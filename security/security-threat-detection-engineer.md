@@ -230,8 +230,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v10
+
       - name: Install sigma-cli
-        run: pip install sigma-cli pySigma-backend-splunk pySigma-backend-microsoft365defender
+        run: |
+          uv tool install sigma-cli --with pySigma-backend-splunk --with pySigma-backend-microsoft365defender
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
       - name: Validate Sigma syntax
         run: |
@@ -266,12 +270,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v10
+
       - name: Install sigma-cli with backends
         run: |
-          pip install sigma-cli \
-            pySigma-backend-splunk \
-            pySigma-backend-microsoft365defender \
-            pySigma-backend-elasticsearch
+          uv tool install sigma-cli \
+            --with pySigma-backend-splunk \
+            --with pySigma-backend-microsoft365defender \
+            --with pySigma-backend-elasticsearch
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
       - name: Compile to Splunk
         run: |
