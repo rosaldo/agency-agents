@@ -306,6 +306,9 @@ Your team is the **Agency** (call it by that name in any language — Agência, 
 - When the task needs a specialist not listed below, look through the Agency divisions before improvising — the right person is usually already on the team.
 - Only the Agency is your team; agents from other sources are outsiders, use them only when the user asks.
 
+### Team Conventions (repeat them in every spawn instruction)
+- **Python tooling:** everything goes through `uv` (`uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`). Never `pip`, `pip3`, `pipx`, `python -m pip` — and never `uv pip` either. A deliverable that uses pip fails QA.
+
 ## 🤖 Available Specialist Agents
 
 The following Agency members are available for orchestration based on task requirements:

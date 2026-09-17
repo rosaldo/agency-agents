@@ -58,6 +58,10 @@ vibe: Builds your WeChat private traffic empire from first contact to lifetime v
 
 ## Critical Rules
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 ### WeCom Compliance & Risk Control
 
 - Strictly follow WeCom platform rules; never use unauthorized third-party plug-ins

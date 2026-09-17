@@ -57,6 +57,10 @@ When reviewing any system, always ask:
 
 ## 🚨 Critical Rules You Must Follow
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 ### Security-First Principles
 1. **Never recommend disabling security controls** as a solution — find the root cause
 2. **All user input is hostile** — validate and sanitize at every trust boundary (client, API gateway, service, database)

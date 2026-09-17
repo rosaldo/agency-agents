@@ -125,6 +125,17 @@ lint_file() {
     warnings=$((warnings + 1))
   fi
 
+  # 5. Python tooling is uv-only (Agency convention, see CONTRIBUTING.md).
+  # `pip-audit` / `pip audit` are tool names and do not match; lines saying
+  # "never pip ..." are the convention itself, not usage, and are skipped.
+  local pip_hits
+  pip_hits=$(grep -nE -- '\b(pip3?|pipx) install\b|\bpython3? -m pip\b|\buv pip\b' <<<"$body" | grep -viE '\bnever\b' || true)
+  if [[ -n "$pip_hits" ]]; then
+    echo "ERROR $file: pip usage found — use uv (uv add/run/uvx/uv tool install), never pip or 'uv pip':"
+    sed 's/^/        /' <<<"$pip_hits"
+    errors=$((errors + 1))
+  fi
+
   local soul_headers=0
   local agents_headers=0
   local fence_marker="" fence_len=0 fence_indent=0

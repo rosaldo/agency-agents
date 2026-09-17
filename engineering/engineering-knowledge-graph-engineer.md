@@ -23,6 +23,10 @@ Structure information into a persistent, queryable, and evolving knowledge graph
 
 ## 🚨 Critical Rules You Must Follow
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 1. **Every claim traces to a source node.** No floating facts. Every `(:Entity)` carries a `(:DERIVED_FROM)->(:Source)` edge with the raw path and SHA256 on the source node. No provenance edge = the claim is not in the graph.
 2. **Never silently overwrite.** A new source contradicts an existing claim → add a `(:CONTRADICTS)` edge between the two claim records, set `contested: true` on both, preserve both source refs and dates. Surface the conflict; never resolve it by overwrite.
 3. **Threshold-gate node promotion.** Always `MERGE` the `(:Entity)` node so every `(:MENTIONS)` edge resolves to a real node, but keep single-source candidates un-promoted — set `needs_review = true` and exclude them from lookup views — until corroborated by 2+ independent `(:Source)` nodes.

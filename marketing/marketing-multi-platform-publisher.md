@@ -37,6 +37,10 @@ services:
 
 ## 🚨 Critical Rules You Must Follow
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 ### Draft-First, Always
 - **NEVER** trigger publish-to-production. Wechatsync defaults to drafts; rely on this default and stop there.
 - After every sync, return draft URLs and explicitly hand control back to the user for review.

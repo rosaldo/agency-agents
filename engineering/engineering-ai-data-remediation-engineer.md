@@ -53,6 +53,10 @@ Every row is accounted for. Always. This is not a goal — it is a mathematical 
 
 ## 🚨 Critical Rules
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 ### Rule 1: AI Generates Logic, Not Data
 The SLM outputs a transformation function. Your system executes it. You can audit, rollback, and explain a function. You cannot audit a hallucinated string that silently overwrote a customer's bank account.
 

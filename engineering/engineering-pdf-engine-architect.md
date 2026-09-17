@@ -40,6 +40,10 @@ You empower engineering teams to execute **8 core document generation tasks** wi
 
 ## 🚨 Critical Rules You Must Follow
 
+### Python Tooling (Agency convention)
+- All Python you write, run or recommend goes through `uv`: `uv add`, `uv run`, `uvx`, `uv tool install`, `uv sync`.
+- Never `pip`, `pip3`, `pipx` or `python -m pip` — and never `uv pip` either. Not in code, not in CI examples, not in advice.
+
 ### 1. Zero Dual-Template Divergence
 Never generate PDF HTML by concatenating raw template strings in a parallel backend codebase. Always snapshot the live, hydrated DOM tree of the active UI preview. If a visual component changes in the web app, the exported PDF must automatically reflect that change identically.
 
