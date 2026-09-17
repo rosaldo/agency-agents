@@ -769,6 +769,33 @@ install_claude_code() {
   done
   ok "Claude Code: $count agents -> $dest"
   install_claude_code_skills "$dest"
+  install_claude_code_statusline "$dest"
+}
+
+# Agency status line (context bar + subscription 5h/7d quotas). Copied next to
+# the agents dir and wired into settings.json only when no statusLine is set,
+# so a user's own status line is never overwritten.
+install_claude_code_statusline() {
+  local agents_dest="$1" cfg script settings
+  [[ "$agents_dest" == */agents ]] || return 0
+  script="$INTEGRATIONS/claude-code/statusline.sh"
+  [[ -f "$script" ]] || return 0
+  cfg="$(dirname "$agents_dest")"
+  install_file "$script" "$cfg/statusline.sh"
+  chmod +x "$cfg/statusline.sh" 2>/dev/null || true
+  settings="$cfg/settings.json"
+  python3 - "$settings" "$cfg/statusline.sh" <<'PY'
+import json, sys
+from pathlib import Path
+path, script = Path(sys.argv[1]), sys.argv[2]
+data = json.loads(path.read_text()) if path.exists() and path.read_text().strip() else {}
+if "statusLine" in data:
+    sys.exit(0)  # respect an existing status line
+data["statusLine"] = {"type": "command", "command": script}
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+print("set")
+PY
+  ok "Claude Code: status line -> $cfg/statusline.sh (settings.json statusLine set if it was empty)"
 }
 
 # Skills ship next to the agents dir (~/.claude/skills). Only installed when

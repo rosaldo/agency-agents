@@ -166,6 +166,14 @@ run_install "$home" --tool claude-code
 assert_eq "$TOTAL_AGENTS" "$(count_md "$home/.claude/agents")" \
   "claude-code installs every agent to \$HOME/.claude/agents"
 assert_eq 0 "$(count_md "$home/.claude")" "claude-code writes nothing into the config root"
+assert_eq 1 "$([[ -x "$home/.claude/statusline.sh" ]] && echo 1 || echo 0)" "claude-code installs the Agency status line"
+assert_eq "$home/.claude/statusline.sh" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["statusLine"]["command"])' "$home/.claude/settings.json")" \
+  "claude-code wires the status line into settings.json"
+home="$(sandbox statusline-keep)"
+mkdir -p "$home/.claude"; printf '{"statusLine":{"type":"command","command":"mine.sh"}}' > "$home/.claude/settings.json"
+run_install "$home" --tool claude-code
+assert_eq "mine.sh" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["statusLine"]["command"])' "$home/.claude/settings.json")" \
+  "claude-code leaves an existing statusLine untouched"
 
 home="$(sandbox path-override)"
 dest="$home/custom-dir"
