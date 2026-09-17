@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Agency status line for Claude Code.
-#   [Opus 5] ⎇ main | ████░░░░░░ 42% ctx | [5h] ███░░░░░░░ 34% ↻14:30 | [7d] █░░░░░░░░░ 12% ↻mon13:00
+#   [Opus 5] ⎇ main ████░░░░░░ 42% ctx | [5h] ███░░░░░░░ 34% ↻14:30 | [7d] █░░░░░░░░░ 12% ↻mon13:00
 # Context bar turns yellow at 50% and red at 75% — the cue to start a fresh
 # session and run /maestro (the ledger brings the pipeline back). The 5h / 7d
 # figures are the subscription rate limits; absent on API-key billing.
@@ -18,7 +18,7 @@ branch=""
 color() { if (( $1 >= 75 )); then printf '\033[31m'; elif (( $1 >= 50 )); then printf '\033[33m'; else printf '\033[32m'; fi; }
 
 bar() { local b="" i; for ((i=0;i<$1/10;i++)); do b+="█"; done; for ((i=$1/10;i<10;i++)); do b+="░"; done; printf '%s' "$b"; }
-out=$(printf '[%s]%s | %s%s %d%%\033[0m ctx' "$model" "$branch" "$(color "$pct")" "$(bar "$pct")" "$pct")
+out=$(printf '[%s]%s %s%s %d%%\033[0m ctx' "$model" "$branch" "$(color "$pct")" "$(bar "$pct")" "$pct")
 
 # Subscription quotas (absent on API-key billing). Reset shown as HH:MM for
 # the 5h window and weekday+HH:MM (locale abbreviation) for the 7d window.
