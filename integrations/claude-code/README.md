@@ -19,7 +19,7 @@ cp engineering/*.md ~/.claude/agents/
 wires it into `settings.json` (only if no `statusLine` is set yet). It shows:
 
 ```
-[Opus 5] ⎇ main | ████░░░░░░ 42% ctx | [5h] 34% ↻14:30 | [7d] 12% ↻mon13:00
+[Opus 5] ⎇ main | ████░░░░░░ 42% ctx | [5h] ███░░░░░░░ 34% ↻14:30 | [7d] █░░░░░░░░░ 12% ↻mon13:00
 ```
 
 Context bar goes yellow at 50% and red at 75% — the cue to open a fresh session
