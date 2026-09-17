@@ -56,6 +56,14 @@ cp engineering/*.md ~/.claude/agents/
 # "Hey Claude, activate Frontend Developer mode and help me build a React component"
 ```
 
+**Maestro (pipeline orchestrator):** the `maestro` agent runs the full pipeline
+(`Senior Project Manager → UX Architect → [Dev ↔ Evidence Collector] → Reality Checker`).
+Spawn it as a subagent (`@agent-maestro`) or wear it in the main session with the `/maestro` skill:
+
+```bash
+cp -r skills/maestro ~/.claude/skills/
+```
+
 ### Option 3: Use as Reference
 
 Each agent file contains:

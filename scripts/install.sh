@@ -768,6 +768,25 @@ install_claude_code() {
     done < <(find "$REPO_ROOT/$dir" -name "*.md" -type f -print0)
   done
   ok "Claude Code: $count agents -> $dest"
+  install_claude_code_skills "$dest"
+}
+
+# Skills ship next to the agents dir (~/.claude/skills). Only installed when
+# the agents dest is a .../agents dir, so an arbitrary --path is left alone.
+install_claude_code_skills() {
+  local agents_dest="$1" skills_dest skill slug
+  [[ "$agents_dest" == */agents ]] || return 0
+  [[ -d "$REPO_ROOT/skills" ]] || return 0
+  skills_dest="$(dirname "$agents_dest")/skills"
+  for skill in "$REPO_ROOT"/skills/*/; do
+    [[ -f "$skill/SKILL.md" ]] || continue
+    slug="$(basename "$skill")"
+    # skill <slug> wears agent <slug>; skip it when that agent was not selected
+    slug_allowed "$slug" || continue
+    mkdir -p "$skills_dest/$slug"
+    install_file "$skill/SKILL.md" "$skills_dest/$slug/"
+    ok "Claude Code: skill /$slug -> $skills_dest/$slug"
+  done
 }
 
 install_copilot() {
