@@ -775,6 +775,17 @@ install_claude_code() {
 # Agency status line (context bar + subscription 5h/7d quotas). Copied next to
 # the agents dir and wired into settings.json only when no statusLine is set,
 # so a user's own status line is never overwritten.
+#
+# `refreshInterval` exists because of the quotas, not the clock. Claude Code
+# re-runs the status line when a new ASSISTANT MESSAGE arrives — and a coordinator
+# waiting on background subagents produces none, while those subagents keep
+# spending the SAME 5h/7d subscription quota. Without the timer the two quota
+# bars freeze exactly when they are moving fastest. No hook can force a refresh
+# (checked against the hooks reference), so a short timer is the only lever.
+#
+# 5s is the tick, not the work: statusline.sh gates `git branch` on the newest
+# mtime across this session's transcript and its subagents', so an idle tick
+# reads a cache instead of walking a repository.
 install_claude_code_statusline() {
   local agents_dest="$1" cfg script settings
   [[ "$agents_dest" == */agents ]] || return 0
@@ -791,7 +802,7 @@ path, script = Path(sys.argv[1]), sys.argv[2]
 data = json.loads(path.read_text()) if path.exists() and path.read_text().strip() else {}
 if "statusLine" in data:
     sys.exit(0)  # respect an existing status line
-data["statusLine"] = {"type": "command", "command": script}
+data["statusLine"] = {"type": "command", "command": script, "refreshInterval": 5}
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 print("set")
 PY

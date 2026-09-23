@@ -169,6 +169,8 @@ assert_eq 0 "$(count_md "$home/.claude")" "claude-code writes nothing into the c
 assert_eq 1 "$([[ -x "$home/.claude/statusline.sh" ]] && echo 1 || echo 0)" "claude-code installs the Agency status line"
 assert_eq "$home/.claude/statusline.sh" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["statusLine"]["command"])' "$home/.claude/settings.json")" \
   "claude-code wires the status line into settings.json"
+assert_eq "5" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["statusLine"].get("refreshInterval"))' "$home/.claude/settings.json")" \
+  "claude-code sets refreshInterval so the quota bars move while subagents run"
 home="$(sandbox statusline-keep)"
 mkdir -p "$home/.claude"; printf '{"statusLine":{"type":"command","command":"mine.sh"}}' > "$home/.claude/settings.json"
 run_install "$home" --tool claude-code
