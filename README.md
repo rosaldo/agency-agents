@@ -339,6 +339,7 @@ Defending the stack — from secure-by-design architecture to breach response.
 | 🛡️ [Blockchain Security Auditor](security/security-blockchain-security-auditor.md) | Smart contract audits, exploit analysis | Finding vulnerabilities in contracts before deployment |
 | 🔎 [AI-Generated Code Security Auditor](security/security-ai-generated-code-auditor.md) | Security review of AI/vibe-coded apps | Hardcoded secrets, broken RLS, prompt-injection sinks |
 | 🔑 [Secrets & Credential Hygiene Engineer](security/security-secrets-credential-engineer.md) | Secrets & credential lifecycle | Detection, vaulting, rotation, leak response |
+| 🔬 [Skill Spector](security/security-skill-inspector.md) | Pre-install review of skills, plugins, MCP servers, subagents | SkillSpector static scan + semantic review, APPROVE/CAUTION/REJECT verdict |
 
 ### 🛟 Support Division
 
