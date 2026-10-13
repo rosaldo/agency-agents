@@ -27,6 +27,14 @@ and run `/maestro`; the pipeline ledger brings the Maestro back where it stopped
 `[5h]` / `[7d]` are the subscription rate limits with their reset time (hidden on API-key billing).
 Requires `jq`.
 
+## Quota Gate
+
+The installer also adds `hooks/agent-rate-gate.sh`, a `PreToolUse` hook on the `Agent`
+tool (registered once in `settings.json`, existing hooks kept). It denies new subagent
+dispatches while `[5h]` is above 80% or `[7d]` above 90%, reading the snapshot the status
+line writes to `~/.claude/state/rate-limits.json`; missing or stale data only warns.
+Set `AGENT_GATE_OFF=1` to disable it.
+
 ## Activate an Agent
 
 In any Claude Code session, reference an agent by name:

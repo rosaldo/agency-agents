@@ -40,6 +40,14 @@ IFS=$'\t' read -r model dir pct sid transcript five_u five_r seven_u seven_r <<<
          ] | @tsv' <<<"$input"
 )"
 
+# Persist the raw quotas so other tools (e.g. a PreToolUse gate) can read them.
+# Atomic tmp+mv: a reader never sees a half-written file. Skipped when absent.
+if [[ -n "$five_u$seven_u" ]]; then
+  snap="$HOME/.claude/state/rate-limits.json"
+  jq -c '{five_hour: .rate_limits.five_hour, seven_day: .rate_limits.seven_day, observed_at: (now | floor)}' \
+    <<<"$input" > "$snap.$$" 2>/dev/null && mv -f "$snap.$$" "$snap" 2>/dev/null || rm -f "$snap.$$" 2>/dev/null
+fi
+
 color() { if (( $1 >= 75 )); then printf '\033[31m'; elif (( $1 >= 50 )); then printf '\033[33m'; else printf '\033[32m'; fi; }
 
 bar() { local b="" i; for ((i=0;i<$1/10;i++)); do b+="█"; done; for ((i=$1/10;i<10;i++)); do b+="░"; done; printf '%s' "$b"; }
