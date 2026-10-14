@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# PreToolUse gate for the Agent tool: denies a subagent dispatch when the 5h window
+# PreToolUse gate for the Agent and SendMessage tools: denies a subagent dispatch or
+# resume when the 5h window
 # is above 80% or the 7d window is above 90%. Source: the snapshot written by the
 # status line (~/.claude/state/rate-limits.json, from the official rate_limits.* fields).
-# Missing, unreadable, stale (>10 min) or expired-window data does NOT block, it only
-# warns, so a broken snapshot never stalls work. Agents already in flight are unaffected.
-# Disable: AGENT_GATE_OFF=1 in claude's environment, or remove the "Agent" matcher block
+# A stale snapshot (>10 min) blocks too: the quota is unknown. Missing, unreadable or
+# expired-window data does NOT block, it only warns. Agents already in flight are unaffected.
+# Disable: AGENT_GATE_OFF=1 in claude's environment, or remove the "Agent|SendMessage" matcher block
 # from ~/.claude/settings.json. Test: ~/.claude/hooks/agent-rate-gate.test.sh
 cat >/dev/null  # the hook input is not used; drain stdin
 [[ -n "$AGENT_GATE_OFF" ]] && exit 0
@@ -16,7 +17,7 @@ warn() {
 }
 [[ -r "$snap" ]] || { warn "snapshot $snap missing or unreadable"; exit 0; }
 
-jq -ec --argjson now "$(date +%s)" --argjson m5 80 --argjson m7 90 --argjson stale 600 '
+jq -ec --argjson now "$(date +%s)" --argjson m5 80 --argjson m7 90 --argjson stale 600 --arg snapfile "$snap" '
   def short: if . == "five_hour" then "5h" else "7d" end;
   def win($k; $max): .[$k] as $w
     | if ($w | type) != "object" or ($w.used_percentage | type) != "number" or (($w.resets_at // 0) <= $now)
@@ -29,7 +30,8 @@ jq -ec --argjson now "$(date +%s)" --argjson m5 80 --argjson m7 90 --argjson sta
     then {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $m}, systemMessage: $m}
     else {hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $m}, systemMessage: $m} end;
   if ($now - (.observed_at // 0)) > $stale then
-    out(false; "Quota gate: snapshot older than 10 min (no data) — dispatch allowed WITHOUT a quota check.")
+    out(true; "Subagent dispatch DENIED by the quota gate: the snapshot \($snapfile) is older than 10 min (observed \(((.observed_at // 0) | strflocaltime("%a %d/%m %H:%M")))), so the quota is unknown. "
+      + "It refreshes while a session with the status line is running; to bypass, restart claude with AGENT_GATE_OFF=1.")
   else
     [win("five_hour"; $m5), win("seven_day"; $m7)] as $ws
     | ($ws | map(select(.state == "over"))) as $over

@@ -24,7 +24,7 @@ snap 81 10 5;        check "5h 81% denies"                 deny
 snap 79 10 5;        check "5h 79% passes"                 pass
 snap 80 90 5;        check "5h 80%/7d 90% passes (cap means 'above')" pass
 snap 10 91 5;        check "7d 91% denies"                 deny
-snap 99 99 700;      check "stale file passes with a warning"     warn
+snap 10 10 700;      check "stale file (>10 min) denies"          deny
 snap 99 99 5 -10;    check "expired window passes with a warning" warn
 rm -f "$dir/s.json"; check "missing file passes with a warning"   warn
 echo 'not-json' > "$dir/s.json"; check "invalid JSON passes with a warning" warn

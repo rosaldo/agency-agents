@@ -30,9 +30,10 @@ Requires `jq`.
 ## Quota Gate
 
 The installer also adds `hooks/agent-rate-gate.sh`, a `PreToolUse` hook on the `Agent`
-tool (registered once in `settings.json`, existing hooks kept). It denies new subagent
-dispatches while `[5h]` is above 80% or `[7d]` above 90%, reading the snapshot the status
-line writes to `~/.claude/state/rate-limits.json`; missing or stale data only warns.
+and `SendMessage` tools (registered once in `settings.json`, existing hooks kept). It denies
+new subagent dispatches and resumes while `[5h]` is above 80% or `[7d]` above 90%, reading
+the snapshot the status line writes to `~/.claude/state/rate-limits.json`. A snapshot older
+than 10 minutes also denies (quota unknown); a missing one only warns.
 Set `AGENT_GATE_OFF=1` to disable it.
 
 ## Activate an Agent

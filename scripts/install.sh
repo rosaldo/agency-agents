@@ -810,11 +810,12 @@ PY
   ok "Claude Code: status line -> $cfg/statusline.sh (settings.json statusLine set if it was empty)"
 }
 
-# Quota gate: a PreToolUse hook on the Agent tool that denies new subagent
-# dispatches when the 5h window is above 80% or the 7d one above 90%. It reads
-# the snapshot statusline.sh writes, so it ships together with it.
-# Registration is idempotent: an existing Agent hook pointing at
-# agent-rate-gate.sh (absolute or ~ path) is left alone; other hooks are kept.
+# Quota gate: a PreToolUse hook on the Agent and SendMessage tools that denies
+# new subagent dispatches and resumes when the 5h window is above 80% or the 7d
+# one above 90%. It reads the snapshot statusline.sh writes, so it ships with it.
+# Registration is idempotent: an existing hook pointing at agent-rate-gate.sh
+# (absolute or ~ path) keeps its command and only gets its matcher set to
+# GATE_MATCHER (upgrades the old "Agent"-only block); other hooks are kept.
 install_claude_code_rate_gate() {
   local agents_dest="$1" cfg src
   [[ "$agents_dest" == */agents ]] || return 0
@@ -830,15 +831,19 @@ import json, sys
 from pathlib import Path
 path, script = Path(sys.argv[1]), sys.argv[2]
 data = json.loads(path.read_text()) if path.exists() and path.read_text().strip() else {}
+GATE_MATCHER = "Agent|SendMessage"
 pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
-if any(e.get("matcher") == "Agent"
-       and any(h.get("command", "").endswith("agent-rate-gate.sh") for h in e.get("hooks", []))
-       for e in pre):
+mine = [e for e in pre
+        if any(h.get("command", "").endswith("agent-rate-gate.sh") for h in e.get("hooks", []))]
+if mine and all(e.get("matcher") == GATE_MATCHER for e in mine):
     sys.exit(0)  # already registered
-pre.append({"matcher": "Agent", "hooks": [{"type": "command", "command": script, "timeout": 10}]})
+for e in mine:
+    e["matcher"] = GATE_MATCHER
+if not mine:
+    pre.append({"matcher": GATE_MATCHER, "hooks": [{"type": "command", "command": script, "timeout": 10}]})
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 PY
-  ok "Claude Code: quota gate -> $cfg/hooks/agent-rate-gate.sh (PreToolUse/Agent registered if absent; AGENT_GATE_OFF=1 disables)"
+  ok "Claude Code: quota gate -> $cfg/hooks/agent-rate-gate.sh (PreToolUse/Agent|SendMessage registered if absent; AGENT_GATE_OFF=1 disables)"
 }
 
 # Skills ship next to the agents dir (~/.claude/skills). Only installed when
