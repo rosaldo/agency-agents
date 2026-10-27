@@ -46,7 +46,7 @@ where the previous ended, and the last ends at `duration`.
 | `enter_beat` | integer | 0 | beat, counted from the scene start, at which entrances begin |
 | `stagger` | integer | 3 | frames between consecutive entrances, 2–4 |
 | `background` | as above | top-level | overrides the default |
-| `hold` | integer | — | beats at the end of the scene that may be completely still (reading time); 1 to the scene's length in beats |
+| `hold` | integer | — | beats at the end of the scene rendered as one repeated frame (a deliberate still); 1 to the scene's length in beats |
 | `elements` | list | — | components, entering in list order |
 
 ## Elements

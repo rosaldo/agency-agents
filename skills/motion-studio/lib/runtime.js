@@ -9,10 +9,18 @@
     var n = parseInt(hex.slice(1), 16);
     return (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255;
   }
+  // paint() returns the scene's base background; light() lays the wandering
+  // glow over it each frame (a dark glow on light backgrounds).
   function paint(layer, bg) {
-    var first = bg.color || bg.gradient[0];
-    layer.style.background = bg.color || "linear-gradient(180deg, " + bg.gradient.join(", ") + ")";
-    layer.style.color = luminance(first) > 0.55 ? "#111418" : "#f5f5f2";
+    var light = luminance(bg.color || bg.gradient[0]) > 0.55;
+    layer.style.color = light ? "#111418" : "#f5f5f2";
+    return { base: bg.color || "linear-gradient(180deg, " + bg.gradient.join(", ") + ")",
+             tint: light ? "rgba(0, 0, 0, 0.06)" : "rgba(255, 255, 255, 0.08)" };
+  }
+  function light(sc, t) {
+    var g = M.glow(t);
+    sc.layer.style.background = "radial-gradient(circle at " + g.x + "% " + g.y + "%, " + sc.paint.tint +
+      ", transparent 60%), " + sc.paint.base;
   }
 
   var state = null;
@@ -28,7 +36,7 @@
       var layer = document.createElement("section");
       layer.className = "ms-scene";
       layer.dataset.scene = sc.id || String(si);
-      paint(layer, sc.background || scene.background || { color: "#111418" });
+      var look = paint(layer, sc.background || scene.background || { color: "#111418" });
       stage.appendChild(layer);
       var startBeat = beatOf(sc.start), stagger = sc.stagger || 3;
       var first = M.beatFrame(startBeat + (sc.enter_beat || 0), bpm, fps);
@@ -44,9 +52,11 @@
           st.root.style.height = el.box[3] * 100 + "%";
         }
         layer.appendChild(st.root);
-        return { el: el, comp: comp, state: st, enter: first + i * stagger, spring: el.spring || comp.spring };
+        return { el: el, index: i, comp: comp, state: st, enter: first + i * stagger, spring: el.spring || comp.spring };
       });
-      return { layer: layer, start: M.beatFrame(startBeat, bpm, fps),
+      // a declared hold freezes the scene on purpose: its last `hold` beats repeat one frame
+      var still = sc.hold ? M.beatFrame(beatOf(sc.end) - sc.hold, bpm, fps) : Infinity;
+      return { layer: layer, paint: look, still: still, start: M.beatFrame(startBeat, bpm, fps),
                end: M.beatFrame(beatOf(sc.end), bpm, fps), stagger: stagger, elements: elements };
     });
     state = { fps: fps, scenes: scenes, frames: Math.round(scene.duration * fps) };
@@ -58,13 +68,20 @@
       var live = frame >= sc.start && frame < sc.end;
       sc.layer.classList.toggle("is-live", live);
       if (!live) return;
+      var f = Math.min(frame, sc.still);
+      light(sc, (f - sc.start) / state.fps);
       sc.elements.forEach(function (e) {
         e.comp.update(e.state, {
           stagger: sc.stagger,
           progress: function (delay, zeta) {
-            return M.spring((frame - e.enter - (delay || 0)) / state.fps, zeta || e.spring.zeta, e.spring.omega);
+            return M.spring((f - e.enter - (delay || 0)) / state.fps, zeta || e.spring.zeta, e.spring.omega);
           }
         });
+        // idle motion uses the individual translate/scale properties, so it
+        // composes with the transform each component sets for its entrance
+        var idle = M.idle((f - e.enter) / state.fps, e.index), root = e.state.root;
+        root.style.translate = idle.x + "cqmin " + idle.y + "cqmin";
+        root.style.scale = String(idle.s);
       });
     });
   }

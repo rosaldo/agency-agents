@@ -20,6 +20,12 @@ Without `box`, elements stack in a column inside the default margins; with
 `box`, they sit at those frame fractions. A cut between scenes is the only
 scene change: scenes switch on their start beat, with no cross-fade.
 
+Nothing is ever frozen by accident: once an element settles it keeps a quiet
+idle motion (a slow drift of about half a percent of the short side, at a
+different period per element, plus a faint breath of scale), and a soft light
+wanders across every background. Both are pure functions of the frame. To
+stop on purpose, declare a `hold` on the scene: its last beats repeat one frame.
+
 Default springs (zeta / omega): title 0.7/14, text 0.8/12, counter 0.75/12,
 list 0.7/16, asset-card 0.6/12, bar-chart 0.8/10.
 
