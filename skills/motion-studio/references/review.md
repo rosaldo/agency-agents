@@ -42,7 +42,7 @@ side you give replaces the default for that side only. Only text is measured
 ## Layer (b): `scripts/contact-sheet scene.json`
 
 Only after layer (a) exits 0. It writes `contact-sheet.png`: one grid, four
-cells per second, never wider or taller than 2048 px, and prints which cells
+cells per second, never wider or taller than 1280 px, and prints which cells
 belong to each scene. That image is the only visual you look at per pass; do
 not open frames or the video.
 

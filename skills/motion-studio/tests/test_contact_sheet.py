@@ -46,6 +46,12 @@ class ContactSheetTest(unittest.TestCase):
         self.assertLessEqual(max(cols * cw, rows * ch), MAX_SIDE)
         self.assertEqual((cw % 2, ch % 2), (0, 0))
 
+    def test_review_sheet_is_cheap_but_still_readable(self):
+        from review_loop import grid
+        cols, rows, (cw, ch) = grid(48, 1080, 1920)  # 12 s of 9:16, the usual short
+        self.assertLessEqual(max(cols * cw, rows * ch), 1280)
+        self.assertGreaterEqual(cw, 120)  # below this a cell no longer shows a scene's layout
+
 
 class PassCounterTest(unittest.TestCase):
     def test_third_rerender_pass_is_refused(self):

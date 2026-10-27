@@ -3,7 +3,7 @@ import math
 
 SHEET_FPS = 4       # cells per second of video
 CELL_WIDTH = 270    # pixels, before any shrinking
-MAX_SIDE = 2048     # the sheet never exceeds this on either side
+MAX_SIDE = 1280     # 12 s of 9:16 keeps 128 px cells: layout, graphics and l/xl text still read, at 39% of the 2048 pixels
 MAX_PASSES = 2      # re-render passes after the first review
 
 
