@@ -75,21 +75,35 @@
     return Promise.all(imgs.map(function (img) { return img.decode().catch(function () {}); }));
   }
 
-  // textBoxes() — boxes of the live scene's elements as fractions of the frame,
-  // for the safe-area check.
+  // textBoxes() — boxes of the text drawn by the live scene's elements, as
+  // fractions of the frame, for the safe-area check. Measures the glyphs, not
+  // the element, so an image or a bar track never counts as text.
   function textBoxes() {
     var stage = document.getElementById("stage").getBoundingClientRect(), out = [];
     state.scenes.forEach(function (sc) {
       if (!sc.layer.classList.contains("is-live")) return;
       sc.elements.forEach(function (e, i) {
-        var r = e.state.root.getBoundingClientRect();
-        out.push({ scene: sc.layer.dataset.scene, element: i, box: [
-          (r.left - stage.left) / stage.width, (r.top - stage.top) / stage.height,
-          r.width / stage.width, r.height / stage.height] });
+        var walk = document.createTreeWalker(e.state.root, NodeFilter.SHOW_TEXT), node, u = null;
+        while ((node = walk.nextNode())) {
+          if (!node.nodeValue.trim()) continue;
+          var range = document.createRange();
+          range.selectNodeContents(node);
+          var r = range.getBoundingClientRect();
+          u = u ? { l: Math.min(u.l, r.left), t: Math.min(u.t, r.top), r: Math.max(u.r, r.right), b: Math.max(u.b, r.bottom) }
+                : { l: r.left, t: r.top, r: r.right, b: r.bottom };
+        }
+        if (!u) return;
+        out.push({ element: i, box: [(u.l - stage.left) / stage.width, (u.t - stage.top) / stage.height,
+          (u.r - u.l) / stage.width, (u.b - u.t) / stage.height] });
       });
     });
     return out;
   }
 
-  root.MotionStudio = { load: load, renderFrame: renderFrame, ready: ready, textBoxes: textBoxes };
+  // scenes() — each scene's id and frame range [start, end), as cut on the beat grid.
+  function scenes() {
+    return state.scenes.map(function (sc) { return { id: sc.layer.dataset.scene, start: sc.start, end: sc.end }; });
+  }
+
+  root.MotionStudio = { load: load, renderFrame: renderFrame, ready: ready, textBoxes: textBoxes, scenes: scenes };
 })(window);

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# render <scene.json> [--out DIR] [--scenes 2,4] — draw every frame in Chromium.
+# Runs render.py through uv with the pinned playwright; prints one JSON line.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec uv run --no-project --quiet --with "playwright==$(cat "$HERE/playwright-version")" \
+  python "$HERE/render.py" "$@"
