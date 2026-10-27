@@ -127,6 +127,16 @@ class ValidateSceneTest(unittest.TestCase):
         third = {"component": "text", "text": "and calmer weekends", "size": "l"}  # scene has xl + m already
         self.assertRule(mutated(lambda s: s["scenes"][1]["elements"].append(third)), "font-sizes")
 
+    def test_hold_is_a_beat_count_inside_the_scene(self):
+        self.assertEqual(validate(mutated(lambda s: s["scenes"][0].update(hold=2)))[0], 0)
+        self.assertRule(mutated(lambda s: s["scenes"][0].update(hold=0)), "hold")
+        self.assertRule(mutated(lambda s: s["scenes"][0].update(hold=9)), "hold")  # scene is 4 beats
+
+    def test_safe_area_overrides_are_relative_margins(self):
+        self.assertEqual(validate(mutated(lambda s: s.update(safe_area={"bottom": 0.2})))[0], 0)
+        self.assertRule(mutated(lambda s: s.update(safe_area={"bottom": 60})), "safe-area")
+        self.assertRule(mutated(lambda s: s.update(safe_area={"middle": 0.1})), "safe-area")
+
     def test_caps_centered_on_gradient(self):
         self.assertRule(
             mutated(lambda s: s["scenes"][1]["elements"][1].update(text="FEWER TICKETS", align="center")),

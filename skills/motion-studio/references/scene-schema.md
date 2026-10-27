@@ -17,6 +17,7 @@ Either a preset or a free size:
 | `bpm` | number | — | 40–240; sets the beat grid |
 | `duration` | seconds | — | 1–300 and a whole number of beats |
 | `background` | `{"color": "#rrggbb"}` or `{"gradient": ["#rrggbb", "#rrggbb"]}` | — | default for every scene |
+| `safe_area` | `{"top", "right", "bottom", "left"}` | per format, see `review.md` | frame fractions 0–0.4; any side you give replaces that side's default |
 
 Preset sizes (width × height):
 
@@ -45,6 +46,7 @@ where the previous ended, and the last ends at `duration`.
 | `enter_beat` | integer | 0 | beat, counted from the scene start, at which entrances begin |
 | `stagger` | integer | 3 | frames between consecutive entrances, 2–4 |
 | `background` | as above | top-level | overrides the default |
+| `hold` | integer | — | beats at the end of the scene that may be completely still (reading time); 1 to the scene's length in beats |
 | `elements` | list | — | components, entering in list order |
 
 ## Elements
@@ -67,4 +69,5 @@ Assets are paths under `assets/` next to `scene.json`, and they must exist.
 `format`, `even-size`, `size-limits`, `fps`, `bpm`, `duration`, `beat-grid`,
 `timeline`, `cut-on-beat`, `stagger`, `enter-timing`, `font-sizes`,
 `caps-center-gradient` (capitals + centered + gradient background together),
-`hero-asset`, `asset`, `component`, `relative-box`, `background`, `spring`.
+`hero-asset`, `asset`, `component`, `relative-box`, `background`, `spring`,
+`hold`, `safe-area`.

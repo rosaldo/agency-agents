@@ -1,0 +1,117 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+"""check-video <scene.json> [--video out.mp4] [--layout frames/layout.json] — review layer (a).
+
+Zero-token checks of the rendered video against the plan: size/fps/duration
+(ffprobe), still stretches not declared as a scene "hold" (freezedetect), cut
+error in frames against the beat grid, and text boxes outside the safe area.
+Prints one JSON line; exit 0 only when every check passes.
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from motion_math import beat_frame
+from scene_schema import resolve_size, safe_margins, validate
+
+FREEZE_MIN = 0.5        # seconds: a longer still that is not a declared hold is dead air
+FREEZE_NOISE = "-60dB"  # freezedetect's default; encoder noise on a still frame stays below it
+EDGE = 0.002            # sub-pixel rounding allowed on a text box edge, as a frame fraction
+LIST_MAX = 5            # findings listed per check; the count is always complete
+
+
+def probe(video, scene):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                        "stream=width,height,r_frame_rate:format=duration", "-of", "json", str(video)],
+                       capture_output=True, text=True)
+    if r.returncode:
+        return {"ok": False, "error": (r.stderr.strip().splitlines() or ["ffprobe failed"])[-1]}, 0.0
+    data = json.loads(r.stdout)
+    v, duration = data["streams"][0], float(data["format"]["duration"])
+    num, den = map(int, v["r_frame_rate"].split("/"))
+    fps, (width, height) = scene.get("fps", 30), resolve_size(scene)
+    got = {"size": [v["width"], v["height"]], "fps": round(num / den, 3), "seconds": round(duration, 3)}
+    ok = (got["size"] == [width, height] and abs(num / den - fps) < 1e-3
+          and abs(duration - scene["duration"]) <= 1 / fps)
+    return {"ok": ok, **({} if ok else {"got": got, "plan": {"size": [width, height], "fps": fps,
+                                                               "seconds": scene["duration"]}})}, duration
+
+
+def freezes(video, duration):
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(video), "-map", "0:v:0",
+                        "-vf", f"freezedetect=n={FREEZE_NOISE}:d={FREEZE_MIN}", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    starts = [float(x) for x in re.findall(r"freeze_start: ([\d.]+)", r.stderr)]
+    ends = [float(x) for x in re.findall(r"freeze_end: ([\d.]+)", r.stderr)]
+    return list(zip(starts, ends + [duration] * (len(starts) - len(ends))))
+
+
+def subtract(span, holes):
+    """Parts of span (a, b) not covered by any (start, end) in holes."""
+    parts = [span]
+    for h0, h1 in holes:
+        parts = [p for a, b in parts for p in ((a, min(b, h0)), (max(a, h1), b)) if p[1] - p[0] > 1e-9]
+    return parts
+
+
+def dead_air(video, duration, scene):
+    beat = 60 / scene["bpm"]
+    holds = [(sc["end"] - sc["hold"] * beat, sc["end"]) for sc in scene["scenes"] if sc.get("hold")]
+    dead = [[round(a, 2), round(b, 2)] for span in freezes(video, duration)
+            for a, b in subtract(span, holds) if b - a >= FREEZE_MIN]
+    return {"ok": not dead, **({"dead": dead[:LIST_MAX], "count": len(dead)} if dead else {})}
+
+
+def cut_error(scene, layout):
+    plan, rendered = scene["scenes"], layout.get("scenes", [])
+    if len(plan) != len(rendered):
+        return {"ok": False, "error": f"layout has {len(rendered)} scenes, plan has {len(plan)}; re-render"}
+    bpm, fps = scene["bpm"], scene.get("fps", 30)
+    worst = max(abs(r["start"] - beat_frame(round(p["start"] * bpm / 60), bpm, fps)) for p, r in zip(plan, rendered))
+    return {"ok": worst == 0, "max_error_frames": worst}
+
+
+def safe_area(scene, layout):
+    m = safe_margins(scene)
+    outside = [{"scene": sc["id"], "element": b["element"], "box": [round(v, 3) for v in b["box"]]}
+               for sc in layout.get("scenes", []) for b in sc["boxes"]
+               if b["box"][0] < m["left"] - EDGE or b["box"][1] < m["top"] - EDGE
+               or b["box"][0] + b["box"][2] > 1 - m["right"] + EDGE
+               or b["box"][1] + b["box"][3] > 1 - m["bottom"] + EDGE]
+    return {"ok": not outside, "margins": m,
+            **({"outside": outside[:LIST_MAX], "count": len(outside)} if outside else {})}
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="check-video")
+    ap.add_argument("scene")
+    ap.add_argument("--video", help="default: out.mp4 next to scene.json")
+    ap.add_argument("--layout", help="default: frames/layout.json next to scene.json")
+    args = ap.parse_args(argv)
+    path = Path(args.scene)
+    base = path.parent
+    try:
+        scene = json.loads(path.read_text())
+        layout = json.loads(Path(args.layout or base / "frames" / "layout.json").read_text())
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 1
+    errors = validate(scene, base)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors[:20]}))
+        return 1
+    video = Path(args.video) if args.video else base / "out.mp4"
+    probed, duration = probe(video, scene)
+    result = {"probe": probed,
+              "freeze": dead_air(video, duration, scene) if duration else {"ok": False},
+              "cuts": cut_error(scene, layout),
+              "safe_area": safe_area(scene, layout)}
+    ok = all(check["ok"] for check in result.values())
+    print(json.dumps({"ok": ok, **result}))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

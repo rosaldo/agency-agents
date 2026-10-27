@@ -40,6 +40,15 @@ COMPONENTS = {
     "bar-chart":  (("bars",), (), {"labels": "s"}),
 }
 
+# Safe area: margins as fractions of the frame (top, right, bottom, left) that
+# text must stay inside. A house layout default, not any platform's spec; set
+# "safe_area" in scene.json from the target platform's current guide.
+# Tall frames keep more room top and bottom, where vertical feeds draw their UI.
+SAFE_AREA = {"tall": {"top": 0.08, "right": 0.06, "bottom": 0.12, "left": 0.06},
+             "other": {"top": 0.05, "right": 0.05, "bottom": 0.05, "left": 0.05}}
+TALL_RATIO = 1.5      # height / width at or above this is "tall" (9:16, 2:3)
+SAFE_AREA_MAX = 0.4   # no single margin may eat more than 40% of the frame
+
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 EPS = 1e-6
 
@@ -52,6 +61,14 @@ def resolve_size(scene):
         scale = Fraction(short, min(w, h))
         return int(w * scale), int(h * scale)
     return scene["width"], scene["height"]
+
+
+def safe_margins(scene):
+    """Margins text must keep: the format default, overridden side by side by scene["safe_area"]."""
+    w, h = resolve_size(scene)
+    margins = dict(SAFE_AREA["tall" if h / w >= TALL_RATIO else "other"])
+    margins.update(scene.get("safe_area") or {})
+    return margins
 
 
 def fmt(x):
@@ -211,6 +228,11 @@ def _check_scenes(scene, base_dir, timing_ok, errors):
             _check_element(el if isinstance(el, dict) else {}, f"{where}.elements[{j}]", base_dir, gradient, sizes, errors)
         if len(sizes) > MAX_FONT_SIZES:
             errors.add("font-sizes", where, f"{len(sizes)} font sizes ({', '.join(sorted(sizes))}); keep at most {MAX_FONT_SIZES}")
+        hold = sc.get("hold")
+        if hold is not None and timing_ok:
+            beats = round((end - start) * bpm / 60)
+            if not (isinstance(hold, int) and not isinstance(hold, bool) and 1 <= hold <= beats):
+                errors.add("hold", where, f"hold is a whole number of beats, 1-{beats}, at the end of the scene")
         enter_beat = sc.get("enter_beat", 0)
         if timing_ok and isinstance(enter_beat, int) and enter_beat >= 0 and elements and isinstance(stagger, int):
             last = beat_frame(round(start * bpm / 60) + enter_beat, bpm, fps) + (len(elements) - 1) * stagger
@@ -222,6 +244,16 @@ def _check_scenes(scene, base_dir, timing_ok, errors):
         errors.add("timeline", "scenes", f"scenes end at {fmt(previous_end)} s but duration is {fmt(duration)} s")
 
 
+def _check_safe_area(scene, errors):
+    area = scene.get("safe_area")
+    if area is None:
+        return
+    sides = set(SAFE_AREA["other"])
+    if not (isinstance(area, dict) and set(area) <= sides and all(_in(v, (0, SAFE_AREA_MAX)) for v in area.values())):
+        errors.add("safe-area", "safe_area",
+                   f"safe_area takes {', '.join(sorted(sides))} as frame fractions 0-{SAFE_AREA_MAX}")
+
+
 def validate(scene, base_dir):
     errors = Errors()
     if not isinstance(scene, dict):
@@ -230,4 +262,5 @@ def validate(scene, base_dir):
     _check_format(scene, errors)
     timing_ok = _check_timing(scene, errors)
     _check_scenes(scene, Path(base_dir), timing_ok, errors)
+    _check_safe_area(scene, errors)
     return errors
