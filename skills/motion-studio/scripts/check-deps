@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# check-deps — verify every motion-studio dependency before any other step.
+# One line per problem on stderr; exit 1 if anything is missing. A missing
+# Playwright Chromium is installed through uv and checked again.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLAYWRIGHT_VERSION="$(cat "$HERE/playwright-version")"
+problems=0
+
+problem() { printf 'missing: %s\n' "$1" >&2; problems=$((problems + 1)); }
+
+# package_hint <package> — the usual install command for this OS.
+package_hint() {
+  case "$(uname -s)" in
+    Darwin) printf 'brew install %s' "$1" ;;
+    Linux)  printf 'install the %s package (apt, dnf, zypper or pacman)' "$1" ;;
+    *)      printf 'install %s and put it on PATH' "$1" ;;
+  esac
+}
+
+browsers_dir() {
+  if [[ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]]; then printf '%s' "$PLAYWRIGHT_BROWSERS_PATH"
+  elif [[ "$(uname -s)" == Darwin ]]; then printf '%s' "$HOME/Library/Caches/ms-playwright"
+  else printf '%s' "$HOME/.cache/ms-playwright"; fi
+}
+
+# shortcut: any chromium build counts, not the exact revision this pin wants;
+# upgrade to `playwright install --dry-run` parsing if revisions drift apart.
+has_chromium() { ls -d "$(browsers_dir)"/chromium* >/dev/null 2>&1; }
+
+command -v uv >/dev/null 2>&1 || problem "uv — install it from https://docs.astral.sh/uv/ ($(package_hint uv))"
+for tool in ffmpeg ffprobe; do
+  command -v "$tool" >/dev/null 2>&1 || problem "$tool — $(package_hint ffmpeg)"
+done
+
+if command -v ffmpeg >/dev/null 2>&1; then
+  encoders="$(ffmpeg -hide_banner -encoders 2>/dev/null)"
+  for enc in libx264 libvpx-vp9 libopus; do
+    grep -qw -- "$enc" <<<"$encoders" || problem "ffmpeg encoder $enc — install an ffmpeg build with $enc enabled"
+  done
+fi
+
+(( problems == 0 )) || exit 1
+
+if ! has_chromium; then
+  printf 'installing Playwright Chromium (playwright==%s)\n' "$PLAYWRIGHT_VERSION" >&2
+  uv run --no-project --with "playwright==$PLAYWRIGHT_VERSION" playwright install chromium >&2
+  has_chromium || { problem "Playwright Chromium — uv run --with playwright==$PLAYWRIGHT_VERSION playwright install chromium"; exit 1; }
+fi
+
+printf 'ok: uv, ffmpeg (libx264, libvpx-vp9, libopus), ffprobe, Playwright Chromium\n'
