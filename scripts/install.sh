@@ -859,7 +859,8 @@ skill_owner() {
 
 # A skill is its whole directory (SKILL.md plus scripts/, references/, ...):
 # copied recursively, or symlinked as one directory under --link. The previous
-# install of that one skill is removed first so no stale file survives.
+# install of that one skill is removed first so no stale file survives, and a
+# copy drops build junk (__pycache__, .pyc, .pytest_cache, .DS_Store).
 install_claude_code_skills() {
   local agents_dest="$1" skills_dest skill slug
   [[ "$agents_dest" == */agents ]] || return 0
@@ -874,7 +875,14 @@ install_claude_code_skills() {
     # skip the skill when its owning agent was not selected
     slug_allowed "$(skill_owner "$skill/SKILL.md")" || continue
     rm -rf "${skills_dest:?}/$slug"
-    if $USE_LINK; then ln -s "$skill" "$skills_dest/$slug"; else cp -R "$skill" "$skills_dest/$slug"; fi
+    if $USE_LINK; then
+      ln -s "$skill" "$skills_dest/$slug"
+    else
+      cp -R "$skill" "$skills_dest/$slug"
+      # build junk (bytecode caches, test caches, Finder files) never ships
+      find "$skills_dest/$slug" \( -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} + \) \
+        -o \( -type f \( -name '*.py[co]' -o -name .DS_Store \) -exec rm -f {} + \)
+    fi
     ok "Claude Code: skill /$slug -> $skills_dest/$slug"
   done
 }

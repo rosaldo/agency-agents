@@ -388,6 +388,11 @@ printf -- '---\nname: fixture-skill\ndescription: test fixture\n---\nbody\n' > "
 printf '#!/bin/sh\necho x\n' > "$FIXTURE_REPO/skills/fixture-skill/scripts/x"
 chmod +x "$FIXTURE_REPO/skills/fixture-skill/scripts/x"
 printf 'y\n' > "$FIXTURE_REPO/skills/fixture-skill/references/y.md"
+# build junk a skill's own tests and scripts leave behind; it must not ship
+mkdir -p "$FIXTURE_REPO/skills/fixture-skill/scripts/__pycache__" "$FIXTURE_REPO/skills/fixture-skill/.pytest_cache"
+printf 'b' > "$FIXTURE_REPO/skills/fixture-skill/scripts/__pycache__/x.cpython-312.pyc"
+printf 'b' > "$FIXTURE_REPO/skills/fixture-skill/references/stray.pyc"
+printf 'b' > "$FIXTURE_REPO/skills/fixture-skill/.DS_Store"
 
 # run_fixture_install <home> [args...] — like run_install, against the fixture repo.
 run_fixture_install() {
@@ -405,6 +410,8 @@ assert_eq 0 "$RUN_STATUS" "fixture repo install exits 0"
 assert_eq "SKILL.md references/y.md scripts/x" \
   "$(cd "$sk/fixture-skill" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs)" \
   "a skill ships its whole tree, not only SKILL.md"
+assert_eq "" "$(find "$sk/fixture-skill" \( -name __pycache__ -o -name '*.pyc' -o -name .pytest_cache -o -name .DS_Store \) | xargs)" \
+  "a skill ships without __pycache__, .pyc or other build junk"
 assert_eq 1 "$([[ -x "$sk/fixture-skill/scripts/x" ]] && echo 1 || echo 0)" "skill scripts keep the execute bit"
 assert_eq 1 "$(cmp -s "$REPO_ROOT/skills/maestro/SKILL.md" "$sk/maestro/SKILL.md" && echo 1 || echo 0)" \
   "/maestro is still installed as before"
