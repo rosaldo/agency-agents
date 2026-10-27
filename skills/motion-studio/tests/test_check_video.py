@@ -15,11 +15,11 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "check-video"
 # 3 s at 120 BPM and 30 fps: one beat is 15 frames; the cut lands on beat 3 = frame 45.
 SCENE = {"width": 320, "height": 240, "fps": 30, "bpm": 120, "duration": 3,
-         "scenes": [{"id": "a", "start": 0, "end": 1.5, "elements": [{"component": "text", "text": "One"}]},
-                    {"id": "b", "start": 1.5, "end": 3, "elements": [{"component": "text", "text": "Two"}]}]}
+         "scenes": [{"id": "a", "text_only": True, "start": 0, "end": 1.5, "elements": [{"component": "text", "text": "One"}]},
+                    {"id": "b", "text_only": True, "start": 1.5, "end": 3, "elements": [{"component": "text", "text": "Two"}]}]}
 LAYOUT = {"width": 320, "height": 240, "fps": 30, "frames": 90, "scenes": [
-    {"id": "a", "start": 0, "end": 45, "boxes": [{"element": 0, "box": [0.1, 0.4, 0.5, 0.1]}]},
-    {"id": "b", "start": 45, "end": 90, "boxes": [{"element": 0, "box": [0.1, 0.4, 0.5, 0.1]}]}]}
+    {"id": "a", "text_only": True, "start": 0, "end": 45, "boxes": [{"element": 0, "box": [0.1, 0.4, 0.5, 0.1]}]},
+    {"id": "b", "text_only": True, "start": 45, "end": 90, "boxes": [{"element": 0, "box": [0.1, 0.4, 0.5, 0.1]}]}]}
 
 
 class CheckVideoTest(unittest.TestCase):

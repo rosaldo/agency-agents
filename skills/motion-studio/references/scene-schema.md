@@ -48,7 +48,8 @@ where the previous ended, and the last ends at `duration`.
 | `stagger` | integer | 3 | frames between consecutive entrances, 2–4 |
 | `background` | as above | top-level | overrides the default |
 | `hold` | integer | — | beats at the end of the scene rendered as one repeated frame (a deliberate still); 1 to the scene's length in beats |
-| `elements` | list | — | components, entering in list order |
+| `elements` | list | — | components, entering in list order; at least one graphic (see `components.md`) |
+| `text_only` | boolean | false | marks a scene that has no graphic on purpose |
 
 ## Elements
 
@@ -73,4 +74,5 @@ Assets are paths under `assets/` next to `scene.json`, and they must exist.
 `timeline`, `cut-on-beat`, `stagger`, `enter-timing`, `font-sizes`,
 `caps-center-gradient` (capitals + centered + gradient background together),
 `hero-asset`, `asset`, `component`, `relative-box`, `background`, `spring`,
-`hold`, `safe-area`, `palette`.
+`hold`, `safe-area`, `palette`, `graphic-richness` (every scene has a
+graphic component unless it is marked `text_only`).

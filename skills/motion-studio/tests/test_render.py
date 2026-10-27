@@ -23,8 +23,8 @@ SCENE = {
     "preset": "16:9", "quality": "low", "fps": 30, "bpm": 120, "duration": 1,
     "background": {"color": "#101418"},
     "scenes": [
-        {"id": "a", "start": 0, "end": 0.5, "elements": [{"component": "title", "text": "Alpha"}]},
-        {"id": "b", "start": 0.5, "end": 1, "elements": [{"component": "counter", "from": 0, "to": 9}]},
+        {"id": "a", "text_only": True, "start": 0, "end": 0.5, "elements": [{"component": "title", "text": "Alpha"}]},
+        {"id": "b", "text_only": True, "start": 0.5, "end": 1, "elements": [{"component": "counter", "from": 0, "to": 9}]},
     ],
 }
 

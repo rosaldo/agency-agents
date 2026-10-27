@@ -53,8 +53,13 @@ Score every scene 0–10 by adding the five lines below (0, 1 or 2 each):
 | Read | the message is clear in the cells where the scene settles | readable, but crowded or late | cannot be read in time |
 | Hierarchy | one focal point, the hero or the key number | two elements compete | no clear focus |
 | Motion | entrances differ cell to cell and settle before the cut | movement exists but looks uniform | nothing moves, or it never settles |
-| Fit | palette, type and composition follow `style.md` and the approved plan | one visible drift | ignores the plan |
-| Craft | aligned, nothing clipped, consistent spacing | one small flaw | broken layout or clipped text |
+| Graphic | a drawn graphic (icon, shape, chart, ring, reveal, burst) carries or points at the message and animates in | a graphic is there but only decorates, or stays still | text only |
+| Craft | follows the approved plan and `style.md`; aligned, nothing clipped, consistent spacing | one small flaw or drift | broken layout, clipped text, or ignores the plan |
+
+The Graphic line has a deterministic floor: `validate-scene` already rejects a
+scene with no graphic component (rule `graphic-richness`) unless the scene says
+`"text_only": true`. A `text_only` scene scores 0 on Graphic, so keep it for a
+deliberate pause, never for a whole video.
 
 ## The loop
 

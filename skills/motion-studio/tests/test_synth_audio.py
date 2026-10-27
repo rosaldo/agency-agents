@@ -12,8 +12,8 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "synth-audio"
 FPS, BPM = 30, 120
 SCENE = {"preset": "1:1", "fps": FPS, "bpm": BPM, "duration": 3,
-         "scenes": [{"id": "a", "start": 0, "end": 1.5, "elements": [{"component": "text", "text": "One"}]},
-                    {"id": "b", "start": 1.5, "end": 3, "elements": [{"component": "text", "text": "Two"}]}]}
+         "scenes": [{"id": "a", "text_only": True, "start": 0, "end": 1.5, "elements": [{"component": "text", "text": "One"}]},
+                    {"id": "b", "text_only": True, "start": 1.5, "end": 3, "elements": [{"component": "text", "text": "Two"}]}]}
 
 
 class SynthAudioTest(unittest.TestCase):

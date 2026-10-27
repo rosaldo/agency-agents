@@ -15,8 +15,8 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 # 3 s, two scenes, no hold: springs settle in well under a second, so the
 # rest of each scene is still unless the library keeps it moving.
 SCENE = {"preset": "9:16", "quality": "low", "fps": 30, "bpm": 120, "duration": 3,
-         "scenes": [{"id": "a", "start": 0, "end": 1.5, "elements": [{"component": "title", "text": "Quiet", "subtitle": "still alive"}]},
-                    {"id": "b", "start": 1.5, "end": 3, "elements": [{"component": "counter", "from": 0, "to": 7},
+         "scenes": [{"id": "a", "text_only": True, "start": 0, "end": 1.5, "elements": [{"component": "title", "text": "Quiet", "subtitle": "still alive"}]},
+                    {"id": "b", "text_only": True, "start": 1.5, "end": 3, "elements": [{"component": "counter", "from": 0, "to": 7},
                                                                      {"component": "text", "text": "and settled"}]}]}
 
 

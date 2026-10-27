@@ -56,6 +56,9 @@ ICONS = ("check", "clock", "chart", "cart", "star", "heart", "arrow", "user", "b
 STROKES = ("underline", "arrow", "connector", "outline", "circle", "wave")
 REVEALS = ("wipe", "iris", "slide")
 SIDES = ("left", "right", "top", "bottom")
+# Components that put a non-text graphic on screen: every scene needs one,
+# unless it is marked "text_only" on purpose.
+GRAPHIC_COMPONENTS = ("asset-card", "bar-chart", "shape", "draw", "morph", "icon", "ring", "line-chart", "burst")
 MAX_PALETTE = 6
 
 # Safe area: margins as fractions of the frame (top, right, bottom, left) that
@@ -290,6 +293,13 @@ def _check_scenes(scene, base_dir, timing_ok, errors):
         sizes = set()
         for j, el in enumerate(elements):
             _check_element(el if isinstance(el, dict) else {}, f"{where}.elements[{j}]", base_dir, gradient, sizes, errors)
+        text_only = sc.get("text_only", False)
+        if not isinstance(text_only, bool):
+            errors.add("graphic-richness", where, "text_only is true or false")
+        elif not text_only and not any(isinstance(el, dict) and el.get("component") in GRAPHIC_COMPONENTS
+                                       for el in elements):
+            errors.add("graphic-richness", where,
+                       f"no graphic: add one of {', '.join(GRAPHIC_COMPONENTS)}, or mark the scene \"text_only\": true")
         if len(sizes) > MAX_FONT_SIZES:
             errors.add("font-sizes", where, f"{len(sizes)} font sizes ({', '.join(sorted(sizes))}); keep at most {MAX_FONT_SIZES}")
         hold = sc.get("hold")

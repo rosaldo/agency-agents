@@ -24,7 +24,8 @@
       "background": { "gradient": ["#101418", "#24303c"] },
       "elements": [
         { "component": "counter", "from": 0, "to": 42, "suffix": "%" },
-        { "component": "text", "text": "fewer support tickets", "size": "m" }
+        { "component": "text", "text": "fewer support tickets", "size": "m" },
+        { "component": "icon", "icon": "check", "disc": true, "size": "s" }
       ]
     },
     {

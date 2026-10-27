@@ -12,7 +12,7 @@ from pathlib import Path
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "encode"
 SCENE = {"width": 320, "height": 240, "fps": 30, "bpm": 120, "duration": 1,
-         "scenes": [{"id": "a", "start": 0, "end": 1, "elements": [{"component": "text", "text": "Hi"}]}]}
+         "scenes": [{"id": "a", "text_only": True, "start": 0, "end": 1, "elements": [{"component": "text", "text": "Hi"}]}]}
 
 
 def ffmpeg(*args):

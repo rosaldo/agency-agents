@@ -34,7 +34,9 @@ Show the user a plan and wait. Nothing renders without an explicit approval.
 
 - BPM and duration (a whole number of beats), format and size.
 - A table, one row per scene: start–end in seconds and beats, message, elements
-  (component per `references/components.md`), entrance beat, any `hold`.
+  (component per `references/components.md`), entrance beat, any `hold`. Every
+  scene shows at least one animated graphic (icon, shape, line, chart, ring,
+  reveal, burst), not text alone.
 - Style notes: palette hex, font sizes (at most two per scene), the hero asset.
 
 Read `references/components.md` while planning. If the user changes the plan,

@@ -13,8 +13,8 @@ SCRIPT = SKILL / "scripts" / "contact-sheet"
 sys.path.insert(0, str(SKILL / "scripts"))
 
 SCENE = {"width": 320, "height": 240, "fps": 30, "bpm": 120, "duration": 6,
-         "scenes": [{"id": "a", "start": 0, "end": 2, "elements": [{"component": "text", "text": "One"}]},
-                    {"id": "b", "start": 2, "end": 6, "elements": [{"component": "text", "text": "Two"}]}]}
+         "scenes": [{"id": "a", "text_only": True, "start": 0, "end": 2, "elements": [{"component": "text", "text": "One"}]},
+                    {"id": "b", "text_only": True, "start": 2, "end": 6, "elements": [{"component": "text", "text": "Two"}]}]}
 
 
 class ContactSheetTest(unittest.TestCase):

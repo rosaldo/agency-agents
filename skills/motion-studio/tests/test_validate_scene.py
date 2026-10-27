@@ -187,6 +187,12 @@ class ValidateSceneTest(unittest.TestCase):
         self.assertRule(mutated(lambda s: s.update(palette=["#fff"])), "palette")
         self.assertRule(mutated(lambda s: s.update(background={"color": "#101418", "shapes": 9})), "background")
 
+    def test_every_scene_needs_a_graphic_unless_marked_text_only(self):
+        text_only = [{"component": "title", "text": "Only words"}, {"component": "text", "text": "and more words"}]
+        self.assertRule(mutated(lambda s: s["scenes"][2].update(elements=text_only)), "graphic-richness")
+        self.assertEqual(validate(mutated(lambda s: s["scenes"][2].update(elements=text_only, text_only=True)))[0], 0)
+        self.assertRule(mutated(lambda s: s["scenes"][2].update(text_only="yes")), "graphic-richness")
+
 
 if __name__ == "__main__":
     unittest.main()
