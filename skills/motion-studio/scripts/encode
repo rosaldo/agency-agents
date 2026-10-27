@@ -1,0 +1,71 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+"""encode <scene.json> [--frames DIR] [--audio WAV] [--out-dir DIR] — the two deliverables.
+
+out.mp4: H.264 yuv420p + AAC, for publishing. preview.webm: VP9 + Opus, for
+watching where H.264 does not play. Frame count and fps come from scene.json;
+frames are encoded at their rendered size (check-video compares it to the plan).
+Prints one JSON line.
+"""
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from scene_schema import validate
+
+TARGETS = {
+    "out.mp4": ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium",
+                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"],
+    "preview.webm": ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-crf", "32", "-b:v", "0", "-row-mt", "1",
+                     "-c:a", "libopus", "-b:a", "128k"],
+}
+
+
+def fail(message):
+    print(json.dumps({"ok": False, "error": message}))
+    return 1
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="encode")
+    ap.add_argument("scene")
+    ap.add_argument("--frames", help="frames directory (default: frames/ next to scene.json)")
+    ap.add_argument("--audio", help="WAV (default: audio.wav next to scene.json)")
+    ap.add_argument("--out-dir", help="where out.mp4 and preview.webm go (default: next to scene.json)")
+    args = ap.parse_args(argv)
+    path = Path(args.scene)
+    try:
+        scene = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        return fail(str(exc))
+    errors = validate(scene, path.parent)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors[:20]}))
+        return 1
+    base = path.parent
+    frames = Path(args.frames) if args.frames else base / "frames"
+    audio = Path(args.audio) if args.audio else base / "audio.wav"
+    out_dir = Path(args.out_dir) if args.out_dir else base
+    fps, duration = scene.get("fps", 30), scene["duration"]
+    total = round(duration * fps)
+    missing = [n for n in range(total) if not (frames / f"frame_{n:05d}.png").is_file()]
+    if missing:
+        return fail(f"{len(missing)} of {total} frames missing in {frames} (first: {missing[0]}); run render")
+    if not audio.is_file():
+        return fail(f"no audio at {audio}; run synth-audio")
+    inputs = ["-framerate", str(fps), "-i", str(frames / "frame_%05d.png"), "-i", str(audio),
+              "-map", "0:v", "-map", "1:a", "-frames:v", str(total), "-t", f"{duration}",
+              "-r", str(fps)]
+    for name, codec in TARGETS.items():
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, *codec, str(out_dir / name)],
+                           capture_output=True, text=True)
+        if r.returncode:
+            return fail(f"ffmpeg {name}: " + (r.stderr.strip().splitlines() or ["failed"])[-1])
+    print(json.dumps({"ok": True, "mp4": str(out_dir / "out.mp4"), "webm": str(out_dir / "preview.webm"),
+                      "fps": fps, "seconds": duration}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
