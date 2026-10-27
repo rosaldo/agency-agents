@@ -20,7 +20,6 @@ html, body { margin: 0; padding: 0; background: #000; }
 }
 .ms-scene.is-live { display: flex; }
 .ms-el { will-change: transform, opacity; }
-.ms-el.has-box { position: absolute; }
 .ms-align-start { text-align: left; align-self: stretch; }
 .ms-align-center { text-align: center; align-self: stretch; }
 .ms-align-end { text-align: right; align-self: stretch; }
@@ -40,3 +39,17 @@ html, body { margin: 0; padding: 0; background: #000; }
 .ms-bar-label { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 0.9cqmin; }
 .ms-bar-track { height: 3.2cqmin; border-radius: 1.6cqmin; background: color-mix(in srgb, currentColor 14%, transparent); }
 .ms-bar-fill { height: 100%; border-radius: inherit; background: currentColor; transform-origin: left center; }
+/* layered background: soft palette shapes at three depths, then a still grain */
+.ms-backdrop { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
+.ms-orb { position: absolute; opacity: 0.16; filter: blur(5cqmin); }
+.ms-grain { position: absolute; inset: 0; background-size: 18cqmin 18cqmin; }
+.ms-el { position: relative; z-index: 1; }
+.ms-el.has-box { position: absolute; }
+/* graphics: one SVG filling the element; children scale and turn about their own centre */
+.ms-graphic { position: relative; }
+.ms-graphic svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.ms-graphic svg * { transform-box: fill-box; transform-origin: center; }
+.ms-dot { position: absolute; width: 2.6cqmin; height: 2.6cqmin; border-radius: 50%; }
+.ms-burst { position: absolute; inset: 0; pointer-events: none; }
+.ms-particle { position: absolute; left: 50%; top: 50%; }
+.ms-mask.has-box > * { height: 100%; }  /* a masked element fills the box its mask holds */

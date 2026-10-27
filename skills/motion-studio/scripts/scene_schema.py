@@ -38,7 +38,25 @@ COMPONENTS = {
     "list":       (("items",), ("items",), {"items": "m"}),
     "asset-card": (("asset",), ("caption",), {"caption": "s"}),
     "bar-chart":  (("bars",), (), {"labels": "s"}),
+    "shape":      ((), (), {}),
+    "draw":       (("stroke",), (), {}),
+    "morph":      (("from", "to"), (), {}),
+    "icon":       (("icon",), (), {}),
+    "ring":       (("value",), (), {}),
+    "line-chart": (("points",), (), {}),
+    "burst":      ((), (), {}),
 }
+
+# Graphics drawn in code (lib/shapes.js and lib/components.js mirror these).
+# A graphic's `size` is its height in the column layout, as a fraction of the
+# short side; it is not a font size.
+GRAPHIC_SIZES = {"xs": 0.1, "s": 0.16, "m": 0.24, "l": 0.34, "xl": 0.46}
+SHAPES = ("circle", "blob", "rect", "triangle", "hexagon", "star", "heart")
+ICONS = ("check", "clock", "chart", "cart", "star", "heart", "arrow", "user", "bolt", "gift", "bell", "calendar")
+STROKES = ("underline", "arrow", "connector", "outline", "circle", "wave")
+REVEALS = ("wipe", "iris", "slide")
+SIDES = ("left", "right", "top", "bottom")
+MAX_PALETTE = 6
 
 # Safe area: margins as fractions of the frame (top, right, bottom, left) that
 # text must stay inside. A house layout default, not any platform's spec; set
@@ -177,15 +195,61 @@ def _check_element(el, where, base_dir, scene_gradient, sizes, errors):
                  and box[0] + box[2] <= 1 + EPS and box[1] + box[3] <= 1 + EPS and box[2] > 0 and box[3] > 0)
         if not valid:
             errors.add("relative-box", where, "box is [x, y, w, h] as fractions 0-1 of the frame, inside the frame")
+    for message in _graphic_errors(name, el):
+        errors.add("component", where, message)
     spring = el.get("spring")
     if spring is not None and not (isinstance(spring, dict) and _in(spring.get("zeta"), (0.2, 2))
                                    and _in(spring.get("omega"), (4, 40))):
         errors.add("spring", where, "spring needs zeta 0.2-2 and omega 4-40 rad/s")
 
 
+def _int_in(v, lo, hi):
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def _hex(v):
+    return isinstance(v, str) and bool(HEX.match(v))
+
+
+# field -> (test, what it must be); only checked when the field is present
+_GRAPHIC_FIELDS = {
+    "color": (_hex, "a #rrggbb colour"),
+    "reveal": (lambda v: v in REVEALS, f"one of {', '.join(REVEALS)}"),
+}
+_GRAPHIC_BY_COMPONENT = {
+    "shape": {"shape": (lambda v: v in SHAPES, f"one of {', '.join(SHAPES)}"),
+              "from": (lambda v: v in SIDES, f"one of {', '.join(SIDES)}"),
+              "spin": (lambda v: _in(v, (-720, 720)), "degrees -720 to 720"),
+              "opacity": (lambda v: _in(v, (0.05, 1)), "0.05-1")},
+    "draw": {"stroke": (lambda v: v in STROKES, f"one of {', '.join(STROKES)}")},
+    "morph": {"from": (lambda v: v in SHAPES, f"one of {', '.join(SHAPES)}"),
+              "to": (lambda v: v in SHAPES, f"one of {', '.join(SHAPES)}"),
+              "after": (lambda v: _int_in(v, 0, 8), "beats 0-8 after the entrance")},
+    "icon": {"icon": (lambda v: v in ICONS, f"one of {', '.join(ICONS)}"),
+             "mode": (lambda v: v in ("draw", "pop"), "draw or pop"),
+             "disc": (lambda v: isinstance(v, bool), "true or false")},
+    "ring": {"value": (lambda v: _in(v, (0, 100)), "a number 0-100")},
+    "line-chart": {"points": (lambda v: isinstance(v, list) and 2 <= len(v) <= 12 and all(_number(x) for x in v),
+                              "2-12 numbers")},
+    "burst": {"count": (lambda v: _int_in(v, 8, 80), "an integer 8-80"),
+              "seed": (lambda v: _int_in(v, 0, 2**31), "an integer >= 0")},
+}
+
+
+def _graphic_errors(name, el):
+    fields = {**_GRAPHIC_FIELDS, **_GRAPHIC_BY_COMPONENT.get(name, {})}
+    return [f"{name}.{field} must be {what}" for field, (ok, what) in fields.items()
+            if field in el and not ok(el[field])]
+
+
 def _check_background(bg, where, errors):
     if bg is None:
         return False
+    if isinstance(bg, dict):
+        if "shapes" in bg and not _int_in(bg["shapes"], 0, 6):
+            errors.add("background", where, "background.shapes is 0-6 soft parallax shapes")
+        if "grain" in bg and not isinstance(bg["grain"], bool):
+            errors.add("background", where, "background.grain is true or false")
     if isinstance(bg, dict) and HEX.match(str(bg.get("color", ""))):
         return False
     g = bg.get("gradient") if isinstance(bg, dict) else None
@@ -263,4 +327,8 @@ def validate(scene, base_dir):
     timing_ok = _check_timing(scene, errors)
     _check_scenes(scene, Path(base_dir), timing_ok, errors)
     _check_safe_area(scene, errors)
+    palette = scene.get("palette")
+    if palette is not None and not (isinstance(palette, list) and 1 <= len(palette) <= MAX_PALETTE
+                                    and all(_hex(c) for c in palette)):
+        errors.add("palette", "palette", f"palette is 1-{MAX_PALETTE} #rrggbb colours for the graphics")
     return errors

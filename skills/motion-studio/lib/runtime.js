@@ -15,12 +15,81 @@
     var light = luminance(bg.color || bg.gradient[0]) > 0.55;
     layer.style.color = light ? "#111418" : "#f5f5f2";
     return { base: bg.color || "linear-gradient(180deg, " + bg.gradient.join(", ") + ")",
-             tint: light ? "rgba(0, 0, 0, 0.06)" : "rgba(255, 255, 255, 0.08)" };
+             tint: light ? "rgba(0, 0, 0, 0.06)" : "rgba(255, 255, 255, 0.08)",
+             paper: bg.color || bg.gradient[0] };
   }
   function light(sc, t) {
     var g = M.glow(t);
     sc.layer.style.background = "radial-gradient(circle at " + g.x + "% " + g.y + "%, " + sc.paint.tint +
       ", transparent 60%), " + sc.paint.base;
+  }
+
+  // Default palette for graphics when scene.json gives none: warm, mint, blue, coral.
+  var PALETTE = ["#ffb547", "#4cc9a6", "#6c8cff", "#ff6b6b"];
+  var grainTile = null;
+
+  // grain() — a seeded noise tile laid over every background: it breaks the
+  // gradient into fine dither, so the encoder shows no bands, and never moves.
+  function grain() {
+    var c = document.createElement("canvas"), side = 192, g = c.getContext("2d");
+    c.width = c.height = side;
+    var img = g.createImageData(side, side), rand = root.Shapes.rng(7);
+    for (var i = 0; i < img.data.length; i += 4) {
+      var v = rand() < 0.5 ? 0 : 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = Math.round(rand() * 16);
+    }
+    g.putImageData(img, 0, 0);
+    return c.toDataURL("image/png");
+  }
+
+  // decorate() — the layered background: soft shapes in the palette at three
+  // depths (placed by a seed per scene) plus the grain. Returns what drift() moves.
+  function decorate(layer, bg, palette, si) {
+    var back = document.createElement("div"), rand = root.Shapes.rng(101 + si * 7919), shapes = [];
+    back.className = "ms-backdrop";
+    for (var i = 0; i < (bg.shapes === undefined ? 3 : bg.shapes); i++) {
+      var n = document.createElement("div"), depth = 1 + i % 3, side = 28 + rand() * 30;
+      n.className = "ms-orb";
+      n.style.width = n.style.height = side + "cqmin";
+      n.style.left = rand() * 100 + "%";
+      n.style.top = rand() * 100 + "%";
+      n.style.background = palette[(si + i) % palette.length];
+      n.style.borderRadius = i % 2 ? "38% 62% 55% 45% / 45% 40% 60% 55%" : "50%";
+      back.appendChild(n);
+      shapes.push({ n: n, depth: depth, phase: rand() * 6.28 });
+    }
+    if (bg.grain !== false) {
+      var g = document.createElement("div");
+      g.className = "ms-grain";
+      g.style.backgroundImage = "url(" + grainTile + ")";
+      back.appendChild(g);
+    }
+    layer.appendChild(back);
+    return shapes;
+  }
+  // drift(shapes, t) — nearer shapes (higher depth) move further: parallax.
+  function drift(shapes, t) {
+    shapes.forEach(function (o) {
+      var a = 2 * Math.PI * t / 9 + o.phase;
+      o.n.style.transform = "translate(-50%, -50%) translate(" + 2.2 * o.depth * Math.sin(a) + "cqmin, " +
+        1.6 * o.depth * Math.cos(a * 0.8) + "cqmin) rotate(" + 6 * o.depth * Math.sin(a * 0.5) + "deg)";
+    });
+  }
+  // unmask(e, q) — open the element's mask by q (0 shut, 1 open)
+  function unmask(e, q) {
+    q = Math.min(1, Math.max(0, q));
+    var mask = e.node, kind = e.el.reveal;
+    if (kind === "slide") e.state.root.style.translate = "0 " + (1 - q) * 110 + "%";
+    if (q >= 1) {
+      mask.style.clipPath = "none"; // fully open: nothing clipped, not even an overshoot
+    } else if (kind === "slide") {
+      mask.style.clipPath = "inset(0)";
+    } else if (kind === "wipe") {
+      mask.style.clipPath = "inset(-5% " + (1 - q) * 105 + "% -5% -5%)";
+    } else {
+      mask.style.clipPath = "circle(" + q * 75 + "% at 50% 50%)";
+    }
   }
 
   var state = null;
@@ -32,34 +101,48 @@
     stage.style.height = size.height + "px";
     stage.textContent = "";
     var beatOf = function (t) { return Math.round(t * bpm / 60); };
+    var palette = scene.palette || PALETTE;
+    grainTile = grainTile || grain();
     var scenes = scene.scenes.map(function (sc, si) {
       var layer = document.createElement("section");
       layer.className = "ms-scene";
       layer.dataset.scene = sc.id || String(si);
-      var look = paint(layer, sc.background || scene.background || { color: "#111418" });
+      var bg = sc.background || scene.background || { color: "#111418" };
+      var look = paint(layer, bg);
+      look.deco = decorate(layer, bg, palette, si);
       stage.appendChild(layer);
       var startBeat = beatOf(sc.start), stagger = sc.stagger || 3;
       var first = M.beatFrame(startBeat + (sc.enter_beat || 0), bpm, fps);
       var elements = sc.elements.map(function (el, i) {
-        var comp = C[el.component], st = comp.mount(el);
-        st.root.classList.add("ms-el", "ms-align-" + (el.align || "start"));
-        if (el.caps) st.root.classList.add("ms-caps");
-        if (el.box) {
-          st.root.classList.add("has-box");
-          st.root.style.left = el.box[0] * 100 + "%";
-          st.root.style.top = el.box[1] * 100 + "%";
-          st.root.style.width = el.box[2] * 100 + "%";
-          st.root.style.height = el.box[3] * 100 + "%";
+        var comp = C[el.component];
+        var st = comp.mount(el, { palette: palette, index: i, paper: look.paper });
+        // a reveal wraps the element in a mask that the runtime opens; the
+        // component keeps animating its own nodes inside it
+        var node = st.root;
+        if (el.reveal) {
+          node = document.createElement("div");
+          node.className = "ms-mask";
+          node.appendChild(st.root);
         }
-        layer.appendChild(st.root);
-        return { el: el, index: i, comp: comp, state: st, enter: first + i * stagger, spring: el.spring || comp.spring };
+        node.classList.add("ms-el", "ms-align-" + (el.align || "start"));
+        if (el.caps) node.classList.add("ms-caps");
+        if (el.box) {
+          node.classList.add("has-box");
+          node.style.left = el.box[0] * 100 + "%";
+          node.style.top = el.box[1] * 100 + "%";
+          node.style.width = el.box[2] * 100 + "%";
+          node.style.height = el.box[3] * 100 + "%";
+        }
+        layer.appendChild(node);
+        return { el: el, index: i, comp: comp, state: st, node: node, enter: first + i * stagger,
+                 spring: el.spring || comp.spring };
       });
       // a declared hold freezes the scene on purpose: its last `hold` beats repeat one frame
       var still = sc.hold ? M.beatFrame(beatOf(sc.end) - sc.hold, bpm, fps) : Infinity;
       return { layer: layer, paint: look, still: still, start: M.beatFrame(startBeat, bpm, fps),
                end: M.beatFrame(beatOf(sc.end), bpm, fps), stagger: stagger, elements: elements };
     });
-    state = { fps: fps, scenes: scenes, frames: Math.round(scene.duration * fps) };
+    state = { fps: fps, beat: M.framesPerBeat(bpm, fps), scenes: scenes, frames: Math.round(scene.duration * fps) };
     return state.frames;
   }
 
@@ -68,18 +151,19 @@
       var live = frame >= sc.start && frame < sc.end;
       sc.layer.classList.toggle("is-live", live);
       if (!live) return;
-      var f = Math.min(frame, sc.still);
-      light(sc, (f - sc.start) / state.fps);
+      var f = Math.min(frame, sc.still), t = (f - sc.start) / state.fps;
+      light(sc, t);
+      drift(sc.paint.deco, t);
       sc.elements.forEach(function (e) {
-        e.comp.update(e.state, {
-          stagger: sc.stagger,
-          progress: function (delay, zeta) {
-            return M.spring((f - e.enter - (delay || 0)) / state.fps, zeta || e.spring.zeta, e.spring.omega);
-          }
-        });
+        var progress = function (delay, zeta) {
+          return M.spring((f - e.enter - (delay || 0)) / state.fps, zeta || e.spring.zeta, e.spring.omega);
+        };
+        e.comp.update(e.state, { stagger: sc.stagger, beat: state.beat, t: t, since: (f - e.enter) / state.fps,
+                                 progress: progress });
+        if (e.el.reveal) unmask(e, progress(0, 1));
         // idle motion uses the individual translate/scale properties, so it
         // composes with the transform each component sets for its entrance
-        var idle = M.idle((f - e.enter) / state.fps, e.index), root = e.state.root;
+        var idle = M.idle((f - e.enter) / state.fps, e.index), root = e.node;
         root.style.translate = idle.x + "cqmin " + idle.y + "cqmin";
         root.style.scale = String(idle.s);
       });
@@ -100,7 +184,7 @@
     state.scenes.forEach(function (sc) {
       if (!sc.layer.classList.contains("is-live")) return;
       sc.elements.forEach(function (e, i) {
-        var walk = document.createTreeWalker(e.state.root, NodeFilter.SHOW_TEXT), node, u = null;
+        var walk = document.createTreeWalker(e.node, NodeFilter.SHOW_TEXT), node, u = null;
         while ((node = walk.nextNode())) {
           if (!node.nodeValue.trim()) continue;
           var range = document.createRange();

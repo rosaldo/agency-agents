@@ -17,7 +17,7 @@ from review_loop import next_pass
 from scene_schema import resolve_size, validate
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
-LIB_FILES = ("motion.js", "components.js", "runtime.js")
+LIB_FILES = ("motion.js", "shapes.js", "components.js", "runtime.js")
 
 
 def page_html(base_dir):

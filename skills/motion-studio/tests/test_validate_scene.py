@@ -159,6 +159,34 @@ class ValidateSceneTest(unittest.TestCase):
         self.assertRule(mutated(lambda s: s["scenes"][0]["elements"][1].update(box=[100, 900, 800, 400])),
                         "relative-box")
 
+    def test_graphic_components_validate_their_fields(self):
+        graphics = [{"component": "shape", "shape": "blob", "from": "left", "spin": 90, "opacity": 0.5},
+                    {"component": "draw", "stroke": "underline", "reveal": "wipe"},
+                    {"component": "morph", "from": "circle", "to": "heart", "after": 1},
+                    {"component": "icon", "icon": "check", "disc": True, "color": "#ffb547"},
+                    {"component": "ring", "value": 72},
+                    {"component": "line-chart", "points": [1, 3, 2, 6]},
+                    {"component": "burst", "seed": 4, "count": 30, "box": [0.2, 0.2, 0.6, 0.6]}]
+
+        def add(s):
+            s["palette"] = ["#ffb547", "#4cc9a6"]
+            s["background"] = {"color": "#101418", "shapes": 4, "grain": True}
+            s["scenes"][2]["elements"] = graphics
+        self.assertEqual(validate(mutated(add))[0], 0, validate(mutated(add))[1])
+        bad = {"icon": {"component": "icon", "icon": "rocket"},
+               "stroke": {"component": "draw", "stroke": "zigzag"},
+               "color": {"component": "shape", "color": "red"},
+               "reveal": {"component": "text", "text": "x", "reveal": "fade"},
+               "points": {"component": "line-chart", "points": [1]},
+               "count": {"component": "burst", "count": 500},
+               "ring": {"component": "ring", "value": 140},
+               "morph": {"component": "morph", "from": "circle", "to": "cube"}}
+        for name, el in bad.items():
+            with self.subTest(name):
+                self.assertRule(mutated(lambda s: s["scenes"][2]["elements"].append(el)), "component")
+        self.assertRule(mutated(lambda s: s.update(palette=["#fff"])), "palette")
+        self.assertRule(mutated(lambda s: s.update(background={"color": "#101418", "shapes": 9})), "background")
+
 
 if __name__ == "__main__":
     unittest.main()

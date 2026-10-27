@@ -28,6 +28,20 @@ SCENE = {
     ],
 }
 
+# every graphic component in one second, with a reveal and a burst
+GRAPHICS = {
+    "preset": "16:9", "quality": "low", "fps": 30, "bpm": 120, "duration": 1,
+    "background": {"gradient": ["#101418", "#24303c"], "shapes": 3},
+    "scenes": [{"id": "g", "start": 0, "end": 1, "stagger": 2, "elements": [
+        {"component": "shape", "shape": "blob", "box": [0.05, 0.1, 0.2, 0.3], "spin": 45},
+        {"component": "draw", "stroke": "arrow", "box": [0.3, 0.1, 0.3, 0.1]},
+        {"component": "morph", "from": "circle", "to": "star", "after": 0, "box": [0.7, 0.1, 0.2, 0.3]},
+        {"component": "icon", "icon": "cart", "disc": True, "box": [0.05, 0.55, 0.15, 0.3]},
+        {"component": "ring", "value": 80, "box": [0.25, 0.55, 0.2, 0.3]},
+        {"component": "line-chart", "points": [1, 4, 2, 7], "box": [0.5, 0.55, 0.4, 0.3], "reveal": "wipe"},
+        {"component": "burst", "seed": 3, "count": 24}]}],
+}
+
 
 def chromium_ready():
     if not shutil.which("uv"):
@@ -70,6 +84,17 @@ class RenderTest(unittest.TestCase):
         layout = json.loads((frames / "layout.json").read_text())
         self.assertEqual([(s["id"], s["start"], s["end"]) for s in layout["scenes"]], [("a", 0, 15), ("b", 15, 30)])
         self.assertTrue(all(len(s["boxes"]) == 1 for s in layout["scenes"]))
+        self.assertEqual(self.render()[0], 0)
+        self.assertEqual(digests(frames), first)
+
+    def test_graphics_render_deterministically_and_move(self):
+        self.scene.write_text(json.dumps(GRAPHICS))
+        code, out = self.render()
+        self.assertEqual(code, 0, out)
+        frames = self.work / "frames"
+        first = digests(frames)
+        self.assertEqual(len(first), 30)
+        self.assertEqual(len(set(first.values())), 30)  # every frame differs: the graphics keep moving
         self.assertEqual(self.render()[0], 0)
         self.assertEqual(digests(frames), first)
 

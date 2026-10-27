@@ -16,7 +16,8 @@ Either a preset or a free size:
 | `fps` | integer | 30 | 12–60 |
 | `bpm` | number | — | 40–240; sets the beat grid |
 | `duration` | seconds | — | 1–300 and a whole number of beats |
-| `background` | `{"color": "#rrggbb"}` or `{"gradient": ["#rrggbb", "#rrggbb"]}` | — | default for every scene |
+| `background` | `{"color": "#rrggbb"}` or `{"gradient": ["#rrggbb", "#rrggbb"]}`, plus optional `"shapes"` (0–6, default 3) and `"grain"` (default true) | — | default for every scene |
+| `palette` | list of `#rrggbb` | warm, mint, blue, coral | 1–6 colours the graphics and background shapes cycle through |
 | `safe_area` | `{"top", "right", "bottom", "left"}` | per format, see `review.md` | frame fractions 0–0.4; any side you give replaces that side's default |
 
 Preset sizes (width × height):
@@ -55,12 +56,14 @@ Every element has `component` (see `components.md`) plus:
 
 | Field | Type | Default | Rule |
 |---|---|---|---|
-| `size` | `"xs"` `"s"` `"m"` `"l"` `"xl"` | per component | fraction of the short side; at most 2 sizes per scene |
+| `size` | `"xs"` `"s"` `"m"` `"l"` `"xl"` | per component | fraction of the short side; at most 2 font sizes per scene (a graphic's size is its height, not a font size) |
 | `align` | `"start"` `"center"` `"end"` | `"start"` | |
 | `box` | `[x, y, w, h]` | component layout | fractions 0–1 of the frame, inside it |
 | `hero` | boolean | false | only on an `asset-card` whose `asset` exists |
 | `spring` | `{"zeta", "omega"}` | component feel | zeta 0.2–2, omega 4–40 |
 | `caps` | boolean | false | renders the text in capitals |
+| `color` | `#rrggbb` | next palette colour | graphics only |
+| `reveal` | `"wipe"` `"iris"` `"slide"` | — | enters through a mask |
 
 Assets are paths under `assets/` next to `scene.json`, and they must exist.
 
@@ -70,4 +73,4 @@ Assets are paths under `assets/` next to `scene.json`, and they must exist.
 `timeline`, `cut-on-beat`, `stagger`, `enter-timing`, `font-sizes`,
 `caps-center-gradient` (capitals + centered + gradient background together),
 `hero-asset`, `asset`, `component`, `relative-box`, `background`, `spring`,
-`hold`, `safe-area`.
+`hold`, `safe-area`, `palette`.

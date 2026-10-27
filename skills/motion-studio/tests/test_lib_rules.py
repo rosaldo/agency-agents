@@ -14,7 +14,7 @@ LIB = SKILL / "lib"
 FORBIDDEN_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "forbidden"
 
 sys.path.insert(0, str(SKILL / "scripts"))
-from scene_schema import COMPONENTS, TEXT_SIZES  # noqa: E402
+from scene_schema import COMPONENTS, GRAPHIC_SIZES, ICONS, SHAPES, STROKES, TEXT_SIZES  # noqa: E402
 
 RULES = {
     "css-transition": re.compile(r"\btransition"),
@@ -54,6 +54,20 @@ class LibRulesTest(unittest.TestCase):
         block = re.search(r"TEXT_SIZES = \{([^}]*)\}", source).group(1)
         mirrored = {k: float(v) for k, v in re.findall(r"([a-z]+):\s*([0-9.]+)", block)}
         self.assertEqual(mirrored, TEXT_SIZES)
+
+    def test_graphic_catalog_mirrors_the_schema(self):
+        shapes = (LIB / "shapes.js").read_text()
+
+        def keys(name):
+            block = re.search(name + r" = \{(.*?)\n  \};", shapes, re.S).group(1)
+            return set(re.findall(r"^\s*([a-z]+):", block, re.M))
+        self.assertEqual(keys("ICONS"), set(ICONS))
+        self.assertTrue(8 <= len(ICONS) <= 12)
+        self.assertEqual(keys("STROKES"), set(STROKES))
+        self.assertEqual(keys("OUTLINES"), set(SHAPES))
+        source = (LIB / "components.js").read_text()
+        block = re.search(r"GRAPHIC_SIZES = \{([^}]*)\}", source).group(1)
+        self.assertEqual({k: float(v) for k, v in re.findall(r"([a-z]+):\s*([0-9.]+)", block)}, GRAPHIC_SIZES)
 
 
 if __name__ == "__main__":

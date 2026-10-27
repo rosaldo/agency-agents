@@ -15,6 +15,31 @@ sizes are relative to the frame, so one scene works in every format.
 | `asset-card` | `asset`, optional `caption`, `hero` | a real screenshot, photo or logo from `assets/`; the scene's hero |
 | `bar-chart` | `bars`: `[{"label", "value"}]` | a before/after or a small comparison; bars grow in order |
 
+### Graphics (drawn in code, no image files)
+
+| Component | Fields | Use it for |
+|---|---|---|
+| `shape` | `shape` (`circle` `blob` `rect` `triangle` `hexagon` `star` `heart`), optional `from` (`left` `right` `top` `bottom`), `spin` (degrees), `opacity` | a coloured form that pops in (or slides in from a side) and turns to rest; `blob` keeps wobbling; `rect` stretches into a rounded panel when it has a `box` |
+| `draw` | `stroke` (`underline` `arrow` `connector` `outline` `circle` `wave`) | a line that draws itself across its box: underline a word, point with an arrow, link two things, ring or frame a number |
+| `morph` | `from`, `to` (shape names), optional `after` (beats, default 2) | one shape pops in, then becomes another |
+| `icon` | `icon` (`check` `clock` `chart` `cart` `star` `heart` `arrow` `user` `bolt` `gift` `bell` `calendar`), optional `mode` (`draw` default, `pop`), `disc` | a pictogram that draws its stroke in or pops; `disc: true` puts it on a filled circle |
+| `ring` | `value` (0–100), optional `prefix`, `suffix` (default `%`), `decimals` | progress or a share: the arc grows while the number counts up |
+| `line-chart` | `points` (2–12 numbers) | a trend: the line draws left to right, the area fades in, the end dot pops |
+| `burst` | optional `seed`, `count` (8–80, default 36) | a confetti accent at the climax; flies out from the centre of its box, or of the frame without one |
+
+Graphics take `color` (`#rrggbb`); without it they cycle through the top-level
+`palette`. Their `size` is the height of the graphic in the column layout
+(`xs` 0.1 to `xl` 0.46 of the short side) and is not a font size. Most graphics
+read best with a `box`. Elements paint in list order, so a shape listed first
+sits behind what follows.
+
+Any element, text included, can enter through a mask with `reveal`: `wipe`
+(left to right), `iris` (a circle opening from the centre) or `slide` (rises
+from behind its own edge).
+
+Every background is layered: soft shapes in the palette drift at three depths
+(parallax), and a fixed grain dithers gradients so the encoder shows no bands.
+
 Shared fields (`size`, `align`, `box`, `spring`, `caps`) are in `scene-schema.md`.
 Without `box`, elements stack in a column inside the default margins; with
 `box`, they sit at those frame fractions. A cut between scenes is the only
@@ -27,10 +52,11 @@ wanders across every background. Both are pure functions of the frame. To
 stop on purpose, declare a `hold` on the scene: its last beats repeat one frame.
 
 Default springs (zeta / omega): title 0.7/14, text 0.8/12, counter 0.75/12,
-list 0.7/16, asset-card 0.6/12, bar-chart 0.8/10.
+list 0.7/16, asset-card 0.6/12, bar-chart 0.8/10, shape 0.55/11, draw 1/9,
+morph 0.6/10, icon 0.5/13, ring 1/7, line-chart 1/6, burst 1/6.
 
 Write a new component only when none of these fits; it goes in
-`lib/components.js`, registers in `scripts/scene_schema.py`, and must pass
+`lib/components.js` (geometry in `lib/shapes.js`), registers in `scripts/scene_schema.py`, and must pass
 `tests/test_lib_rules.py`.
 
 ## Spring
