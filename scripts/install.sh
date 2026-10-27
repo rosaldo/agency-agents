@@ -848,18 +848,24 @@ PY
 
 # Skills ship next to the agents dir (~/.claude/skills). Only installed when
 # the agents dest is a .../agents dir, so an arbitrary --path is left alone.
+# A skill is its whole directory (SKILL.md plus scripts/, references/, ...):
+# copied recursively, or symlinked as one directory under --link. The previous
+# install of that one skill is removed first so no stale file survives.
 install_claude_code_skills() {
   local agents_dest="$1" skills_dest skill slug
   [[ "$agents_dest" == */agents ]] || return 0
   [[ -d "$REPO_ROOT/skills" ]] || return 0
   skills_dest="$(dirname "$agents_dest")/skills"
+  mkdir -p "$skills_dest"
   for skill in "$REPO_ROOT"/skills/*/; do
+    skill="${skill%/}"
     [[ -f "$skill/SKILL.md" ]] || continue
     slug="$(basename "$skill")"
+    [[ -n "$slug" ]] || continue
     # skill <slug> wears agent <slug>; skip it when that agent was not selected
     slug_allowed "$slug" || continue
-    mkdir -p "$skills_dest/$slug"
-    install_file "$skill/SKILL.md" "$skills_dest/$slug/"
+    rm -rf "${skills_dest:?}/$slug"
+    if $USE_LINK; then ln -s "$skill" "$skills_dest/$slug"; else cp -R "$skill" "$skills_dest/$slug"; fi
     ok "Claude Code: skill /$slug -> $skills_dest/$slug"
   done
 }

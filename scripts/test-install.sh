@@ -365,6 +365,61 @@ run_install "$home" --tool claude-code --division engineering --path "$dest"
 assert_eq "$first" "$(count_md "$dest")" "re-running installs the same set, not duplicates"
 
 # ---------------------------------------------------------------------------
+# 7. Skills ship as whole directories
+#
+# A skill is a directory (SKILL.md plus scripts/, references/, ...), not one
+# file. The fixture repo mirrors this checkout through symlinks but swaps in
+# its own skills/ (the real /maestro plus a fixture), so no case writes into
+# the repo. install.sh derives REPO_ROOT from its own (logical) path, so it
+# runs against the mirror.
+# ---------------------------------------------------------------------------
+echo ""
+echo "skills"
+
+FIXTURE_REPO="$SANDBOX_ROOT/fixture-repo"
+mkdir -p "$FIXTURE_REPO/skills/fixture-skill/scripts" "$FIXTURE_REPO/skills/fixture-skill/references"
+for _e in "$REPO_ROOT"/* "$REPO_ROOT"/.[!.]*; do
+  [[ "$(basename "$_e")" == skills || "$(basename "$_e")" == .git ]] && continue
+  ln -s "$_e" "$FIXTURE_REPO/$(basename "$_e")"
+done
+ln -s "$REPO_ROOT/skills/maestro" "$FIXTURE_REPO/skills/maestro"
+printf -- '---\nname: fixture-skill\ndescription: test fixture\n---\nbody\n' > "$FIXTURE_REPO/skills/fixture-skill/SKILL.md"
+printf '#!/bin/sh\necho x\n' > "$FIXTURE_REPO/skills/fixture-skill/scripts/x"
+chmod +x "$FIXTURE_REPO/skills/fixture-skill/scripts/x"
+printf 'y\n' > "$FIXTURE_REPO/skills/fixture-skill/references/y.md"
+
+# run_fixture_install <home> [args...] — like run_install, against the fixture repo.
+run_fixture_install() {
+  local home="$1"; shift
+  RUN_OUT="$(HOME="$home" "$FIXTURE_REPO/scripts/install.sh" --no-interactive --tool claude-code "$@" 2>&1)"
+  RUN_STATUS=$?
+  $VERBOSE && printf '%s\n' "$RUN_OUT"
+  return 0
+}
+
+home="$(sandbox skill-tree)"
+sk="$home/.claude/skills"
+run_fixture_install "$home"
+assert_eq 0 "$RUN_STATUS" "fixture repo install exits 0"
+assert_eq "SKILL.md references/y.md scripts/x" \
+  "$(cd "$sk/fixture-skill" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs)" \
+  "a skill ships its whole tree, not only SKILL.md"
+assert_eq 1 "$([[ -x "$sk/fixture-skill/scripts/x" ]] && echo 1 || echo 0)" "skill scripts keep the execute bit"
+assert_eq 1 "$(cmp -s "$REPO_ROOT/skills/maestro/SKILL.md" "$sk/maestro/SKILL.md" && echo 1 || echo 0)" \
+  "/maestro is still installed as before"
+
+mkdir -p "$sk/user-own"; printf 'mine\n' > "$sk/user-own/SKILL.md"
+printf 'stale\n' > "$sk/fixture-skill/old.md"
+run_fixture_install "$home"
+assert_eq 0 "$([[ -e "$sk/fixture-skill/old.md" ]] && echo 1 || echo 0)" "a reinstall leaves no orphan file inside the skill"
+assert_eq 1 "$([[ -f "$sk/user-own/SKILL.md" ]] && echo 1 || echo 0)" "a reinstall never touches other skills"
+
+run_fixture_install "$home" --link
+assert_eq 1 "$([[ -L "$sk/fixture-skill" ]] && echo 1 || echo 0)" "--link symlinks the skill directory"
+assert_eq 1 "$([[ -x "$sk/fixture-skill/scripts/x" && -f "$sk/fixture-skill/references/y.md" ]] && echo 1 || echo 0)" \
+  "--link exposes the whole skill tree"
+
+# ---------------------------------------------------------------------------
 echo ""
 if [[ $xfailed -gt 0 ]]; then
   echo "Results: $passed passed, $failed failed, $xfailed known-broken (xfail)."
