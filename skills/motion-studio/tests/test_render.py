@@ -82,6 +82,13 @@ class RenderTest(unittest.TestCase):
         changed = {n for n, t in before.items() if (frames / n).stat().st_mtime_ns != t}
         self.assertEqual(changed, {f"frame_{i:05d}.png" for i in range(15, 30)})
 
+    def test_third_partial_render_is_refused(self):
+        self.assertEqual(self.render()[0], 0)
+        self.assertEqual([self.render("--scenes", "a")[1]["pass"] for _ in range(2)], [1, 2])
+        code, out = self.render("--scenes", "a")
+        self.assertNotEqual(code, 0)
+        self.assertIn("passes", out["error"])
+
     def test_partial_render_needs_a_full_render_first(self):
         code, out = self.render("--scenes", "b")
         self.assertNotEqual(code, 0)

@@ -3,7 +3,8 @@
 Builds the page from lib/, steps it with MotionStudio.renderFrame(n) and saves
 frame_NNNNN.png per frame plus layout.json (each scene's frame range and the
 text boxes measured on its last frame). --scenes re-renders only those scenes
-(ids or 1-based numbers) over an existing full render. Prints one JSON line.
+(ids or 1-based numbers) over an existing full render, at most
+review_loop.MAX_PASSES times; a full render resets the count. Prints one JSON line.
 """
 import argparse
 import json
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from review_loop import next_pass
 from scene_schema import resolve_size, validate
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
@@ -64,6 +66,10 @@ def main(argv):
     old_layout = json.loads(layout_path.read_text()) if args.scenes and layout_path.is_file() else None
     if args.scenes and old_layout is None:
         return fail("--scenes needs a full render first; run render without --scenes")
+    try:
+        passes = next_pass(old_layout.get("passes", 0)) if old_layout else 0
+    except ValueError as exc:
+        return fail(str(exc))
     out.mkdir(parents=True, exist_ok=True)
     page_file = out / ".page.html"
     page_file.write_text(page_html(scene_path.parent))
@@ -95,13 +101,13 @@ def main(argv):
         browser.close()
 
     previous = {s["id"]: s["boxes"] for s in (old_layout or {}).get("scenes", [])}
-    layout = {"width": width, "height": height, "fps": scene.get("fps", 30), "frames": total,
+    layout = {"width": width, "height": height, "fps": scene.get("fps", 30), "frames": total, "passes": passes,
               "scenes": [{**sc, "boxes": boxes[i] if i in boxes else previous.get(sc["id"], [])}
                          for i, sc in enumerate(ranges)]}
     layout_path.write_text(json.dumps(layout))
     page_file.unlink()
-    print(json.dumps({"ok": True, "frames": total, "rendered": rendered, "width": width, "height": height,
-                      "out": str(out)}))
+    print(json.dumps({"ok": True, "frames": total, "rendered": rendered, "pass": passes, "width": width,
+                      "height": height, "out": str(out)}))
     return 0
 
 

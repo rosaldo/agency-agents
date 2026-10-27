@@ -1,0 +1,53 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+"""contact-sheet <scene.json> [--video out.mp4] [--out contact-sheet.png] — review layer (b).
+
+One small grid image (4 cells per second) to score each scene by eye, plus the
+cell range of every scene. Prints one JSON line.
+"""
+import argparse
+import json
+import math
+import subprocess
+import sys
+from pathlib import Path
+
+from review_loop import SHEET_FPS, grid
+from scene_schema import resolve_size, validate
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="contact-sheet")
+    ap.add_argument("scene")
+    ap.add_argument("--video", help="default: out.mp4 next to scene.json")
+    ap.add_argument("--out", help="default: contact-sheet.png next to scene.json")
+    args = ap.parse_args(argv)
+    path = Path(args.scene)
+    try:
+        scene = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 1
+    errors = validate(scene, path.parent)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors[:20]}))
+        return 1
+    video = Path(args.video) if args.video else path.parent / "out.mp4"
+    out = Path(args.out) if args.out else path.parent / "contact-sheet.png"
+    cells = math.ceil(scene["duration"] * SHEET_FPS)
+    cols, rows, (cw, ch) = grid(cells, *resolve_size(scene))
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-frames:v", "1", "-vf",
+                        f"fps={SHEET_FPS},scale={cw}:{ch},tile={cols}x{rows}", str(out)],
+                       capture_output=True, text=True)
+    if r.returncode:
+        print(json.dumps({"ok": False, "error": (r.stderr.strip().splitlines() or ["ffmpeg failed"])[-1]}))
+        return 1
+    # cell k shows time k / SHEET_FPS; a scene owns the cells inside [start, end)
+    index = {sc.get("id", str(i)): [math.ceil(sc["start"] * SHEET_FPS), math.ceil(sc["end"] * SHEET_FPS) - 1]
+             for i, sc in enumerate(scene["scenes"])}
+    print(json.dumps({"ok": True, "sheet": str(out), "cells": cells, "cols": cols, "rows": rows,
+                      "cell": [cw, ch], "scenes": index}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
