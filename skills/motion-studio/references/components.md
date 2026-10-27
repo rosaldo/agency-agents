@@ -1,7 +1,31 @@
 # Components
 
-Read this while planning scenes. Every component is driven by the frame time
-`t` and the spring below; nothing uses CSS transitions or animations.
+Read this while planning scenes. Every component is driven by the frame number
+and the spring below; the library has no CSS-driven motion and no clock. All
+sizes are relative to the frame, so one scene works in every format.
+
+## Catalog
+
+| Component | Fields | Use it for |
+|---|---|---|
+| `title` | `text`, optional `subtitle` | the hook or a section opener; subtitle enters one stagger later |
+| `text` | `text` | one short statement that supports the scene |
+| `counter` | `from`, `to`, optional `prefix`, `suffix`, `decimals` | a number that matters; settles on `to` without overshoot |
+| `list` | `items` (2-6 short strings) | steps or features; items slide in one stagger apart |
+| `asset-card` | `asset`, optional `caption`, `hero` | a real screenshot, photo or logo from `assets/`; the scene's hero |
+| `bar-chart` | `bars`: `[{"label", "value"}]` | a before/after or a small comparison; bars grow in order |
+
+Shared fields (`size`, `align`, `box`, `spring`, `caps`) are in `scene-schema.md`.
+Without `box`, elements stack in a column inside the default margins; with
+`box`, they sit at those frame fractions. A cut between scenes is the only
+scene change: scenes switch on their start beat, with no cross-fade.
+
+Default springs (zeta / omega): title 0.7/14, text 0.8/12, counter 0.75/12,
+list 0.7/16, asset-card 0.6/12, bar-chart 0.8/10.
+
+Write a new component only when none of these fits; it goes in
+`lib/components.js`, registers in `scripts/scene_schema.py`, and must pass
+`tests/test_lib_rules.py`.
 
 ## Spring
 
