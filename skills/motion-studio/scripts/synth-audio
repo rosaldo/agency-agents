@@ -1,0 +1,99 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+"""synth-audio <scene.json> [--out audio.wav] — a beat bed drawn in code.
+
+48 kHz mono 16-bit WAV, exactly as long as the video: a kick on every beat, a
+hat on every off-beat, and on each scene cut a louder kick plus a short pluck.
+Standard library only. Prints one JSON line.
+"""
+import argparse
+import array
+import json
+import math
+import random
+import sys
+import wave
+from pathlib import Path
+
+from scene_schema import validate
+
+RATE = 48000
+PENTATONIC = (220.0, 246.94, 277.18, 329.63, 369.99)  # A major pentatonic, Hz
+
+
+def kick(gain):
+    n = int(0.35 * RATE)
+    phase, out = 0.0, []
+    for i in range(n):
+        t = i / RATE
+        phase += 2 * math.pi * (50 + 100 * math.exp(-30 * t)) / RATE
+        out.append(gain * math.exp(-9 * t) * math.sin(phase))
+    return out
+
+
+def hat(gain, rng):
+    return [gain * math.exp(-60 * i / RATE) * rng.uniform(-1, 1) for i in range(int(0.05 * RATE))]
+
+
+def pluck(freq, gain):
+    out = []
+    for i in range(int(0.6 * RATE)):
+        t = i / RATE
+        tone = math.sin(2 * math.pi * freq * t) + 0.35 * math.sin(4 * math.pi * freq * t)
+        out.append(gain * math.exp(-6 * t) * tone)
+    return out
+
+
+def add(track, sound, at):
+    for i, v in enumerate(sound[: max(0, len(track) - at)]):
+        track[at + i] += v
+
+
+def synth(scene):
+    bpm, duration = scene["bpm"], scene["duration"]
+    total = round(duration * RATE)
+    beat = 60 / bpm
+    cuts = {round(sc["start"] / beat): i for i, sc in enumerate(scene["scenes"])}
+    track = [0.0] * total
+    rng = random.Random(0)  # fixed seed: the same scene always gives the same bytes
+    plain_kick, cut_kick, tick = kick(0.5), kick(0.9), hat(0.12, rng)
+    for n in range(round(duration / beat)):
+        at = round(n * beat * RATE)
+        add(track, cut_kick if n in cuts else plain_kick, at)
+        add(track, tick, round((n + 0.5) * beat * RATE))
+        if n in cuts:
+            add(track, pluck(PENTATONIC[cuts[n] % len(PENTATONIC)], 0.25), at)
+    peak = max(1e-9, max(map(abs, track)))
+    scale = 0.9 * 32767 / max(1.0, peak)  # only ever scales down, never boosts
+    return array.array("h", (int(round(v * scale)) for v in track))
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="synth-audio")
+    ap.add_argument("scene")
+    ap.add_argument("--out", help="WAV path (default: audio.wav next to scene.json)")
+    args = ap.parse_args(argv)
+    path = Path(args.scene)
+    try:
+        scene = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 1
+    errors = validate(scene, path.parent)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors[:20]}))
+        return 1
+    out = Path(args.out) if args.out else path.parent / "audio.wav"
+    samples = synth(scene)
+    if sys.byteorder == "big":
+        samples.byteswap()  # WAV is little-endian
+    with wave.open(str(out), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(samples.tobytes())
+    print(json.dumps({"ok": True, "out": str(out), "seconds": len(samples) / RATE, "rate": RATE}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
