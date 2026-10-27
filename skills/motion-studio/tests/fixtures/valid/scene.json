@@ -1,0 +1,40 @@
+{
+  "preset": "9:16",
+  "quality": "medium",
+  "fps": 30,
+  "bpm": 120,
+  "duration": 6,
+  "background": { "color": "#101418" },
+  "scenes": [
+    {
+      "id": "hook",
+      "start": 0,
+      "end": 2,
+      "stagger": 3,
+      "elements": [
+        { "component": "title", "text": "Ship faster", "subtitle": "Three steps, no footage" },
+        { "component": "asset-card", "asset": "assets/product.png", "hero": true, "box": [0.1, 0.45, 0.8, 0.4] }
+      ]
+    },
+    {
+      "id": "numbers",
+      "start": 2,
+      "end": 4.5,
+      "enter_beat": 1,
+      "background": { "gradient": ["#101418", "#24303c"] },
+      "elements": [
+        { "component": "counter", "from": 0, "to": 42, "suffix": "%" },
+        { "component": "text", "text": "fewer support tickets", "size": "m" }
+      ]
+    },
+    {
+      "id": "close",
+      "start": 4.5,
+      "end": 6,
+      "elements": [
+        { "component": "list", "items": ["Plan", "Render", "Review"] },
+        { "component": "bar-chart", "bars": [{ "label": "Before", "value": 3 }, { "label": "After", "value": 9 }], "size": "m" }
+      ]
+    }
+  ]
+}

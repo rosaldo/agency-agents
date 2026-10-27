@@ -1,0 +1,38 @@
+#!/usr/bin/env -S uv run --no-project --quiet --script
+"""validate-scene <scene.json> — check a scene against the schema and the style rules.
+
+Prints one JSON line: {"ok": true, "width", "height", "fps", "frames"} or
+{"ok": false, "errors": [{"rule", "where", "message"}, ...]}. Exit 1 when not ok.
+"""
+import json
+import sys
+from pathlib import Path
+
+from scene_schema import resolve_size, validate
+
+MAX_ERRORS = 20
+
+
+def main(argv):
+    if len(argv) != 2:
+        print(json.dumps({"ok": False, "errors": [{"rule": "usage", "where": "", "message": "validate-scene <scene.json>"}]}))
+        return 2
+    path = Path(argv[1])
+    try:
+        scene = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "errors": [{"rule": "format", "where": str(path), "message": str(exc)}]}))
+        return 1
+    errors = validate(scene, path.parent)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors[:MAX_ERRORS]}))
+        return 1
+    width, height = resolve_size(scene)
+    fps = scene.get("fps", 30)
+    print(json.dumps({"ok": True, "width": width, "height": height, "fps": fps,
+                      "frames": round(scene["duration"] * fps)}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
