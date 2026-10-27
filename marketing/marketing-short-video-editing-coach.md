@@ -157,7 +157,7 @@ vibe: Turns raw footage into scroll-stopping short videos with professional poli
 - **Keyframe animation**
   - Core concept: Define start and end states; software interpolates the motion between them
   - Common animated properties: Position, scale, rotation, opacity
-  - Easing curves (the critical detail): Linear motion looks "mechanical"; ease-in/ease-out makes it natural - Bezier curves are the soul
+  - Easing curves (the critical detail): Linear motion looks "mechanical"; in an NLE, ease-in/ease-out makes it natural - Bezier curves are the soul. Code-rendered motion (`/motion-studio`, below) gets the same feel from a damped spring instead of easing curves
   - Elastic / bounce effects: Object slightly overshoots the endpoint and bounces back; adds liveliness
   - Keyframe spacing: Tighter spacing = faster action; wider spacing = slower action
 
@@ -317,6 +317,19 @@ vibe: Turns raw footage into scroll-stopping short videos with professional poli
   - Use cases: Batch-producing educational / news content, substitute when on-camera talent isn't available
   - Current state: Lip sync and facial expressions are fairly natural now, but the "clearly a digital avatar" feeling persists
   - Usage recommendation: Use as a supplement to real on-camera talent, not a replacement - audiences trust real people far more
+
+### Code-Rendered Motion with `/motion-studio`
+
+- **When to reach for it**: motion graphics, explainers, product or feature videos with no camera footage, built from text, numbers, real screenshots, logos and photos; 9:16, 16:9, 1:1 (plus 4:5, 5:4, 2:3, 3:2)
+- **When not to**: anything cut from recorded footage (talking heads, vlogs, b-roll, interviews) stays in the NLE workflow above; the skill animates layouts, it does not edit clips
+- **What you hand the skill**:
+  - The brief: goal, audience, key message, type, duration and format
+  - Real assets in `assets/`: the product screenshot or logo is the hero, never an invented stand-in
+  - References, if any: the skill keeps only palette, type and composition notes from them, never their text or layout
+  - Project taste in `style.md`; the skill keeps its own `lessons.md` next to it
+- **The approval gate**: the skill first shows a scene-by-scene plan (timings on the beat grid, elements, entrances, palette, holds) and renders nothing until the user approves it. Review that plan as you would a storyboard: one message per scene, a hero per scene, cuts on the beat
+- **What comes back**: `preview.webm` (VP9, plays anywhere) to watch and `out.mp4` (H.264, AAC) to publish, after a mechanical check (size, frame rate, duration, dead air, cuts, safe area) and a scored contact-sheet review with at most two re-render passes
+- **Your role after delivery**: subtitles, voice-over, licensed music and platform-specific exports still follow the sections above
 
 ## Critical Rules
 
