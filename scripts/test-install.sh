@@ -371,7 +371,8 @@ assert_eq "$first" "$(count_md "$dest")" "re-running installs the same set, not 
 # file. The fixture repo mirrors this checkout through symlinks but swaps in
 # its own skills/ (the real /maestro plus a fixture), so no case writes into
 # the repo. install.sh derives REPO_ROOT from its own (logical) path, so it
-# runs against the mirror.
+# runs against the mirror. Directories are copied, not linked: `find` does not
+# descend into a symlinked starting point, so linked divisions read as empty.
 # ---------------------------------------------------------------------------
 echo ""
 echo "skills"
@@ -380,7 +381,7 @@ FIXTURE_REPO="$SANDBOX_ROOT/fixture-repo"
 mkdir -p "$FIXTURE_REPO/skills/fixture-skill/scripts" "$FIXTURE_REPO/skills/fixture-skill/references"
 for _e in "$REPO_ROOT"/* "$REPO_ROOT"/.[!.]*; do
   [[ "$(basename "$_e")" == skills || "$(basename "$_e")" == .git ]] && continue
-  ln -s "$_e" "$FIXTURE_REPO/$(basename "$_e")"
+  if [[ -d "$_e" ]]; then cp -R "$_e" "$FIXTURE_REPO/"; else ln -s "$_e" "$FIXTURE_REPO/$(basename "$_e")"; fi
 done
 ln -s "$REPO_ROOT/skills/maestro" "$FIXTURE_REPO/skills/maestro"
 printf -- '---\nname: fixture-skill\ndescription: test fixture\n---\nbody\n' > "$FIXTURE_REPO/skills/fixture-skill/SKILL.md"
@@ -418,6 +419,20 @@ run_fixture_install "$home" --link
 assert_eq 1 "$([[ -L "$sk/fixture-skill" ]] && echo 1 || echo 0)" "--link symlinks the skill directory"
 assert_eq 1 "$([[ -x "$sk/fixture-skill/scripts/x" && -f "$sk/fixture-skill/references/y.md" ]] && echo 1 || echo 0)" \
   "--link exposes the whole skill tree"
+
+# A skill may name its owning agent (metadata: { agent: <slug> }); a selective
+# install then ships it with that agent instead of an agent named like the skill.
+mkdir -p "$FIXTURE_REPO/skills/owned-skill"
+printf -- '---\nname: owned-skill\ndescription: test fixture\nmetadata: { agent: short-video-editing-coach }\n---\nbody\n' \
+  > "$FIXTURE_REPO/skills/owned-skill/SKILL.md"
+home="$(sandbox skill-owner)"
+run_fixture_install "$home" --agent short-video-editing-coach
+assert_eq 1 "$([[ -f "$home/.claude/skills/owned-skill/SKILL.md" ]] && echo 1 || echo 0)" \
+  "a skill installs with the agent its metadata names"
+home="$(sandbox skill-owner-unselected)"
+run_fixture_install "$home" --agent "$FIRST_ENG_SLUG"
+assert_eq 0 "$([[ -e "$home/.claude/skills/owned-skill" ]] && echo 1 || echo 0)" \
+  "a skill is skipped when its owning agent is not selected"
 
 # ---------------------------------------------------------------------------
 echo ""

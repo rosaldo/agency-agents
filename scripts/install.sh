@@ -848,6 +848,15 @@ PY
 
 # Skills ship next to the agents dir (~/.claude/skills). Only installed when
 # the agents dest is a .../agents dir, so an arbitrary --path is left alone.
+# skill_owner <SKILL.md> — slug of the agent a skill belongs to: the `agent`
+# key of its flow-style `metadata: { agent: <slug> }`, else the skill's own
+# directory name (skill <slug> wears agent <slug>, as /maestro does).
+skill_owner() {
+  local owner
+  owner="$(get_field metadata "$1" | sed -n 's/.*agent:[[:space:]]*\([a-z0-9-]*\).*/\1/p')"
+  printf '%s' "${owner:-$(basename "$(dirname "$1")")}"
+}
+
 # A skill is its whole directory (SKILL.md plus scripts/, references/, ...):
 # copied recursively, or symlinked as one directory under --link. The previous
 # install of that one skill is removed first so no stale file survives.
@@ -862,8 +871,8 @@ install_claude_code_skills() {
     [[ -f "$skill/SKILL.md" ]] || continue
     slug="$(basename "$skill")"
     [[ -n "$slug" ]] || continue
-    # skill <slug> wears agent <slug>; skip it when that agent was not selected
-    slug_allowed "$slug" || continue
+    # skip the skill when its owning agent was not selected
+    slug_allowed "$(skill_owner "$skill/SKILL.md")" || continue
     rm -rf "${skills_dest:?}/$slug"
     if $USE_LINK; then ln -s "$skill" "$skills_dest/$slug"; else cp -R "$skill" "$skills_dest/$slug"; fi
     ok "Claude Code: skill /$slug -> $skills_dest/$slug"
