@@ -5,6 +5,7 @@
 # CHANGELOG.md into that same commit, and tags it. It never pushes.
 #
 # Usage: scripts/commit.sh <type> "<message>"     (stage your files first)
+#        scripts/commit.sh --gate                   only run the gate (push.sh uses it)
 #   fix | security | debug       patch   subject: fix(vX.Y.Z): message
 #   docs | chore | test          patch   subject: <type>(vX.Y.Z): message
 #   build | perf                 patch
@@ -22,7 +23,7 @@ VERSION_FILE="$REPO_DIR/VERSION"
 
 fail() { echo "error: $*" >&2; exit 1; }
 usage() {
-  echo "Usage: $0 <fix|security|debug|docs|chore|test|build|perf|feat|refactor|major> \"<message>\"" >&2
+  echo "Usage: $0 <fix|security|debug|docs|chore|test|build|perf|feat|refactor|major> \"<message>\"  |  $0 --gate" >&2
   exit 2
 }
 
@@ -55,6 +56,7 @@ gate() {
   run_check check-divisions.sh
   run_check test-install.sh
   run_check test-versioning.sh
+  run_check test-push.sh
 
   # The engine is checked when the commit touches it.
   local engine=quant-engine
@@ -91,6 +93,7 @@ release() {
   echo "Tagged:    v$new (local; nothing pushed)"
 }
 
+if [[ "${1:-}" == --gate && $# -eq 1 ]]; then gate; exit 0; fi
 [[ $# -eq 2 && -n "$2" ]] || usage
 case "$1" in
   fix | security | debug | docs | chore | test | build | perf | feat | refactor | major) ;;
