@@ -441,6 +441,53 @@ run_fixture_install "$home" --agent "$FIRST_ENG_SLUG"
 assert_eq 0 "$([[ -e "$home/.claude/skills/owned-skill" ]] && echo 1 || echo 0)" \
   "a skill is skipped when its owning agent is not selected"
 
+# A skill whose release.conf pins no Release (empty url) is refused whole, loudly.
+mkdir -p "$FIXTURE_REPO/skills/unpinned-skill"
+printf -- '---\nname: unpinned-skill\ndescription: test fixture\nmetadata: { agent: quant-trader }\n---\nbody\n' \
+  > "$FIXTURE_REPO/skills/unpinned-skill/SKILL.md"
+printf 'binary=tool\nurl=\n' > "$FIXTURE_REPO/skills/unpinned-skill/release.conf"
+home="$(sandbox unpinned)"
+run_fixture_install "$home" --agent quant-trader
+assert_eq 1 "$([[ "$RUN_OUT" == *"unpinned-skill"*"release"* && ! -e "$home/.claude/skills/unpinned-skill" ]] && echo 1 || echo 0)" \
+  "a skill with no pinned Release is tried with its owning agent and refused whole"
+
+# A skill with release.conf gets ONE prebuilt binary, the platform's, fetched
+# from the pinned Release and checked against the skill's SHA256SUMS. The
+# "Release" here is a local directory served over file://, so no network.
+REL="$SANDBOX_ROOT/release"
+mkdir -p "$REL" "$FIXTURE_REPO/skills/bin-skill"
+for _p in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64.exe windows-arm64.exe; do
+  printf '#!/bin/sh\necho %s\n' "$_p" > "$REL/tool-$_p"
+done
+printf -- '---\nname: bin-skill\ndescription: test fixture\nmetadata: { agent: quant-trader }\n---\nbody\n' \
+  > "$FIXTURE_REPO/skills/bin-skill/SKILL.md"
+printf 'binary=tool\nurl=file://%s\n' "$REL" > "$FIXTURE_REPO/skills/bin-skill/release.conf"
+(cd "$REL" && sha256sum tool-* > "$FIXTURE_REPO/skills/bin-skill/SHA256SUMS")
+
+home="$(sandbox bin-ok)"
+AGENCY_PLATFORM=linux-arm64 run_fixture_install "$home" --agent quant-trader
+_b="$home/.claude/skills/bin-skill/bin/tool"
+assert_eq "linux-arm64" "$([[ -x "$_b" ]] && "$_b")" "release.conf installs the platform's binary, executable, at bin/<binary>"
+assert_eq 1 "$(ls "$home/.claude/skills/bin-skill/bin" | wc -l | tr -d ' ')" "only one binary is installed"
+home="$(sandbox bin-windows)"
+AGENCY_PLATFORM=windows-amd64 run_fixture_install "$home" --agent quant-trader
+assert_eq 1 "$([[ -f "$home/.claude/skills/bin-skill/bin/tool.exe" ]] && echo 1 || echo 0)" "windows gets bin/<binary>.exe"
+
+printf 'x' >> "$REL/tool-linux-amd64"   # the asset no longer matches SHA256SUMS
+home="$(sandbox bin-tampered)"
+AGENCY_PLATFORM=linux-amd64 run_fixture_install "$home" --agent quant-trader
+assert_eq 1 "$([[ ! -e "$home/.claude/skills/bin-skill" && "$RUN_OUT" == *checksum* ]] && echo 1 || echo 0)" \
+  "a tampered binary refuses the whole skill and says checksum"
+home="$(sandbox bin-unknown-platform)"
+AGENCY_PLATFORM=plan9-mips run_fixture_install "$home" --agent quant-trader
+assert_eq 1 "$([[ ! -e "$home/.claude/skills/bin-skill" && "$RUN_OUT" == *"linux-amd64"*"windows-arm64"* ]] && echo 1 || echo 0)" \
+  "an unsupported platform refuses the skill and lists the supported ones"
+rm -f "$REL/tool-darwin-arm64"            # unreachable asset, as with no network
+home="$(sandbox bin-missing)"
+AGENCY_PLATFORM=darwin-arm64 run_fixture_install "$home" --agent quant-trader
+assert_eq 1 "$([[ ! -e "$home/.claude/skills/bin-skill" && "$RUN_OUT" == *download* ]] && echo 1 || echo 0)" \
+  "an asset that cannot be downloaded refuses the skill"
+
 # ---------------------------------------------------------------------------
 echo ""
 if [[ $xfailed -gt 0 ]]; then

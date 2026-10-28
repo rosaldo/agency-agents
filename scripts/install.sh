@@ -883,8 +883,65 @@ install_claude_code_skills() {
       find "$skills_dest/$slug" \( -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} + \) \
         -o \( -type f \( -name '*.py[co]' -o -name .DS_Store \) -exec rm -f {} + \)
     fi
+    if ! install_skill_binary "$skills_dest/$slug"; then
+      rm -rf "${skills_dest:?}/$slug"   # never leave a skill without its binary
+      err "Claude Code: skill /$slug not installed (see above)"
+      continue
+    fi
     ok "Claude Code: skill /$slug -> $skills_dest/$slug"
   done
+}
+
+# Platforms (os-arch) a skill's prebuilt binary is published for.
+SKILL_PLATFORMS="linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64"
+
+# detect_platform — os-arch of this machine; AGENCY_PLATFORM overrides (tests).
+detect_platform() {
+  if [[ -n "${AGENCY_PLATFORM:-}" ]]; then printf '%s' "$AGENCY_PLATFORM"; return; fi
+  local os arch
+  case "$(uname -s)" in
+    Linux) os=linux ;; Darwin) os=darwin ;; MINGW*|MSYS*|CYGWIN*) os=windows ;; *) os="$(uname -s)" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch="$(uname -m)" ;;
+  esac
+  printf '%s-%s' "$os" "$arch"
+}
+
+# install_skill_binary <installed skill dir> — a skill shipping release.conf
+# (binary=<name>, url=<Release download URL>) gets ONE prebuilt binary, this
+# platform's, downloaded from that Release and checked against the skill's
+# versioned SHA256SUMS, at bin/<name> (bin/<name>.exe on Windows). Any
+# failure returns 1 with the reason; the caller drops the whole skill.
+install_skill_binary() {
+  local dir="$1" conf="$1/release.conf" name url plat asset want got tmp target
+  [[ -f "$conf" ]] || return 0
+  name="$(sed -n 's/^binary=//p' "$conf")"
+  url="$(sed -n 's/^url=//p' "$conf")"
+  if [[ -z "$name" || -z "$url" ]]; then
+    err "no Release pinned in $(basename "$dir")/release.conf (binary= and url=); its binary ships only from a published release"
+    return 1
+  fi
+  plat="$(detect_platform)"
+  case " $SKILL_PLATFORMS " in
+    *" $plat "*) ;;
+    *) err "no prebuilt $name for $plat (supported: $SKILL_PLATFORMS)"; return 1 ;;
+  esac
+  asset="$name-$plat"; target="$dir/bin/$name"
+  if [[ "$plat" == windows-* ]]; then asset="$asset.exe"; target="$target.exe"; fi
+  want="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' "$dir/SHA256SUMS" 2>/dev/null)"
+  [[ -n "$want" ]] || { err "no checksum for $asset in $(basename "$dir")/SHA256SUMS"; return 1; }
+  command -v curl >/dev/null || { err "curl is required to download $asset"; return 1; }
+  mkdir -p "$dir/bin"
+  tmp="$dir/bin/.$asset.part"
+  if ! curl -fsSL "$url/$asset" -o "$tmp"; then
+    rm -f "$tmp"; err "could not download $url/$asset"; return 1
+  fi
+  if command -v sha256sum >/dev/null; then got="$(sha256sum "$tmp")"; else got="$(shasum -a 256 "$tmp")"; fi
+  if [[ "${got%% *}" != "$want" ]]; then
+    rm -f "$tmp"; err "checksum mismatch for $asset; refusing it"; return 1
+  fi
+  chmod +x "$tmp" && mv -f "$tmp" "$target"
 }
 
 install_copilot() {

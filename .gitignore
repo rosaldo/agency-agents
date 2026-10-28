@@ -86,3 +86,6 @@ integrations/vibe/agents/
 integrations/vibe/prompts/
 integrations/zcode/agents/
 graphify-out/
+
+# Prebuilt skill binaries land in bin/ (written into the repo under --link)
+skills/*/bin/
