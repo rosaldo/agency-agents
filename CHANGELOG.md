@@ -1,0 +1,44 @@
+# Changelog
+
+> Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
+
+- **v1.29.0** (2026-10-27) · `feat` — versioned releases on the fork: commit.sh gate + semantic bump + tag, generated CHANGELOG, backfilled tags for the owner's earlier commits
+- **v1.28.0** (2026-10-27) · `feat` — finance: teach the Quant Trader how strategy skills fit in
+- **v1.27.0** (2026-10-27) · `feat` — install: ship one prebuilt binary per platform for skills with a pinned Release
+- **v1.26.0** (2026-10-27) · `feat` — finance: add the Quant Trader specialist
+- **v1.25.0** (2026-10-27) · `feat` — finance: extend the Tax Strategist to Brazilian individual capital gains
+- **v1.24.0** (2026-10-27) · `feat` — engineering: apply Payments idempotency and reconciliation to brokerage orders
+- **v1.23.0** (2026-10-27) · `feat` — specialized: extend Model QA to non-stationary financial signals
+- **v1.22.0** (2026-10-27) · `feat` — academic: teach the Statistician to validate trading-strategy backtests
+- **v1.21.0** (2026-10-27) · `feat` — engineering: let the AI Engineer hand time-series forecasts to the Quant Trader as signals
+- **v1.20.0** (2026-10-27) · `feat` — motion-studio: every scene needs a graphic, checked and scored
+- **v1.19.2** (2026-10-27) · `fix` — install: ship skills without __pycache__, .pyc or other build junk
+- **v1.19.1** (2026-10-27) · `perf` — motion-studio: cap the contact sheet at 1280 px
+- **v1.19.0** (2026-10-27) · `feat` — motion-studio: graphic components drawn in code and a layered background
+- **v1.18.0** (2026-10-27) · `feat` — marketing: teach the Short-Video Editing Coach when to use /motion-studio
+- **v1.17.0** (2026-10-27) · `feat` — motion-studio: short SKILL.md with the plan approval gate and on-demand references
+- **v1.16.0** (2026-10-27) · `feat` — motion-studio: idle motion keeps settled scenes alive; hold is a true still
+- **v1.15.0** (2026-10-27) · `feat` — motion-studio: contact sheet and a two-pass re-render limit
+- **v1.14.0** (2026-10-27) · `feat` — motion-studio: check-video review layer with holds and a relative safe area
+- **v1.13.0** (2026-10-27) · `feat` — motion-studio: encode H.264 MP4 and VP9 WebM preview
+- **v1.12.0** (2026-10-27) · `feat` — motion-studio: synthesize a beat bed with accents on the cuts
+- **v1.11.0** (2026-10-26) · `feat` — motion-studio: render frames and text layout in Chromium through uv
+- **v1.10.0** (2026-10-26) · `feat` — motion-studio: component library driven by frame and spring
+- **v1.9.0** (2026-10-26) · `feat` — motion-studio: scene.json schema and validate-scene
+- **v1.8.0** (2026-10-26) · `feat` — motion-studio: closed-form spring and beat grid
+- **v1.7.0** (2026-10-26) · `feat` — motion-studio: dependency check that fails fast
+- **v1.6.0** (2026-10-26) · `feat` — install: let a skill declare its owning agent for selective installs
+- **v1.5.2** (2026-10-26) · `fix` — install: ship the whole skill directory, not only SKILL.md
+- **v1.5.1** (2026-10-13) · `fix` — claude-code: quota gate also covers SendMessage and denies on a stale snapshot
+- **v1.5.0** (2026-10-13) · `feat` — claude-code: ship the quota gate — deny subagent dispatch above 5h 80% / 7d 90%
+- **v1.4.1** (2026-10-03) · `fix` — check-divisions: exclude skills/ from the division scan
+- **v1.4.0** (2026-10-03) · `feat` — security: add Skill Spector — pre-install review of skills, plugins, MCP servers and subagents
+- **v1.3.4** (2026-09-23) · `fix` — claude-code: keep the quota bars moving while subagents run
+- **v1.3.3** (2026-09-17) · `fix` — claude-code: drop the separator between model and context bar
+- **v1.3.2** (2026-09-17) · `fix` — claude-code: draw the bar on the 5h and 7d quotas too
+- **v1.3.1** (2026-09-17) · `fix` — claude-code: bracket the quota labels and show the weekly reset time in the status line
+- **v1.3.0** (2026-09-17) · `feat` — claude-code: ship the Agency status line — context bar plus 5h/7d subscription quotas
+- **v1.2.0** (2026-09-17) · `feat` — maestro: context & memory policy — disk ledger, bounded reports, resume protocol
+- **v1.1.0** (2026-09-17) · `feat` — agents: make uv the Agency's Python convention — Maestro, 33 agents, CONTRIBUTING, lint
+- **v1.0.1** (2026-09-17) · `fix` — agents: use uv instead of pip in the Sigma CI example
+- **v1.0.0** (2026-09-17) · `feat` — maestro: rename the orchestrator to maestro, fix its roster, make it lead the Agency, ship a /maestro skill
