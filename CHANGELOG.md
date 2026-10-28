@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.30.1** (2026-10-27) · `docs` — CONTRIBUTING: fork commits go through scripts/commit.sh, publishing through scripts/push.sh
 - **v1.30.0** (2026-10-27) · `feat` — push.sh: build skill binaries, pin release.conf + SHA256SUMS via commit.sh, push branch and tags, publish the GitHub Release; commit.sh --gate
 - **v1.29.0** (2026-10-27) · `feat` — versioned releases on the fork: commit.sh gate + semantic bump + tag, generated CHANGELOG, backfilled tags for the owner's earlier commits
 - **v1.28.0** (2026-10-27) · `feat` — finance: teach the Quant Trader how strategy skills fit in

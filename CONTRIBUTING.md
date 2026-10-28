@@ -2,6 +2,8 @@
 
 First off, thank you for considering contributing to The Agency! It's people like you who make this collection of AI agents better for everyone.
 
+> **On the `rosaldo` fork branch:** every commit goes through `scripts/commit.sh <type> "<message>"` instead of `git commit`. It runs the gate (`bash -n`, `lint-agents.sh`, `check-divisions.sh`, `test-install.sh`, `test-versioning.sh`, `test-push.sh`, and `go vet`/`go test` when the Go engine (`quant-engine/`) is touched), bumps `VERSION` by the Conventional Commits type (fix/docs/chore/test/build/perf → patch, feat/refactor → minor, major → major), puts the version in the subject (`feat(v1.46.0): …`), regenerates `CHANGELOG.md` (generated — do not edit it by hand) and creates a local annotated tag. It never pushes: publishing is `scripts/push.sh`, run by the repository owner only — it builds every skill that has a `release.conf`, pins that skill's `release.conf` url and `SHA256SUMS` to a GitHub Release through `commit.sh`, pushes the branch and tags, and uploads the binaries to that Release (binaries never go into git). Commits merged from upstream carry no version.
+
 ## 📋 Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
