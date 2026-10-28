@@ -5,7 +5,7 @@
 # CHANGELOG.md into that same commit, and tags it. It never pushes.
 #
 # Usage: scripts/commit.sh <type> "<message>"     (stage your files first)
-#        scripts/commit.sh --gate                   only run the gate (push.sh uses it)
+#        scripts/commit.sh --gate                   only run the gate, engine always included (push.sh uses it)
 #   fix | security | debug       patch   subject: fix(vX.Y.Z): message
 #   docs | chore | test          patch   subject: <type>(vX.Y.Z): message
 #   build | perf                 patch
@@ -58,12 +58,16 @@ gate() {
   run_check test-versioning.sh
   run_check test-push.sh
 
-  # The engine is checked when the commit touches it.
+  # The engine is checked when the commit touches it, and always on --gate (the
+  # push path), where nothing is staged.
   local engine=quant-engine
-  if git -C "$REPO_DIR" diff --cached --name-only | grep -q "^$engine/"; then
-    command -v go > /dev/null || fail "this commit touches $engine but go is not installed — install Go to run its tests"
-    echo "-> gate: go vet + go test ($engine)"
-    (cd "$REPO_DIR/$engine" && go vet ./... && go test -count=1 ./...) || fail "$engine: go vet or go test failed"
+  if [[ "$GATE_ONLY" == 1 && -d "$REPO_DIR/$engine" ]] \
+    || git -C "$REPO_DIR" diff --cached --name-only | grep -q "^$engine/"; then
+    command -v go > /dev/null || fail "$engine must be tested but go is not installed — install Go to run its tests"
+    [[ "$(go env CGO_ENABLED)" == 1 ]] && command -v "$(go env CC)" > /dev/null \
+      || fail "go test -race needs cgo and a C compiler (CGO_ENABLED=$(go env CGO_ENABLED), CC=$(go env CC)) — install gcc"
+    echo "-> gate: go vet + go test -race ($engine)"
+    (cd "$REPO_DIR/$engine" && go vet ./... && go test -race -count=1 ./...) || fail "$engine: go vet or go test -race failed"
   fi
 
   echo "gate ok"
@@ -93,7 +97,8 @@ release() {
   echo "Tagged:    v$new (local; nothing pushed)"
 }
 
-if [[ "${1:-}" == --gate && $# -eq 1 ]]; then gate; exit 0; fi
+GATE_ONLY=0
+if [[ "${1:-}" == --gate && $# -eq 1 ]]; then GATE_ONLY=1; gate; exit 0; fi
 [[ $# -eq 2 && -n "$2" ]] || usage
 case "$1" in
   fix | security | debug | docs | chore | test | build | perf | feat | refactor | major) ;;

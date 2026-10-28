@@ -105,6 +105,20 @@ printf 'if then\n' > "$T/broken.sh"; git -C "$T" add broken.sh
 check "gate failure blocks the commit" '[[ $? -ne 0 && "$(git -C "$T" rev-parse HEAD)" == "$head_before" ]]'
 check "gate failure leaves VERSION and tags alone" '[[ "$(cat "$T/VERSION")" == 2.0.0 && -z "$(git -C "$T" tag -l v2.0.1)" ]]'
 
+git -C "$T" rm -q --cached broken.sh; rm "$T/broken.sh"
+if command -v go > /dev/null; then
+  # A committed engine with a data race: --gate stages nothing, so this only
+  # fails if --gate tests the engine anyway and with -race.
+  E="$T/quant-engine"; mkdir -p "$E"
+  printf 'module racy\n\ngo 1.21\n' > "$E/go.mod"
+  printf 'package racy\n\nimport "testing"\n\nfunc TestRace(t *testing.T) {\n\tx, done := 0, make(chan bool)\n\tgo func() { x++; done <- true }()\n\tx++\n\t<-done\n\t_ = x\n}\n' > "$E/racy_test.go"
+  git -C "$T" add quant-engine; git -C "$T" commit -qm "chore: racy engine"
+  "$T/scripts/commit.sh" --gate > "$WORK/out" 2>&1
+  check "--gate tests the engine with -race even with nothing staged" '[[ $? -ne 0 ]] && grep -q "DATA RACE" "$WORK/out"'
+else
+  echo "  skip --gate engine check (go not installed)"
+fi
+
 check "nothing was pushed" '[[ -z "$(git -C "$WORK/origin.git" for-each-ref)" ]]'
 
 if (( failed )); then echo "test-versioning: FAILED"; exit 1; fi

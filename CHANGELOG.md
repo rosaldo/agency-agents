@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.30.2** (2026-10-28) · `fix` — commit.sh: engine tests run with -race (cgo required, fails loudly otherwise) and always on --gate, so the push path tests the engine
 - **v1.30.1** (2026-10-27) · `docs` — CONTRIBUTING: fork commits go through scripts/commit.sh, publishing through scripts/push.sh
 - **v1.30.0** (2026-10-27) · `feat` — push.sh: build skill binaries, pin release.conf + SHA256SUMS via commit.sh, push branch and tags, publish the GitHub Release; commit.sh --gate
 - **v1.29.0** (2026-10-27) · `feat` — versioned releases on the fork: commit.sh gate + semantic bump + tag, generated CHANGELOG, backfilled tags for the owner's earlier commits
