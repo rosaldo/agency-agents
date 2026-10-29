@@ -31,6 +31,7 @@ type venueServer struct {
 	*httptest.Server
 	mu       sync.Mutex
 	exchange []string // raw /exchange bodies
+	info     []string // raw /info bodies
 	nextOid  int
 	status   map[int]string // oid -> filled | open | canceled
 }
@@ -47,6 +48,7 @@ func newVenueServer(t *testing.T) *venueServer {
 			_, _ = io.WriteString(w, v.answer(string(body)))
 			return
 		}
+		v.info = append(v.info, string(body))
 		var q struct {
 			Type, Dex string
 			Oid       any
@@ -116,7 +118,7 @@ func dialTo(t *testing.T, srv *venueServer, symbols []string) ccxt.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.(*lib.Hyperliquid).Urls["api"] = map[string]any{"public": srv.URL, "private": srv.URL}
+	hl(c).Urls["api"] = map[string]any{"public": srv.URL, "private": srv.URL}
 	return c
 }
 
@@ -190,3 +192,6 @@ func TestNoBuilderOrReferralReachesTheWire(t *testing.T) {
 		t.Fatalf("orders on the wire %d, want 3", orders)
 	}
 }
+
+// hl is the fork's client under the venue's dex binding.
+func hl(c ccxt.Client) *lib.Hyperliquid { return c.(*client).Hyperliquid }
