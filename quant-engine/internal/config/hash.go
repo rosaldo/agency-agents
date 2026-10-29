@@ -29,12 +29,13 @@ func (c *Config) ParamsHash() string {
 		Exchange, AssetClass, NewsGuard string
 		Interval, Timezone              string
 		Symbols                         []string
+		Perp                            Perp
 		Risk                            Risk
 		Costs                           Costs
 		Strategy                        string
 		Params                          any
 		News                            *strategy.NewsPolicy
-	}{c.Exchange, c.AssetClass, c.NewsGuard, c.IntervalSpec, c.Timezone, symbols, r, c.Costs, c.name, block, c.news})
+	}{c.Exchange, c.AssetClass, c.NewsGuard, c.IntervalSpec, c.Timezone, symbols, c.Perp, r, c.Costs, c.name, block, c.news})
 	if err != nil {
 		panic(err) // plain numbers, strings and decoded yml always marshal
 	}

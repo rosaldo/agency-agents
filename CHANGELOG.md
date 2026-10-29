@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.32.0** (2026-10-29) · `feat` — quant-engine: strategy contract enforced in loop and backtest (entry validation, perp.allow_short, strategy Exit at market, side-aware target, same Decide in both); guard after a halt journals it and keeps status current (R3)
 - **v1.31.1** (2026-10-28) · `fix` — quant-engine: refuse a news policy with feeds but no keywords (fail closed); drop references to a private doc
 - **v1.31.0** (2026-10-28) · `feat` — quant-engine: public generic engine module extracted from the frozen strategy engine (strategy contract, neutral example strategy and fixtures, ported tests)
 - **v1.30.2** (2026-10-28) · `fix` — commit.sh: engine tests run with -race (cgo required, fails loudly otherwise) and always on --gate, so the push path tests the engine

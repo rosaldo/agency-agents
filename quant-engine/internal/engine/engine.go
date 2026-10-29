@@ -184,19 +184,21 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		return fmt.Errorf("step: candles %s: %v", sym, err)
 	}
 	last := cs[len(cs)-1]
-	if p, ok := held[sym]; ok {
-		if t, ok := e.targets[sym]; ok && last.Close >= t {
-			if err := e.Exec.Exit(ctx, p, last.Time, "target"); err != nil {
-				return err // the target stays for the next step
-			}
-			delete(e.targets, sym)
-			delete(e.stops, sym)
-		}
-		return nil // the exchange stop guards it
+	p, holding := held[sym]
+	if !holding {
+		delete(e.targets, sym) // closed by its stop
+		delete(e.stops, sym)
 	}
-	delete(e.targets, sym) // closed by its stop
-	delete(e.stops, sym)
+	// shortcut: every position is long until the perp contract gives
+	// exchange.Position a side (Task 9); shorts are refused before entry
+	side := strategy.Long
+	if holding && TargetHit(side, last.Close, e.targets[sym]) {
+		return e.exit(ctx, p, last.Time, "target") // the exchange stop guards it if this fails
+	}
 	in := strategy.Input{Symbol: sym, Now: last.Time, Candles: cs}
+	if holding {
+		in.Position = &strategy.PositionView{Side: side, Qty: p.Qty, AvgPrice: p.AvgPrice, Stop: p.StopPrice, Target: e.targets[sym]}
+	}
 	for _, aux := range e.Strategy.Inputs() {
 		if in.Aux == nil {
 			in.Aux = map[string][]market.Candle{}
@@ -206,11 +208,21 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		}
 	}
 	d := e.Strategy.Decide(in)
-	if d.Action != strategy.Enter {
+	switch {
+	case d.Action == strategy.Exit && holding:
+		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
+	case d.Action != strategy.Enter:
+		return nil
+	case holding:
+		e.skip(sym, "a position is already open (one per symbol; reverse through flat)")
 		return nil
 	}
-	if d.Side != strategy.Long {
-		e.skip(sym, fmt.Sprintf("side %q not supported", d.Side))
+	if err := e.validateEntry(d, last.Close); err != nil {
+		e.skip(sym, err.Error())
+		return nil
+	}
+	if d.Side == strategy.Short {
+		e.skip(sym, "short entries need the perp adapter, not available yet")
 		return nil
 	}
 	if why := e.newsBlocks(ctx, sym, last.Time); why != "" {
@@ -238,6 +250,45 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.targets[sym] = d.Target
 	}
 	return nil
+}
+
+// exit closes p at market; on failure its target and stop are kept for the
+// next step.
+func (e *Engine) exit(ctx context.Context, p exchange.Position, candle time.Time, reason string) error {
+	if err := e.Exec.Exit(ctx, p, candle, reason); err != nil {
+		return err
+	}
+	delete(e.targets, p.Symbol)
+	delete(e.stops, p.Symbol)
+	return nil
+}
+
+// validateEntry enforces the engine's rules on an Enter (§6): a protective
+// stop on the losing side of the entry, and a side the config allows.
+func (e *Engine) validateEntry(d strategy.Decision, entry float64) error {
+	switch {
+	case d.Side != strategy.Long && d.Side != strategy.Short:
+		return fmt.Errorf("unknown side %q", d.Side)
+	case d.Side == strategy.Short && !e.Cfg.Perp.AllowShort:
+		return errors.New("short refused: perp.allow_short is false")
+	case d.Stop <= 0:
+		return errors.New("no stop: an entry needs a protective stop")
+	case d.Side == strategy.Long && d.Stop >= entry, d.Side == strategy.Short && d.Stop <= entry:
+		return fmt.Errorf("stop %.8g on the wrong side of the %s entry %.8g", d.Stop, d.Side, entry)
+	}
+	return nil
+}
+
+// TargetHit reports a closed candle reaching the exit target: a long's from
+// below, a short's from above. Target 0 means none.
+func TargetHit(side strategy.Side, close, target float64) bool {
+	if target <= 0 {
+		return false
+	}
+	if side == strategy.Short {
+		return close <= target
+	}
+	return close >= target
 }
 
 // skip journals a signal that did not become an order.

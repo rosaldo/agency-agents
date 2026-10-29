@@ -29,6 +29,7 @@ type Config struct {
 	Timezone       string    `yaml:"timezone"`
 	Symbols        []string  `yaml:"symbols"`
 	StrategyParams yaml.Node `yaml:"strategy"` // opaque: validated by Strategy.Configure
+	Perp           Perp      `yaml:"perp"`
 	Risk           Risk      `yaml:"risk"`
 	Costs          Costs     `yaml:"costs"`
 	ValidationFile string    `yaml:"validation_file"`
@@ -37,6 +38,12 @@ type Config struct {
 	location *time.Location
 	name     string               // Strategy.Name()
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
+}
+
+// Perp holds the perpetual-swap settings; for now only whether the strategy
+// may go short (refused when false).
+type Perp struct {
+	AllowShort bool `yaml:"allow_short"`
 }
 
 type Risk struct {

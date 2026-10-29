@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -123,5 +124,53 @@ func TestFailedStopHaltSurvivesARestart(t *testing.T) {
 	Run(context.Background(), c2, s2, f2, exchange.Demo, tick2, dir)
 	if f2.Calls("PlaceOrder") != 0 {
 		t.Fatal("restart traded after a failed-stop halt the same day")
+	}
+}
+
+// dropsStop takes stops until refuse is set, then refuses them.
+type dropsStop struct {
+	*fake.Fake
+	refuse bool
+}
+
+func (d *dropsStop) PlaceStop(ctx context.Context, env exchange.Env, id, sym string, side exchange.Side, qty, px float64) (exchange.OrderState, error) {
+	if d.refuse {
+		return exchange.OrderState{Status: exchange.Rejected}, errors.New("stop refused")
+	}
+	return d.Fake.PlaceStop(ctx, env, id, sym, side, qty, px)
+}
+
+// Re-review 3, R3: during the guard after a halt, status shows the halt
+// (last_event and breaker) and the current positions and equity, not the
+// position the halt already closed.
+func TestStatusDuringTheGuardShowsTheHalt(t *testing.T) {
+	c, s, f, tick, dir := setup(t, "loop_two_days.csv", 0)
+	ex := &dropsStop{Fake: f}
+	var during *Status
+	tick.OnStep = func(int) {
+		ctx := context.Background()
+		ps, _ := f.Positions(ctx, exchange.Demo)
+		switch {
+		case !ex.refuse && len(ps) == 1 && ps[0].StopClientID != "":
+			_, _ = f.CancelOrder(ctx, exchange.Demo, ps[0].StopClientID) // the exchange drops the stop...
+			ex.refuse = true                                             // ...and takes no new one: flatten + halt
+		case ex.refuse && during == nil:
+			st, err := ReadStatus(dir)
+			if err != nil {
+				t.Error(err)
+			}
+			during = &st
+			_ = RequestStop(dir, false)
+		}
+	}
+	reason := Run(context.Background(), c, s, ex, exchange.Demo, tick, dir)
+	if !strings.Contains(reason, "halt") || during == nil {
+		t.Fatalf("setup: reason %q, status read %v", reason, during != nil)
+	}
+	b, _ := json.Marshal(*during)
+	bal, _ := f.Balance(context.Background(), exchange.Demo)
+	if !strings.Contains(string(b), `"halt":"exec: halt`) || !strings.HasPrefix(during.LastEvent, "halt ") ||
+		len(during.Positions) != 0 || during.Equity != bal.Equity {
+		t.Fatalf("status during the guard = %s; want the halt, last_event halt, no position, equity %v", b, bal.Equity)
 	}
 }

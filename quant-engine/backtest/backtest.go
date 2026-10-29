@@ -34,7 +34,7 @@ type Trade struct {
 	EntryTime, ExitTime           time.Time
 	Qty, EntryPrice, Stop, Target float64
 	ExitPrice                     float64
-	ExitReason                    string // target, stop, open_at_end
+	ExitReason                    string // target, exit (the strategy's), stop, open_at_end
 	PnL, R                        float64
 }
 
@@ -132,6 +132,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		if open == nil {
 			equityBefore = equity()
 		}
+		target, _ := en.Target(sym)
 		err := en.Step(ctx)
 		if engine.IsHalt(err) {
 			res.Summary.Halt = err.Error()
@@ -145,7 +146,11 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 			open = &Trade{EntryTime: now, Qty: p.Qty, EntryPrice: p.AvgPrice, Stop: p.StopPrice, Target: t}
 		case open != nil && !held:
 			st, _ := ex.Order(exec.ClientID(sym, now, "exit"))
-			closeTrade(st.FillPrice, "target")
+			reason := "exit"                                           // the strategy's Exit
+			if engine.TargetHit(strategy.Long, candle.Close, target) { // shortcut: long only until Task 9
+				reason = "target"
+			}
+			closeTrade(st.FillPrice, reason)
 		}
 		if open != nil {
 			stopID = p.StopClientID

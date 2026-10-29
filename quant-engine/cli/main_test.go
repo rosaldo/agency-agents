@@ -115,4 +115,11 @@ func TestNamesAndConfigureComeFromTheStrategy(t *testing.T) {
 	if err := testApp().Run([]string{"check", "--config", path}, &out); err == nil || !strings.Contains(err.Error(), "period") {
 		t.Fatalf("check with a bad strategy block: %v", err)
 	}
+	dir := filepath.Join(t.TempDir(), ".test-strategy")
+	if err := testApp().Run([]string{"start", "--config", path, "--dir", dir}, &out); err == nil || !strings.Contains(err.Error(), "period") {
+		t.Fatalf("start with a bad strategy block: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("start with a bad strategy block touched the state dir: %v", err)
+	}
 }

@@ -348,32 +348,43 @@ func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env excha
 		case engine.IsHalt(err):
 			en.Risk.Trip(err.Error()) // persisted: a restart today stays halted
 			save(func(s *State) { s.Breaker = snapshot(en) })
-			return guard(ctx, en, tick, dir, record, err.Error())
+			return guard(ctx, en, ex, env, tick, dir, record, save, err.Error())
 		case err != nil && ctx.Err() == nil:
 			record(Error, err.Error())
 		}
-		if bal, err := ex.Balance(ctx, env); err == nil {
-			ps, _ := ex.Positions(ctx, env)
-			save(func(s *State) {
-				s.Equity, s.Positions, s.Targets, s.Breaker = bal.Equity, ps, en.Targets(), snapshot(en)
-			})
-		}
+		saveAccount(ctx, en, ex, env, save)
 		if err := tick.Next(ctx); errors.Is(err, io.EOF) {
 			return "candles exhausted"
 		}
 	}
 }
 
+// saveAccount puts the account as the exchange reports it in state.json.
+func saveAccount(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, save func(func(*State))) {
+	if bal, err := ex.Balance(ctx, env); err == nil {
+		ps, _ := ex.Positions(ctx, env)
+		save(func(s *State) {
+			s.Equity, s.Positions, s.Targets, s.Breaker = bal.Equity, ps, en.Targets(), snapshot(en)
+		})
+	}
+}
+
 // guard runs after an execution halt until the loop is stopped: it buys
 // nothing, but every candle a fill that landed late (an unconfirmed entry)
-// or a stop the exchange dropped still gets its stop.
-func guard(ctx context.Context, en *engine.Engine, tick Ticker, dir string, record func(kind, reason string), reason string) string {
-	for ctx.Err() == nil && !stopRequested(dir) && tick.Next(ctx) == nil {
+// or a stop the exchange dropped still gets its stop. The halt is the last
+// event and the account is saved every turn, so status shows both.
+func guard(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string,
+	record func(kind, reason string), save func(func(*State)), reason string) string {
+	record(journal.Halt, reason)
+	for {
+		saveAccount(ctx, en, ex, env, save)
+		if ctx.Err() != nil || stopRequested(dir) || tick.Next(ctx) != nil {
+			return reason
+		}
 		if err := en.Reconcile(ctx); err != nil && ctx.Err() == nil {
 			record(Error, err.Error())
 		}
 	}
-	return reason
 }
 
 // Status is the one-line answer of the status command.
@@ -388,6 +399,7 @@ type Status struct {
 	DailyRoomPct  float64             `json:"daily_room_pct"`
 	WeeklyRoomPct float64             `json:"weekly_room_pct"`
 	Positions     []exchange.Position `json:"positions"`
+	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }
@@ -401,7 +413,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Halt: st.Breaker.Halt, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100
