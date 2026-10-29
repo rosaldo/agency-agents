@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.37.1** (2026-10-29) · `fix` — quant-engine: swap markets with contractSize != 1 are traded - the adapter converts base quantities to contracts (floored, never above the risk qty) and back for lot, fills and exchange positions; contractSize absent/<=0 still refused; coinbaseinternational gateway amounts are native base (NativeAmounts, route pinned)
 - **v1.37.0** (2026-10-29) · `feat` — quant-engine: coinbaseinternational trades perp - Venue.SetMargin hook replaces setMarginMode+setLeverage for a venue without setMarginMode; coinbaseinternational sends params.isolated on setLeverage, refuses cross, read-back keeps the requested margin mode (fork reports none); no other venue changes
 - **v1.36.0** (2026-10-29) · `feat` — quant-engine: stop before liquidation (FR-P4) - pre-entry refuses a stop beyond the liquidation distance times (1 - min_liquidation_buffer); after the fill and on every step the exchange's liquidation price is checked, a violation or a missing price where the venue reports one flattens and halts; fallback 1/leverage minus round-trip cost uses the position's applied leverage; Hyperliquid maintenance margin from the market's max leverage (HIP-3 included)
 - **v1.35.0** (2026-10-29) · `feat` — quant-engine: Hyperliquid HIP-3 perp dexes through the same fork - load exactly the dexes the yml symbols name, refuse symbols of more than one dex and dexes whose collateral is not USDC, read the balance from the dex clearinghouse; the venue lists equities

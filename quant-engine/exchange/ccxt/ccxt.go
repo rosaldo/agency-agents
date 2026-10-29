@@ -76,6 +76,11 @@ type Venue struct {
 	// fork has no setMarginMode; an error refuses to start. Its positions
 	// carry no margin mode, so the read-back keeps the requested one.
 	SetMargin func(c Client, symbol string, want exchange.MarginSettings) error
+	// NativeAmounts: on swap the fork passes this venue's order amounts,
+	// fills, position sizes and amount limits through in the exchange's own
+	// unit, the base asset, instead of CCXT's contracts: the adapter then does
+	// not convert by the contract size.
+	NativeAmounts bool
 }
 
 type Options struct {
@@ -182,8 +187,8 @@ func marketKind(m lib.MarketInterface) (string, error) {
 		if flag(m.Inverse) || !flag(m.Linear) {
 			return "", errors.New("inverse swap is refused: only linear swap is traded")
 		}
-		if cs := val(m.ContractSize); cs != 0 && cs != 1 {
-			return "", fmt.Errorf("contract size %g: quantities would be in contracts, not in the base asset", cs)
+		if cs := val(m.ContractSize); cs <= 0 { // unknown: base quantities cannot be converted (fail closed)
+			return "", fmt.Errorf("contract size %g: unknown, base quantities cannot be converted to contracts", cs)
 		}
 		return "swap", nil
 	case flag(m.Spot) || typ == "spot":
@@ -193,6 +198,32 @@ func marketKind(m lib.MarketInterface) (string, error) {
 }
 
 func (a *Adapter) swap() bool { return a.opt.Market == "swap" }
+
+// contractSize is the base quantity of one contract of symbol: CCXT's unified
+// amounts (order amount and filled, position contracts, amount precision and
+// limits) are in contracts on swap, while the engine trades base quantities.
+// Spot and a venue with NativeAmounts are 1. New refuses a swap market
+// without a positive contract size.
+func (a *Adapter) contractSize(symbol string) float64 {
+	if cs := val(a.markets[symbol].ContractSize); a.swap() && cs > 0 && !a.opt.Venue.NativeAmounts {
+		return cs
+	}
+	return 1
+}
+
+// toContracts is the amount sent for a base quantity: floored to the
+// market's amount step in contracts, never above the quantity asked (risk).
+// It also absorbs float noise (0.03/0.01 = 2.9999999999999996 is 3).
+func (a *Adapter) toContracts(symbol string, qty float64) float64 {
+	return floorTo(qty/a.contractSize(symbol), val(a.markets[symbol].Precision.Amount))
+}
+
+func floorTo(q, step float64) float64 {
+	if step > 0 {
+		return math.Floor(q/step+1e-9) * step
+	}
+	return q
+}
 
 // FormatClientID shapes client order IDs for the venue (exchange.IDFormatter).
 func (a *Adapter) FormatClientID(d [16]byte) string {
@@ -364,13 +395,17 @@ func (a *Adapter) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.O
 		if px <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: no reference price for %s", r.Symbol)
 		}
+		amount := a.toContracts(r.Symbol, r.Qty)
+		if amount <= 0 {
+			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: %s quantity %g is below one amount step", r.Symbol, r.Qty)
+		}
 		a.b.Orders[r.ClientID] = ref{Symbol: r.Symbol, Created: a.opt.Now(), Opens: !r.ReduceOnly && (a.swap() || r.Side == exchange.Buy),
-			State: exchange.OrderState{ClientID: r.ClientID, Symbol: r.Symbol, Side: r.Side, Qty: r.Qty, Status: exchange.Open}}
+			State: exchange.OrderState{ClientID: r.ClientID, Symbol: r.Symbol, Side: r.Side, Qty: min(r.Qty, amount*a.contractSize(r.Symbol)), Status: exchange.Open}}
 		if err := a.save(); err != nil {
 			delete(a.b.Orders, r.ClientID)
 			return exchange.OrderState{Status: exchange.Rejected}, err
 		}
-		o, err := a.c.CreateOrder(r.Symbol, "market", string(r.Side), r.Qty, lib.WithCreateOrderPrice(px),
+		o, err := a.c.CreateOrder(r.Symbol, "market", string(r.Side), amount, lib.WithCreateOrderPrice(px),
 			lib.WithCreateOrderParams(a.orderParams(r.ClientID, r.ReduceOnly)))
 		if err != nil {
 			if !refused(err) {
@@ -480,7 +515,8 @@ func (a *Adapter) refresh(clientID string) error {
 }
 
 // settle records an order's state and applies the net quantity it filled
-// since last seen: the executed amount, less any fee charged in the base asset.
+// since last seen: the executed amount (contracts on swap, made base), less
+// any fee charged in the base asset.
 func (a *Adapter) settle(clientID string, o lib.Order) {
 	r := a.b.Orders[clientID]
 	if id := deref(o.Id); id != "" {
@@ -491,7 +527,7 @@ func (a *Adapter) settle(clientID string, o lib.Order) {
 	if p := fillPrice(o); p > 0 {
 		r.State.FillPrice = p
 	}
-	filled := val(o.Filled)
+	filled := val(o.Filled) * a.contractSize(r.Symbol)
 	if o.Filled == nil && r.State.Status == exchange.Filled {
 		filled = r.State.Qty
 	}
@@ -521,11 +557,10 @@ func (a *Adapter) settle(clientID string, o lib.Order) {
 	a.b.Orders[clientID] = r
 }
 
+// floorStep floors a base quantity to the market's amount step in base.
 func (a *Adapter) floorStep(symbol string, q float64) float64 {
-	if step := val(a.markets[symbol].Precision.Amount); step > 0 {
-		return math.Floor(q/step+1e-9) * step
-	}
-	return q
+	step, _ := a.Lot(symbol)
+	return floorTo(q, step)
 }
 
 func (a *Adapter) apply(r ref, qty float64) {
@@ -561,7 +596,11 @@ func (a *Adapter) PlaceStop(ctx context.Context, env exchange.Env, clientID, sym
 		if h == nil || side != h.Side.Closing() || qty > h.Qty+1e-12 {
 			return exchange.OrderState{Status: exchange.Rejected}, errors.New("ccxt: a stop must close at most the engine's own position")
 		}
-		st := exchange.OrderState{ClientID: clientID, Symbol: symbol, Side: side, Qty: qty, StopPrice: stopPrice, Status: exchange.Open}
+		amount := a.toContracts(symbol, qty)
+		if amount <= 0 {
+			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: %s stop quantity %g is below one amount step", symbol, qty)
+		}
+		st := exchange.OrderState{ClientID: clientID, Symbol: symbol, Side: side, Qty: min(qty, amount*a.contractSize(symbol)), StopPrice: stopPrice, Status: exchange.Open}
 		a.b.Orders[clientID] = ref{Symbol: symbol, State: st, Created: a.opt.Now(), Stop: true}
 		if err := a.save(); err != nil {
 			return st, err
@@ -569,7 +608,7 @@ func (a *Adapter) PlaceStop(ctx context.Context, env exchange.Env, clientID, sym
 		params := a.orderParams(clientID, true)
 		params["triggerPrice"] = stopPrice
 		// the trigger price doubles as the reference price of the market order it fires
-		o, err := a.c.CreateOrder(symbol, "market", string(side), qty, lib.WithCreateOrderPrice(stopPrice), lib.WithCreateOrderParams(params))
+		o, err := a.c.CreateOrder(symbol, "market", string(side), amount, lib.WithCreateOrderPrice(stopPrice), lib.WithCreateOrderParams(params))
 		if err != nil {
 			st.Status = exchange.Unknown // it may have landed: R2 resolves it by client ID
 			if refused(err) {
@@ -703,12 +742,13 @@ func (a *Adapter) Balance(ctx context.Context, env exchange.Env) (exchange.Balan
 
 // Capabilities are conservative: no attached stops; the quantity step reads
 // CCXT's amount precision as a tick size (CCXT's usual precision mode; to be
-// verified per exchange).
+// verified per exchange), in base (Lot).
 func (a *Adapter) Capabilities() exchange.Capabilities {
 	c := exchange.Capabilities{Swap: a.swap(), ReportsLiquidation: a.swap() && a.opt.Venue.ReportsLiquidation}
-	for _, m := range a.markets {
-		c.QtyStep = max(c.QtyStep, val(m.Precision.Amount))
-		c.MinQty = max(c.MinQty, val(m.Limits.Amount.Min))
+	for sym := range a.markets {
+		step, minQty := a.Lot(sym)
+		c.QtyStep = max(c.QtyStep, step)
+		c.MinQty = max(c.MinQty, minQty)
 	}
 	return c
 }
@@ -739,11 +779,12 @@ func (a *Adapter) LiquidationDistance(symbol string, side exchange.PositionSide,
 	return (1/leverage - mm) / (1 - mm), true
 }
 
-// Lot is one market's quantity step and minimum (precision read as a tick
-// size, CCXT's usual mode; to be verified per exchange).
+// Lot is one market's quantity step and minimum in the base asset: CCXT
+// gives them in contracts on swap (precision read as a tick size, CCXT's
+// usual mode; to be verified per exchange).
 func (a *Adapter) Lot(symbol string) (step, min float64) {
-	m := a.markets[symbol]
-	return val(m.Precision.Amount), val(m.Limits.Amount.Min)
+	m, cs := a.markets[symbol], a.contractSize(symbol)
+	return val(m.Precision.Amount) * cs, val(m.Limits.Amount.Min) * cs
 }
 
 // settleCurrency is the settle currency of the traded swap markets; they
@@ -807,7 +848,7 @@ func (a *Adapter) account(own []exchange.Position) {
 				p.Blocked = fmt.Sprintf("the exchange reports a %s position against the engine's %s", deref(ep.Side), p.PSide())
 				continue
 			}
-			p.AccountQty += val(ep.Contracts)
+			p.AccountQty += val(ep.Contracts) * a.contractSize(p.Symbol) // CCXT positions count contracts
 			p.Leverage, p.MarginMode, p.LiquidationPrice = val(ep.Leverage), deref(ep.MarginMode), val(ep.LiquidationPrice)
 		}
 		if a.want.Leverage > 0 && p.Leverage > 0 && (p.Leverage != float64(a.want.Leverage) ||

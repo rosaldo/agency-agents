@@ -31,6 +31,7 @@ func (c *swapStub) LoadMarkets(...any) (map[string]lib.MarketInterface, error) {
 		"AAA/USDC":             m("AAA/USDC", "spot", false, false, false, 0),
 		"MRG/USDC":             m("MRG/USDC", "margin", false, false, false, 0),
 		"BIG/USDC:USDC":        m("BIG/USDC:USDC", "swap", true, true, false, 0.01),
+		"NOC/USDC:USDC":        m("NOC/USDC:USDC", "swap", true, true, false, 0),
 	}, nil
 }
 
@@ -50,18 +51,19 @@ func swapAdapter(t *testing.T, c Client) *Adapter {
 	return a
 }
 
-// FR-P1: spot and linear swap are traded; future, option, inverse swap,
-// margin and a market of the other type than the yml's are refused at start.
+// FR-P1: spot and linear swap are traded (any positive contract size);
+// future, option, inverse swap, margin, a swap without a contract size and a
+// market of the other type than the yml's are refused at start.
 func TestOnlySpotAndLinearSwapAreTraded(t *testing.T) {
 	c := &swapStub{newStub(now)}
-	for sym, market := range map[string]string{"AAA/USDC:USDC": "swap", "AAA/USDC": "spot"} {
+	for sym, market := range map[string]string{"AAA/USDC:USDC": "swap", "AAA/USDC": "spot", "BIG/USDC:USDC": "swap"} {
 		if _, err := New(c, Options{Symbols: []string{sym}, Market: market, Env: exchange.Real}); err != nil {
 			t.Errorf("%s (%s) refused: %v", sym, market, err)
 		}
 	}
 	for sym, want := range map[string]string{
 		"AAA/USD:AAA": "inverse", "AAA/USDC:USDC-261231": "future", "AAA/USDC:USDC-C": "option",
-		"MRG/USDC": "margin", "BIG/USDC:USDC": "contract size", "AAA/USDC": "spot market",
+		"MRG/USDC": "margin", "NOC/USDC:USDC": "contract size", "AAA/USDC": "spot market",
 	} {
 		_, err := New(c, Options{Symbols: []string{sym}, Market: "swap", Env: exchange.Real})
 		if err == nil || !strings.Contains(err.Error(), want) {

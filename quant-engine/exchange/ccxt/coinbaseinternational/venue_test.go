@@ -116,3 +116,19 @@ func TestCrossIsRefused(t *testing.T) {
 		t.Fatalf("set_leverage sent on a refused margin mode: %v", g.leverage)
 	}
 }
+
+// Amounts are the gateway's own (NativeAmounts): the route is pinned, so a
+// key shaped like a native Deribit one (8 + 43 characters, the fork's
+// ResolveRoute) cannot switch the fork to contracts underneath.
+func TestTheGatewayRouteIsPinned(t *testing.T) {
+	if !Venue.NativeAmounts {
+		t.Fatal("coinbaseinternational amounts would be converted from contracts")
+	}
+	c, err := Venue.Dial(map[string]string{"API_KEY": "abcdefgh", "API_SECRET": strings.Repeat("s", 43)}, false, []string{sym})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.(*lib.Coinbaseinternational).IsNativeDeribitCredentials() {
+		t.Fatal("Deribit-shaped keys took the native route: amounts would be contracts")
+	}
+}

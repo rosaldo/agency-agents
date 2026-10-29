@@ -13,12 +13,26 @@ import (
 
 var _ ccxt.APIKeyClient = (*lib.Coinbaseinternational)(nil) // compile time: the venue satisfies the adapter
 
-// Venue is coinbaseinternational: basic, not verified per exchange, with one
-// exception (owner's decision 29/10, perp): the fork has no setMarginMode
-// here, so margin mode goes on setLeverage (setMargin).
+// Venue is coinbaseinternational: basic, not verified per exchange, with two
+// exceptions (owner's decision 29/10, perp). The fork has no setMarginMode
+// here, so margin mode goes on setLeverage (setMargin). And on its Coinbase
+// gateway route the fork converts no amount to contracts (createOrder sends
+// the amount as is, parseOrder and parsePosition read amount and size as
+// is; only the native Deribit route converts), so amounts are the
+// exchange's own, the base asset: NativeAmounts. The route is pinned to
+// the gateway, so Deribit-shaped keys cannot switch the unit underneath.
 var Venue = func() ccxt.Venue {
 	v := ccxt.APIKeyVenue("coinbaseinternational", func() ccxt.APIKeyClient { return lib.NewCoinbaseinternational(nil) })
 	v.SetMargin = setMargin
+	v.NativeAmounts = true
+	dial := v.Dial
+	v.Dial = func(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, error) {
+		c, err := dial(cred, sandbox, symbols)
+		if err == nil {
+			c.(*lib.Coinbaseinternational).Options.Store("route", "coinbase")
+		}
+		return c, err
+	}
 	return v
 }()
 
