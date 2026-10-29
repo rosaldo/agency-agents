@@ -97,3 +97,35 @@ func TestReconcileResizesAStopLargerThanTheOwnQuantity(t *testing.T) {
 		t.Fatalf("the larger stop still rests: %+v", st)
 	}
 }
+
+// QA-T11 M5: resize puts the new stop first; when it fails, the larger old
+// stop is never cancelled and keeps protecting.
+func TestResizeKeepsTheOldStopWhenTheNewOneFails(t *testing.T) {
+	f, s, e, p := entered(t)
+	e.Ex = &shrunk{Fake: s.Fake, qty: 6}
+	f.FailNext("PlaceStop", errors.New("rejected"), false)
+	if err := e.Reconcile(ctx, func(exchange.Position) float64 { return 90 }); err == nil {
+		t.Fatal("a failed resize must surface")
+	}
+	if st, _ := f.Order(p.StopClientID); st.Status != exchange.Open {
+		t.Fatalf("the old stop was cancelled although the new one failed: %+v", st)
+	}
+	x := &spy{Fake: f}
+	e.Ex = &shrunkSpy{spy: x, qty: 6}
+	if err := e.Reconcile(ctx, func(exchange.Position) float64 { return 90 }); err != nil {
+		t.Fatal(err)
+	}
+	if len(x.calls) != 2 || !strings.HasPrefix(x.calls[0], "place ") || x.calls[1] != "cancel "+p.StopClientID {
+		t.Fatalf("calls %v; want the new stop placed before the old one is cancelled", x.calls)
+	}
+}
+
+// shrunkSpy is shrunk over a spy: calls recorded, positions netted down.
+type shrunkSpy struct {
+	*spy
+	qty float64
+}
+
+func (x *shrunkSpy) Positions(ctx context.Context, env exchange.Env) ([]exchange.Position, error) {
+	return (&shrunk{Fake: x.Fake, qty: x.qty}).Positions(ctx, env)
+}

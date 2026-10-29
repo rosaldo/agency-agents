@@ -139,7 +139,23 @@ type Adapter struct {
 	mu      sync.Mutex
 	b       book
 	want    exchange.MarginSettings // applied by ConfigureMarket; checked on every Positions
+	cuts    map[string]cut          // own-quantity drops seen once, awaiting confirmation (B1)
 }
+
+// cut is an own-quantity drop the account showed on one reading: own is the
+// engine's quantity then, kept what the account left of it, since when first seen.
+type cut struct {
+	own, kept float64
+	since     time.Time
+}
+
+// cutConfirm: an account reading lower than own (or flat, or opposite) cuts
+// own_qty, and so its stop, only when a reading at least this long after the
+// first one still agrees. A venue that reports a fresh own fill late (an
+// empty or partial fetchPositions) must not cut what the engine holds:
+// Positions is called several times per step, so two readings alone could
+// both fall inside the lag; a grace alone could cut on one late reading.
+const cutConfirm = time.Minute
 
 // New binds c to the yml's markets. FR-P1: only spot and linear swap are
 // traded, read from CCXT's market structure, never from the symbol's name;
@@ -178,7 +194,7 @@ func New(c Client, o Options) (*Adapter, error) {
 			return nil, fmt.Errorf("ccxt: %s: %w", o.Venue.ID, err)
 		}
 	}
-	a := &Adapter{c: c, opt: o, markets: ms, b: book{Orders: map[string]ref{}, Positions: map[string]*holding{}}}
+	a := &Adapter{c: c, opt: o, markets: ms, b: book{Orders: map[string]ref{}, Positions: map[string]*holding{}}, cuts: map[string]cut{}}
 	if raw, err := os.ReadFile(o.Book); err == nil {
 		if err := json.Unmarshal(raw, &a.b); err != nil {
 			return nil, fmt.Errorf("ccxt: book %s: %w", o.Book, err)
@@ -960,6 +976,19 @@ func (a *Adapter) net(blocked map[string]string) map[string]accountPos {
 			}
 		} else {
 			kept, why := ownbook.Reconcile(own, ownbook.Holding{Side: ap.side, Qty: ap.qty})
+			if h == nil || kept.Qty >= h.Qty {
+				delete(a.cuts, sym) // the account agrees again: a pending drop was a late reading
+			} else if !a.confirmCut(sym, h.Qty, kept.Qty) {
+				// fail closed: own and its stop stay, entries wait for the second reading
+				kept.Qty = h.Qty
+				if why == "" {
+					shows := "flat"
+					if ap.qty > 0 {
+						shows = fmt.Sprintf("%g %s", ap.qty, ap.side)
+					}
+					why = fmt.Sprintf("unconfirmed: the account shows %s against the engine's own %g; own and its stop kept until a later reading agrees", shows, h.Qty)
+				}
+			}
 			if why != "" {
 				blocked[sym] = why
 			}
@@ -977,6 +1006,23 @@ func (a *Adapter) net(blocked map[string]string) map[string]accountPos {
 		acct[sym] = ap
 	}
 	return acct
+}
+
+// confirmCut tells whether the drop of sym's own quantity from own to kept
+// was already seen at least cutConfirm ago with the same numbers; any other
+// reading starts the wait again.
+func (a *Adapter) confirmCut(sym string, own, kept float64) bool {
+	now := a.opt.Now()
+	c, ok := a.cuts[sym]
+	if ok && c.own == own && c.kept == kept {
+		if !now.Before(c.since.Add(cutConfirm)) {
+			delete(a.cuts, sym)
+			return true
+		}
+		return false
+	}
+	a.cuts[sym] = cut{own: own, kept: kept, since: now}
+	return false
 }
 
 // ConfigureMarket sets margin mode and leverage on a swap market (FR-P3).

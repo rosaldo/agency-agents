@@ -47,6 +47,13 @@ func onePosition(t *testing.T, a *Adapter) exchange.Position {
 	return ps[0]
 }
 
+// later moves the adapter's clock past cutConfirm: the next reading can
+// confirm a drop of own_qty the previous one only held (B1).
+func later(a *Adapter) {
+	t := a.opt.Now().Add(cutConfirm)
+	a.opt.Now = func() time.Time { return t }
+}
+
 func restingStops(c *stub) []lib.Order {
 	var out []lib.Order
 	for _, o := range c.orders {
@@ -85,6 +92,10 @@ func TestNettingForeignQtyKeepsTheOwnOnly(t *testing.T) {
 func TestNettingAccountBelowTheOwnShrinksItAndResizesTheStop(t *testing.T) {
 	c, a, e := enteredSwap(t)
 	c.positions = account("long", 1.5)
+	if p := onePosition(t, a); p.Qty != 2 || p.StopQty != 2 || !strings.HasPrefix(p.Blocked, "unconfirmed") {
+		t.Fatalf("first reading %+v; want own 2 kept with its stop, entries blocked", p)
+	}
+	later(a)
 	p := onePosition(t, a)
 	if p.Qty != 1.5 || p.StopQty != 2 || p.Blocked != "" {
 		t.Fatalf("position %+v; want own 1.5 with the stop still for 2, not blocked", p)
@@ -106,6 +117,10 @@ func TestNettingAccountBelowTheOwnShrinksItAndResizesTheStop(t *testing.T) {
 func TestNettingFlatAccountForgetsThePositionAndItsStop(t *testing.T) {
 	c, a, _ := enteredSwap(t)
 	c.positions = []lib.Position{}
+	if p := onePosition(t, a); p.Qty != 2 || len(restingStops(c.stub)) != 1 {
+		t.Fatalf("first reading %+v; want own 2 kept with its stop", p)
+	}
+	later(a)
 	ps, err := a.Positions(ctx, exchange.Real)
 	if err != nil || len(ps) != 0 {
 		t.Fatalf("positions %+v %v; want none", ps, err)
@@ -122,6 +137,10 @@ func TestNettingOppositeSideIsLeftUntouchedAndRefused(t *testing.T) {
 	c, a, _ := enteredSwap(t)
 	c.positions = account("short", 3)
 	sent := len(c.sent)
+	if p := onePosition(t, a); p.Qty != 2 || !strings.Contains(p.Blocked, "not the engine's") || len(restingStops(c.stub)) != 1 {
+		t.Fatalf("first reading %+v; want own 2 kept with its stop and the symbol refused", p)
+	}
+	later(a)
 	p := onePosition(t, a)
 	if p.Qty != 0 || !strings.Contains(p.Blocked, "not the engine's") {
 		t.Fatalf("position %+v; want nothing own and the symbol refused", p)
@@ -132,6 +151,64 @@ func TestNettingOppositeSideIsLeftUntouchedAndRefused(t *testing.T) {
 	if _, err := executor(a).Ex.PlaceOrder(ctx, exchange.Real, exchange.OrderRequest{ClientID: "x", Symbol: perp, Side: exchange.Buy,
 		Qty: 1, Type: exchange.Market, ReduceOnly: true}); err == nil {
 		t.Fatal("a reduce-only order against the user's short left")
+	}
+}
+
+// QA-T11 B1: a reading that does not show the engine's fresh fill yet
+// (empty, or short of it) cuts nothing: own and its stop stay, entries wait.
+// Readings close together never confirm; a later one that agrees with own
+// clears the wait.
+func TestLateAccountReadingKeepsTheOwnAndItsStop(t *testing.T) {
+	for _, lag := range [][]lib.Position{{}, account("long", 1)} {
+		c, a, _ := enteredSwap(t)
+		c.positions = lag
+		for range 2 {
+			p := onePosition(t, a)
+			rs := restingStops(c.stub)
+			if p.Qty != 2 || p.StopQty != 2 || !strings.HasPrefix(p.Blocked, "unconfirmed") || len(rs) != 1 || val(rs[0].Amount) != 2 {
+				t.Fatalf("lag %v: position %+v, stops %+v; want own 2 under its stop for 2, entries blocked", lag, p, rs)
+			}
+		}
+		later(a)
+		c.positions = account("long", 2)
+		p := onePosition(t, a)
+		if p.Qty != 2 || p.StopQty != 2 || p.Blocked != "" || len(restingStops(c.stub)) != 1 {
+			t.Fatalf("lag %v: position %+v; want own 2 under its stop, unblocked", lag, p)
+		}
+		later(a) // the wait was cleared: a new lag starts it again
+		c.positions = lag
+		if p := onePosition(t, a); p.Qty != 2 {
+			t.Fatalf("lag %v: a fresh lag cut own at once: %+v", lag, p)
+		}
+	}
+}
+
+// QA-T11 M4: an unreadable account fails closed: every symbol blocked, own
+// and its stop untouched.
+func TestUnreadableAccountBlocksAndKeepsTheStop(t *testing.T) {
+	c, a, _ := enteredSwap(t)
+	c.posErr = lib.NetworkError("down")
+	p := onePosition(t, a)
+	if p.Qty != 2 || p.StopQty != 2 || !strings.Contains(p.Blocked, "unreadable") || len(restingStops(c.stub)) != 1 {
+		t.Fatalf("position %+v; want own 2 under its stop and the symbol blocked", p)
+	}
+}
+
+// QA-T11 M7: a leverage other than the yml's blocks only a symbol the engine
+// holds; the user's position on a hedged account does not.
+func TestLeverageMismatchBlocksOnlyAnOwnHolding(t *testing.T) {
+	c := newSwapStub()
+	a := swapAdapter(t, c)
+	a.want = exchange.MarginSettings{Leverage: 3, MarginMode: "isolated"}
+	c.positions = []lib.Position{{Symbol: s(perp), Side: s("long"), Contracts: f(5), Hedged: b(true), Leverage: f(10), MarginMode: s("cross")}}
+	if ps, err := a.Positions(ctx, exchange.Real); err != nil || len(ps) != 0 {
+		t.Fatalf("positions %+v %v; the user's leverage must not block a symbol the engine does not hold", ps, err)
+	}
+	c2, a2, _ := enteredSwap(t)
+	a2.want = a.want
+	c2.positions = []lib.Position{{Symbol: s(perp), Side: s("long"), Contracts: f(2), Leverage: f(10), MarginMode: s("cross")}}
+	if p := onePosition(t, a2); !strings.Contains(p.Blocked, "leverage 10") {
+		t.Fatalf("position %+v; want the own holding blocked on leverage", p)
 	}
 }
 
@@ -346,5 +423,26 @@ func TestFundingIsReadFromTheVenue(t *testing.T) {
 	}
 	if fs, err := adapter(t, newStub(now)).Funding(ctx, exchange.Real, "AAA/USDT", now); err != nil || fs != nil {
 		t.Fatalf("spot funding %+v %v, want none", fs, err)
+	}
+}
+
+// QA-T11 M6: a stop of unknown fate the lookup did not find is taken as
+// absent only when the cancel answers "not found"; a cancel that fails
+// otherwise (network) leaves it unknown and stale, retried.
+func TestUnknownStopIsAbsentOnlyOnNotFound(t *testing.T) {
+	c := &lostStop{stub: newStub(now)}
+	a := adapter(t, c)
+	e := executor(a)
+	if err := e.Enter(ctx, "AAA/USDT", now, exec.Plan{Entry: 100, Stop: 90, Qty: 1}); err != nil {
+		t.Fatal(err)
+	}
+	p := onePosition(t, a)
+	c.failCancel = true
+	stale, err := e.MoveStop(ctx, p, 95, now.Add(time.Hour))
+	if err == nil || stale != c.lost {
+		t.Fatalf("stale %q err %v; want the lost stop %q stale", stale, err, c.lost)
+	}
+	if r := a.b.Orders[c.lost]; r.Absent || r.State.Status == exchange.Canceled {
+		t.Fatalf("lost stop %+v taken as absent after a network error", r.State)
 	}
 }

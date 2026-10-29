@@ -30,6 +30,7 @@ type stub struct {
 	balances   lib.Balances
 	prices     []float64      // reference price of every CreateOrder, in order
 	positions  []lib.Position // what FetchPositions reports
+	posErr     error          // what FetchPositions fails with
 	settings   []string       // SetMarginMode / SetLeverage calls
 	funding    []lib.FundingHistory
 	sent       []float64 // amount of every order created, in order
@@ -110,6 +111,9 @@ func (c *stub) FetchFundingHistory(...lib.FetchFundingHistoryOptions) ([]lib.Fun
 // account's net position per symbol from the filled orders, as a one-way
 // (netting) venue does.
 func (c *stub) FetchPositions(...lib.FetchPositionsOptions) ([]lib.Position, error) {
+	if c.posErr != nil {
+		return nil, c.posErr
+	}
 	if c.positions != nil {
 		return c.positions, nil
 	}
