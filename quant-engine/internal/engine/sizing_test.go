@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
+	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
@@ -102,5 +107,33 @@ func TestDrawdownIsOnEquity(t *testing.T) {
 	b.Equity = 9_600 // 4% > daily 3%
 	if err := e.Step(ctx); !IsHalt(err) {
 		t.Fatalf("equity drawdown: err = %v, want a halt", err)
+	}
+}
+
+// FR-R3: entries in the same step share the free margin: the second one is
+// checked against what the first left, not against the step's whole cash.
+func TestEntriesInOneStepShareTheFreeMargin(t *testing.T) {
+	s := &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+		// qty floor(100 / 1.75) = 57, notional 5 985 each; cash 10 000 fits one
+		return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 103.25}
+	}}
+	c, err := config.Parse([]byte(strings.Replace(scriptedYAML, "[AAA]", "[AAA, BBB]", 1)), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs, "BBB": cs}})
+	for i := 0; i < 3; i++ {
+		f.Advance()
+	}
+	j := &events{}
+	e := New(c, s, f, exchange.Demo, j, func() time.Time { return cs[3].Time })
+	if err := e.Step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := f.Positions(context.Background(), exchange.Demo)
+	b, _ := f.Balance(context.Background(), exchange.Demo)
+	if len(ps) != 1 || b.Cash < 0 || !strings.Contains(j.rejected(), "margin") {
+		t.Fatalf("positions %+v, cash %v, rejections %q; want one entry and a margin rejection", ps, b.Cash, j.rejected())
 	}
 }

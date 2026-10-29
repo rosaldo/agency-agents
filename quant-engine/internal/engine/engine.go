@@ -167,8 +167,9 @@ func (e *Engine) Step(ctx context.Context) error {
 		held[p.Symbol] = p
 	}
 	var errs []error
+	free := bal.Cash // free margin left for this step's entries
 	for _, sym := range e.Cfg.Symbols {
-		err := e.stepSymbol(ctx, sym, held, bal)
+		err := e.stepSymbol(ctx, sym, held, bal.Equity, &free)
 		if IsHalt(err) {
 			return err
 		}
@@ -177,7 +178,7 @@ func (e *Engine) Step(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, bal exchange.Balance) error {
+func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64) error {
 	n := max(e.Strategy.Warmup(), 1)
 	cs, err := e.Ex.Candles(ctx, e.Env, sym, e.Cfg.Interval(), n)
 	if err != nil || len(cs) == 0 {
@@ -236,18 +237,18 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}); ok {
 		step, minQty = l.Lot(sym) // per market when the adapter knows it
 	}
-	qty, why := risk.Size(risk.SizeInput{Equity: bal.Equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
-		Stop: d.Stop, SlippagePct: e.Cfg.Costs.SlippagePct, CommissionPct: e.Cfg.Costs.CommissionPct, QtyStep: step, MinQty: minQty})
+	qty, why := risk.Size(risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
+		Stop: d.Stop, SpreadPct: e.Cfg.Costs.SpreadPct, SlippagePct: e.Cfg.Costs.SlippagePct, CommissionPct: e.Cfg.Costs.CommissionPct, QtyStep: step, MinQty: minQty})
 	if qty == 0 {
 		e.skip(sym, why)
 		return nil
 	}
-	// shortcut: one Balance per step, so two entries in the same step each see
-	// the whole free margin; the exchange refuses the second if it does not fit
-	if margin := qty * last.Close / float64(e.Cfg.Perp.Leverage); margin > bal.Cash {
-		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, bal.Cash))
+	margin := qty * last.Close / float64(e.Cfg.Perp.Leverage)
+	if margin > *free {
+		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
 		return nil
 	}
+	*free -= margin // also on a failed entry: it may have filled
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}

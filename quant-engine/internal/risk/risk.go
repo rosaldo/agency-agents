@@ -126,7 +126,8 @@ type SizeInput struct {
 	Equity      float64 // account equity in quote currency
 	RiskPct     float64 // risk.max_risk_per_trade_pct
 	Entry, Stop float64 // long: 0 < Stop < Entry
-	SlippagePct float64 // expected slippage on the stop fill, percent of entry
+	SpreadPct   float64 // costs.spread_pct: half of it is paid on each fill
+	SlippagePct float64 // costs.slippage_pct: paid on each fill, entry and stop
 	// CommissionPct is the taker fee per fill (costs.commission_pct), paid on
 	// the entry and on the stop notional. No leverage here: the size comes
 	// from the risk budget, leverage only sets the margin locked (FR-R1).
@@ -135,13 +136,16 @@ type SizeInput struct {
 	MinQty        float64 // market's minimum quantity
 }
 
-// Size is the quantity whose loss at the stop plus expected slippage and the
-// round-trip fees on the notional stays within the per-trade risk budget. qty 0 means do not enter; why says why.
+// Size is the quantity whose loss at the stop stays within the per-trade risk
+// budget, with both fills at their worst: half the spread plus the slippage
+// against each leg, and the commission on each fill's notional. qty 0 means do not enter; why says why.
 func Size(in SizeInput) (qty float64, why string) {
 	if in.Stop <= 0 || in.Stop >= in.Entry {
 		return 0, fmt.Sprintf("stop %.8g is not between 0 and the entry %.8g", in.Stop, in.Entry)
 	}
-	perUnit := in.Entry - in.Stop + in.Entry*in.SlippagePct/100 + (in.Entry+in.Stop)*in.CommissionPct/100
+	adj := (in.SpreadPct/2 + in.SlippagePct) / 100
+	buy, sell := in.Entry*(1+adj), in.Stop*(1-adj)
+	perUnit := buy - sell + (buy+sell)*in.CommissionPct/100
 	raw := in.Equity * in.RiskPct / 100 / perUnit
 	if in.QtyStep > 0 {
 		raw = math.Floor(raw/in.QtyStep) * in.QtyStep
