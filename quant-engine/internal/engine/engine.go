@@ -185,6 +185,9 @@ func (e *Engine) Step(ctx context.Context) error {
 	}
 	held := map[string]exchange.Position{}
 	for _, p := range ps {
+		if err := e.guardLiquidation(ctx, p); err != nil { // FR-P4 every step: liquidation moves with margin and funding
+			return err
+		}
 		held[p.Symbol] = p
 	}
 	var errs []error
@@ -252,6 +255,10 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, "symbol blocked: "+p.Blocked)
 		return nil
 	}
+	if err := e.entryClearsLiquidation(sym, exchange.PositionSide(d.Side), last.Close, d.Stop); err != nil {
+		e.skip(sym, err.Error())
+		return nil
+	}
 	if why := e.newsBlocks(ctx, sym, last.Time); why != "" {
 		e.skip(sym, why)
 		return nil
@@ -282,7 +289,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	if d.Target > 0 {
 		e.targets[sym] = d.Target
 	}
-	return nil
+	return e.guardFilled(ctx, sym)
 }
 
 // exit closes p at market; on failure its target and stop are kept for the

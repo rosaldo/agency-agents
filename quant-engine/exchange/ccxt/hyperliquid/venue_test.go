@@ -195,3 +195,19 @@ func TestNoBuilderOrReferralReachesTheWire(t *testing.T) {
 
 // hl is the fork's client under the venue's dex binding.
 func hl(c ccxt.Client) *lib.Hyperliquid { return c.(*client).Hyperliquid }
+
+// FR-P4 (V2): Hyperliquid positions carry liquidationPx, and its maintenance
+// margin is half the initial margin at the market's max leverage (HIP-3
+// xyz:GOOGL: 20x ⇒ 2.5%).
+func TestHyperliquidLiquidationInputs(t *testing.T) {
+	if !Venue.ReportsLiquidation || Venue.MaintenanceMargin == nil {
+		t.Fatal("hyperliquid venue does not declare liquidation reports and maintenance margin")
+	}
+	max := 20.0
+	if mm, ok := Venue.MaintenanceMargin(lib.MarketInterface{Limits: lib.Limits{Leverage: lib.MinMax{Max: &max}}}); !ok || mm != 0.025 {
+		t.Fatalf("maintenance margin %v %v, want 0.025", mm, ok)
+	}
+	if _, ok := Venue.MaintenanceMargin(lib.MarketInterface{}); ok {
+		t.Fatal("maintenance margin without a max leverage")
+	}
+}

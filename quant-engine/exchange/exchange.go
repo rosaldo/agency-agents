@@ -164,6 +164,15 @@ type IDFormatter interface {
 	FormatClientID(digest [16]byte) string
 }
 
+// LiquidationEstimator is implemented by adapters that know the venue's
+// liquidation formula: the distance from entry to liquidation, as a fraction
+// of entry, of a fresh position at leverage (FR-P4, pre-entry). ok=false
+// means no formula for symbol; the engine then uses the conservative
+// fallback 1/leverage minus the round-trip cost.
+type LiquidationEstimator interface {
+	LiquidationDistance(symbol string, side PositionSide, entry, leverage float64) (frac float64, ok bool)
+}
+
 // CheckEnv is the guard every adapter runs first: a paper engine never
 // reaches the real environment.
 func CheckEnv(paper bool, env Env) error {

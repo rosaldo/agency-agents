@@ -64,6 +64,13 @@ type Venue struct {
 	// Check runs on the loaded markets of the yml's symbols before trading;
 	// an error refuses to start (venue rules the generic adapter cannot know).
 	Check func(markets map[string]lib.MarketInterface) error
+	// ReportsLiquidation: the venue's positions carry a liquidation price; a
+	// position without one is then a violation (FR-P4).
+	ReportsLiquidation bool
+	// MaintenanceMargin is the venue's maintenance margin rate of a market,
+	// as a fraction of the notional; ok=false = unknown. With it the adapter
+	// estimates the liquidation distance (exchange.LiquidationEstimator).
+	MaintenanceMargin func(m lib.MarketInterface) (rate float64, ok bool)
 }
 
 type Options struct {
@@ -693,12 +700,38 @@ func (a *Adapter) Balance(ctx context.Context, env exchange.Env) (exchange.Balan
 // CCXT's amount precision as a tick size (CCXT's usual precision mode; to be
 // verified per exchange).
 func (a *Adapter) Capabilities() exchange.Capabilities {
-	c := exchange.Capabilities{Swap: a.swap()}
+	c := exchange.Capabilities{Swap: a.swap(), ReportsLiquidation: a.swap() && a.opt.Venue.ReportsLiquidation}
 	for _, m := range a.markets {
 		c.QtyStep = max(c.QtyStep, val(m.Precision.Amount))
 		c.MinQty = max(c.MinQty, val(m.Limits.Amount.Min))
 	}
 	return c
+}
+
+// LiquidationDistance is the distance from entry to liquidation of a fresh
+// isolated position, as a fraction of entry: the liquidation formula
+// liq = entry - side*margin_available/size/(1 - mm*side), with
+// margin_available = notional/leverage - mm*notional, gives
+// (1/leverage - mm)/(1 - mm) for a long and (1/leverage - mm)/(1 + mm) for a
+// short, mm being the venue's maintenance margin rate. Cross margin
+// liquidates farther away. A leverage above the market's maximum gives 0
+// (refused). ok=false: the venue has no maintenance margin rate for symbol.
+func (a *Adapter) LiquidationDistance(symbol string, side exchange.PositionSide, _, leverage float64) (float64, bool) {
+	m, found := a.markets[symbol]
+	if !found || !a.swap() || a.opt.Venue.MaintenanceMargin == nil || leverage <= 0 {
+		return 0, false
+	}
+	if hi := val(m.Limits.Leverage.Max); hi > 0 && leverage > hi {
+		return 0, true
+	}
+	mm, ok := a.opt.Venue.MaintenanceMargin(m)
+	if !ok || mm < 0 || mm >= 1 {
+		return 0, false
+	}
+	if side == exchange.Short {
+		return (1/leverage - mm) / (1 + mm), true
+	}
+	return (1/leverage - mm) / (1 - mm), true
 }
 
 // Lot is one market's quantity step and minimum (precision read as a tick

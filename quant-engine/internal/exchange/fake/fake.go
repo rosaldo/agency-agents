@@ -32,6 +32,10 @@ type Options struct {
 	Shorts bool
 	// Applied, when set, is what ConfigureMarket reports whatever is asked.
 	Applied *exchange.MarginSettings
+	// ReportsLiquidation is the capability; Leverage is what positions report
+	// as applied (0 = not reported). SetLiquidation sets their liquidation price.
+	ReportsLiquidation bool
+	Leverage           float64
 }
 
 type position struct {
@@ -63,11 +67,19 @@ type Fake struct {
 	failures    map[string]failure
 	calls       map[string]int
 	unprotected int
+	liq         map[string]float64
 }
 
 func New(o Options) *Fake {
 	return &Fake{opt: o, cash: o.Cash, pos: map[string]*position{}, orders: map[string]exchange.OrderState{},
-		failures: map[string]failure{}, calls: map[string]int{}}
+		failures: map[string]failure{}, calls: map[string]int{}, liq: map[string]float64{}}
+}
+
+// SetLiquidation is the liquidation price positions in symbol report (0 = none).
+func (f *Fake) SetLiquidation(symbol string, price float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.liq[symbol] = price
 }
 
 // FailNext makes the next call to method return err. applied=true performs
@@ -373,7 +385,8 @@ func (f *Fake) Positions(ctx context.Context, env exchange.Env) ([]exchange.Posi
 	}
 	out := []exchange.Position{}
 	for sym, p := range f.pos {
-		ep := exchange.Position{Symbol: sym, Side: p.side, Qty: p.qty, AvgPrice: p.avg, AccountQty: p.qty}
+		ep := exchange.Position{Symbol: sym, Side: p.side, Qty: p.qty, AvgPrice: p.avg, AccountQty: p.qty,
+			Leverage: f.opt.Leverage, LiquidationPrice: f.liq[sym]}
 		if p.stopID != "" {
 			ep.StopClientID, ep.StopPrice = p.stopID, f.orders[p.stopID].StopPrice
 		}
@@ -402,7 +415,8 @@ func (f *Fake) Balance(ctx context.Context, env exchange.Env) (exchange.Balance,
 }
 
 func (f *Fake) Capabilities() exchange.Capabilities {
-	return exchange.Capabilities{AttachedStop: f.opt.AttachedStop, Demo: true, QtyStep: f.opt.QtyStep, MinQty: f.opt.MinQty, Swap: f.opt.Shorts}
+	return exchange.Capabilities{AttachedStop: f.opt.AttachedStop, Demo: true, QtyStep: f.opt.QtyStep, MinQty: f.opt.MinQty, Swap: f.opt.Shorts,
+		ReportsLiquidation: f.opt.ReportsLiquidation}
 }
 
 // ConfigureMarket records and echoes the settings (Configured reads them);

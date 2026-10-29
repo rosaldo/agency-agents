@@ -166,3 +166,35 @@ func TestTripPersistsUntilTheNextDay(t *testing.T) {
 		t.Fatalf("next day still blocked: %v", err)
 	}
 }
+
+// FR-P4: the fallback is 1/leverage minus the round trip; the stop must lie
+// strictly between entry and liquidation, leaving the buffer free.
+func TestStopBeforeLiquidation(t *testing.T) {
+	if d := FallbackLiquidationDistance(4, RoundTripCost(0.05, 0.02, 0.04)); d != 0.25-0.002 {
+		t.Fatalf("fallback %v, want 0.248", d)
+	}
+	for _, tc := range []struct {
+		short           bool
+		entry, stop, lq float64
+		ok              bool
+	}{
+		{false, 100, 90, 80, true},   // 10 of 20, buffer 0.5 leaves 10
+		{false, 100, 89, 80, false},  // 11 > 10
+		{false, 100, 101, 80, false}, // stop above a long's entry
+		{false, 100, 90, 101, false}, // liquidation above a long's entry
+		{false, 100, 50, 0, true},    // 1x long: liquidation at 0
+		{false, 100, 49, -5, false},  // below 0 counts as 0: 51 > 50
+		{true, 100, 110, 120, true},
+		{true, 100, 111, 120, false},
+		{true, 100, 99, 120, false},
+		{true, 100, 110, 95, false},
+	} {
+		err := StopBeforeLiquidation(tc.short, tc.entry, tc.stop, tc.lq, 0.5)
+		if (err == nil) != tc.ok {
+			t.Errorf("short=%v entry %g stop %g liq %g: err %v, want ok=%v", tc.short, tc.entry, tc.stop, tc.lq, err, tc.ok)
+		}
+	}
+	if LiquidationPrice(false, 100, 0.25) != 75 || LiquidationPrice(true, 100, 0.25) != 125 {
+		t.Fatal("liquidation price on the wrong side")
+	}
+}

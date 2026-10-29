@@ -162,3 +162,56 @@ func Size(in SizeInput) (qty float64, why string) {
 	}
 	return raw, fmt.Sprintf("entry %.8g stop %.8g qty %.8g", in.Entry, in.Stop, raw)
 }
+
+// FallbackLiquidationDistance is the conservative distance from entry to
+// liquidation, as a fraction of the entry, used when the adapter knows no
+// formula for the venue (paper simulator, CEX "basic"): 1/leverage minus
+// the round-trip cost (FR-P4). It ignores the maintenance margin the venue
+// keeps; the post-fill check against the exchange's own liquidation price
+// covers that, and min_liquidation_buffer leaves room for it before.
+func FallbackLiquidationDistance(leverage, roundTrip float64) float64 {
+	if leverage <= 0 {
+		return 0
+	}
+	return 1/leverage - roundTrip
+}
+
+// RoundTripCost is the cost of entering and leaving, as a fraction of the
+// notional, with both fills at their worst: commission and slippage on each
+// fill and the whole spread (percent inputs, as in the yml's costs).
+func RoundTripCost(commissionPct, spreadPct, slippagePct float64) float64 {
+	return (2*commissionPct + spreadPct + 2*slippagePct) / 100
+}
+
+// LiquidationPrice is the price at distance frac (fraction of entry) from
+// entry on the losing side: below a long, above a short.
+func LiquidationPrice(short bool, entry, frac float64) float64 {
+	if short {
+		return entry * (1 + frac)
+	}
+	return entry * (1 - frac)
+}
+
+// StopBeforeLiquidation is the FR-P4 invariant: the stop lies strictly
+// between entry and liquidation (a long's liquidation below, a short's
+// above) and leaves buffer (min_liquidation_buffer) of that distance free:
+// |entry - stop| <= |entry - liq| * (1 - buffer). A nil error means it holds.
+func StopBeforeLiquidation(short bool, entry, stop, liq, buffer float64) error {
+	sign := 1.0 // long: liq < stop < entry; a liquidation at or below 0 (1x) is 0
+	if short {
+		sign = -1 // short: entry < stop < liq
+	} else {
+		liq = max(liq, 0)
+	}
+	distStop, distLiq := sign*(entry-stop), sign*(entry-liq)
+	switch {
+	case entry <= 0 || distLiq <= 0:
+		return fmt.Errorf("liquidation %.8g is not on the losing side of the entry %.8g", liq, entry)
+	case distStop <= 0:
+		return fmt.Errorf("stop %.8g is not between the entry %.8g and the liquidation %.8g", stop, entry, liq)
+	case distStop > distLiq*(1-buffer):
+		return fmt.Errorf("stop %.8g is %.4g%% from the entry %.8g, above %.4g%% (liquidation %.8g at %.4g%% minus the %.4g buffer)",
+			stop, distStop/entry*100, entry, distLiq*(1-buffer)/entry*100, liq, distLiq/entry*100, buffer)
+	}
+	return nil
+}

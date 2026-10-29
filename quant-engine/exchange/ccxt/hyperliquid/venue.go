@@ -31,6 +31,23 @@ var Venue = ccxt.Venue{
 	ClientID:    func(d [16]byte) string { return "0x" + hex.EncodeToString(d[:]) },
 	Equity:      true,
 	Check:       check,
+	// liquidationPrice comes from the clearinghouse's liquidationPx (V2)
+	ReportsLiquidation: true,
+	MaintenanceMargin:  maintenanceMargin,
+}
+
+// maintenanceMargin: "The maintenance margin is half of the initial margin
+// at max leverage" (hyperliquid docs, trading/liquidations), so the rate is
+// 1/(2*maxLeverage) of the market (HIP-3 markets carry their own, e.g.
+// xyz:GOOGL 20). The fork maps the meta's maxLeverage to limits.leverage.max
+// and reads no margin table (marginTableId): if a large position sits in a
+// tier with lower leverage it liquidates nearer, which the post-fill check
+// against the exchange's liquidation price catches.
+func maintenanceMargin(m lib.MarketInterface) (float64, bool) {
+	if m.Limits.Leverage.Max == nil || *m.Limits.Leverage.Max <= 0 {
+		return 0, false
+	}
+	return 1 / (2 * *m.Limits.Leverage.Max), true
 }
 
 // client is the fork's client bound to one dex: the balance of a HIP-3 dex
