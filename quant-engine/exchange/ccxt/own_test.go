@@ -183,6 +183,21 @@ func TestLateAccountReadingKeepsTheOwnAndItsStop(t *testing.T) {
 	}
 }
 
+// QA-T11 N1: a later reading with other numbers (own, kept) than the pending
+// one confirms nothing: it starts the wait again, own and its stop stay.
+func TestChangedReadingRestartsTheWait(t *testing.T) {
+	c, a, _ := enteredSwap(t)
+	c.positions = account("long", 1)
+	onePosition(t, a)
+	later(a)
+	c.positions = []lib.Position{}
+	p := onePosition(t, a)
+	rs := restingStops(c.stub)
+	if p.Qty != 2 || p.StopQty != 2 || !strings.HasPrefix(p.Blocked, "unconfirmed") || len(rs) != 1 || val(rs[0].Amount) != 2 {
+		t.Fatalf("position %+v, stops %+v; want own 2 under its stop for 2, entries blocked", p, rs)
+	}
+}
+
 // QA-T11 M4: an unreadable account fails closed: every symbol blocked, own
 // and its stop untouched.
 func TestUnreadableAccountBlocksAndKeepsTheStop(t *testing.T) {
