@@ -38,10 +38,12 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
-// App is one strategy binary.
+// App is one strategy binary: one strategy on one exchange venue, chosen at
+// build time by the venue package the strategy's main imports.
 type App struct {
 	Strategy strategy.Strategy
-	Version  string // set by the strategy's build; "" = dev
+	Venue    ccxtx.Venue // the exchange this binary links; the yml's exchange must name it (or fake)
+	Version  string      // set by the strategy's build; "" = dev
 }
 
 const usage = `usage: NAME <command> [--config NAME.yml] [--dir .NAME]
@@ -128,7 +130,7 @@ func (a App) Run(args []string, stdout io.Writer) error {
 		}
 		return printStatus(*dir, stdout)
 	}
-	cfg, err := config.Load(*cfgPath, a.Strategy) // a bad strategy: block fails here, before anything runs
+	cfg, err := a.load(*cfgPath) // a bad strategy: block fails here, before anything runs
 	if err != nil {
 		return err
 	}
@@ -214,26 +216,45 @@ func (a App) newExchange(cfg *config.Config, fk fakeFlags, dir string) (exchange
 	return a.newCCXT(cfg, fk, dir)
 }
 
-// newCCXT builds the generic CCXT adapter. Live needs
-// <STRATEGY>_<EXCHANGE>_API_KEY and _API_SECRET (and _PASSPHRASE when the
-// exchange uses one). Paper with credentials trades the exchange's sandbox;
-// paper without them simulates fills on the exchange's public market data.
-func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exchange, loop.Ticker, error) {
-	if !ccxtx.Known(cfg.Exchange) {
-		return nil, nil, fmt.Errorf("exchange %q unknown to CCXT", cfg.Exchange)
-	}
-	cred, cerr := config.LoadCredentials(a.Strategy.Name(), cfg.Exchange, false, os.Getenv)
-	if cerr != nil && cfg.Mode == "live" {
-		return nil, nil, fmt.Errorf("live needs exchange credentials: %w", cerr)
-	}
-	var credp *config.Credentials
-	if cerr == nil {
-		cred.Passphrase = config.Secret(os.Getenv(config.EnvPrefix(a.Strategy.Name(), cfg.Exchange) + "PASSPHRASE"))
-		credp = &cred
-	}
-	client, err := ccxtx.Dial(cfg.Exchange, env(cfg), credp)
+// load parses the yml for the strategy and checks it against the binary's
+// venue: the yml's exchange must be the venue compiled in (or fake), and
+// equities need a venue that lists them.
+func (a App) load(path string) (*config.Config, error) {
+	cfg, err := config.Load(path, a.Strategy)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	if cfg.Exchange == "fake" {
+		return cfg, nil
+	}
+	switch {
+	case a.Venue.ID == "" || a.Venue.Dial == nil:
+		return nil, fmt.Errorf("exchange %q: this binary links no exchange venue", cfg.Exchange)
+	case cfg.Exchange != a.Venue.ID:
+		return nil, fmt.Errorf("exchange %q: this binary is built for %q; install the %s variant", cfg.Exchange, a.Venue.ID, cfg.Exchange)
+	case cfg.AssetClass == "equity" && !a.Venue.Equity:
+		return nil, fmt.Errorf("asset_class equity: %s lists no equity markets", a.Venue.ID)
+	}
+	return cfg, nil
+}
+
+// newCCXT builds the CCXT adapter of the binary's venue. Live reads the
+// mainnet credentials <STRATEGY>_<VENUE>_<SUFFIX>; paper reads the testnet
+// ones <STRATEGY>_<VENUE>_TESTNET_<SUFFIX> and trades the venue's sandbox,
+// or, with none of them set, simulates fills on the venue's public data.
+func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exchange, loop.Ticker, error) {
+	v := a.Venue
+	testnet := cfg.Mode == "paper"
+	var cred map[string]string
+	if !testnet || anySet(config.EnvPrefix(a.Strategy.Name(), v.ID, true), v.Credentials) {
+		secrets, err := config.LoadCredentials(a.Strategy.Name(), v.ID, testnet, v.Credentials, v.Optional, os.Getenv)
+		if err != nil {
+			return nil, nil, err
+		}
+		cred = map[string]string{}
+		for k, sv := range secrets {
+			cred[k] = sv.Reveal() // the only place a secret becomes a string: handed to the venue's client
+		}
 	}
 	symbols := slices.Clone(cfg.Symbols)
 	for _, aux := range a.Strategy.Inputs() {
@@ -241,19 +262,33 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 			symbols = append(symbols, aux)
 		}
 	}
+	client, err := v.Dial(cred, testnet && cred != nil, symbols)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", v.ID, err)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, err
 	}
-	ad, err := ccxtx.New(client, ccxtx.Options{Symbols: symbols, Env: env(cfg), Paper: cfg.Mode == "paper",
+	ad, err := ccxtx.New(client, ccxtx.Options{Venue: v, Symbols: symbols, Market: cfg.Market, Env: env(cfg), Paper: testnet,
 		Book: filepath.Join(dir, "book-"+string(env(cfg))+".json")})
 	if err != nil {
 		return nil, nil, err
 	}
 	tick := loop.RealTicker{Interval: cfg.Interval(), Grace: 5 * time.Second}
-	if credp == nil {
+	if cred == nil {
 		return paper.New(ad, fk.paperCapital, time.Now), tick, nil
 	}
 	return ad, tick, nil
+}
+
+// anySet reports whether any credential variable with prefix is set.
+func anySet(prefix string, suffixes []string) bool {
+	for _, s := range suffixes {
+		if os.Getenv(prefix+s) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // start launches `run` in the background and waits until that process
@@ -392,7 +427,7 @@ func (a App) flattenNow(cfgPath, dir string, fk fakeFlags) error {
 		return err
 	}
 	defer unlock()
-	cfg, err := config.Load(cfgPath, a.Strategy)
+	cfg, err := a.load(cfgPath)
 	if err != nil {
 		return err
 	}

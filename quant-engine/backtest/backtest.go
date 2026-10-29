@@ -18,7 +18,6 @@ import (
 	cfgpkg "github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/engine"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
-	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
@@ -31,6 +30,7 @@ type Input struct {
 }
 
 type Trade struct {
+	Side                          strategy.Side
 	EntryTime, ExitTime           time.Time
 	Qty, EntryPrice, Stop, Target float64
 	ExitPrice                     float64
@@ -91,7 +91,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		candles[aux] = in.Aux[aux]
 	}
 	ex := fake.New(fake.Options{Paper: true, QtyStep: in.QtyStep, MinQty: in.MinQty, Cash: in.Capital, Candles: candles,
-		SpreadPct: c.Costs.SpreadPct, SlippagePct: c.Costs.SlippagePct, CommissionPct: c.Costs.CommissionPct})
+		SpreadPct: c.Costs.SpreadPct, SlippagePct: c.Costs.SlippagePct, CommissionPct: c.Costs.CommissionPct, Shorts: c.Market == "swap"})
 	var now time.Time
 	en := engine.New(c, s, ex, exchange.Demo, nil, func() time.Time { return now })
 	en.News = nil // past headlines are not replayable: with news_guard required the backtest takes no entry
@@ -116,7 +116,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 	closeTrade := func(price float64, reason string) {
 		open.ExitTime, open.ExitPrice, open.ExitReason = now, price, reason
 		open.PnL = equity() - equityBefore
-		open.R = open.PnL / (open.Qty * (open.EntryPrice - open.Stop))
+		open.R = open.PnL / (open.Qty * math.Abs(open.EntryPrice-open.Stop))
 		res.Trades = append(res.Trades, *open)
 		open = nil
 	}
@@ -143,11 +143,15 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		switch {
 		case open == nil && held:
 			t, _ := en.Target(sym)
-			open = &Trade{EntryTime: now, Qty: p.Qty, EntryPrice: p.AvgPrice, Stop: p.StopPrice, Target: t}
+			side := strategy.Long
+			if p.PSide() == exchange.Short {
+				side = strategy.Short
+			}
+			open = &Trade{Side: side, EntryTime: now, Qty: p.Qty, EntryPrice: p.AvgPrice, Stop: p.StopPrice, Target: t}
 		case open != nil && !held:
-			st, _ := ex.Order(exec.ClientID(sym, now, "exit"))
-			reason := "exit"                                           // the strategy's Exit
-			if engine.TargetHit(strategy.Long, candle.Close, target) { // shortcut: long only until Task 9
+			st, _ := ex.Order(en.Exec.ID(sym, now, "exit"))
+			reason := "exit" // the strategy's Exit
+			if engine.TargetHit(open.Side, candle.Close, target) {
 				reason = "target"
 			}
 			closeTrade(st.FillPrice, reason)
@@ -216,9 +220,9 @@ func (r Result) Write(dir string) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	num := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
-	_ = w.Write([]string{"entry_time", "entry_price", "qty", "stop", "target", "exit_time", "exit_price", "exit_reason", "pnl", "r_multiple"})
+	_ = w.Write([]string{"side", "entry_time", "entry_price", "qty", "stop", "target", "exit_time", "exit_price", "exit_reason", "pnl", "r_multiple"})
 	for _, t := range r.Trades {
-		_ = w.Write([]string{t.EntryTime.Format(time.RFC3339), num(t.EntryPrice), num(t.Qty), num(t.Stop), num(t.Target),
+		_ = w.Write([]string{string(t.Side), t.EntryTime.Format(time.RFC3339), num(t.EntryPrice), num(t.Qty), num(t.Stop), num(t.Target),
 			t.ExitTime.Format(time.RFC3339), num(t.ExitPrice), t.ExitReason, num(t.PnL), num(t.R)})
 	}
 	if w.Flush(); w.Error() != nil {

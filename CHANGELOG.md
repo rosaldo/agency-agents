@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.34.0** (2026-10-29) · `feat` — quant-engine: CCXT perp adapter on the fork - linear swap only (future/option/inverse/margin refused), long and short, margin mode and leverage set and checked at start, reduce-only stops and exits, market orders with a reference price and stops as unified triggers, swap balance from the exchange, one venue package per exchange (hyperliquid, okx, binanceusdm, coinbaseinternational) with no CreateExchange, client IDs from strategy name shaped by the venue, testnet credentials apart from mainnet, equity only on equity venues with news_guard required; R1a refusals, R2 cancel of a stop of unknown fate
 - **v1.33.1** (2026-10-29) · `fix` — quant-engine: entries in one step share the free margin; sizing counts spread and slippage on both legs
 - **v1.33.0** (2026-10-29) · `feat` — quant-engine: perp risk limits (sizing on notional with round-trip fees and slippage, leverage-independent; perp.leverage capped by risk.max_leverage; margin check before entry; min_liquidation_buffer default 0.5)
 - **v1.32.0** (2026-10-29) · `feat` — quant-engine: strategy contract enforced in loop and backtest (entry validation, perp.allow_short, strategy Exit at market, side-aware target, same Decide in both); guard after a halt journals it and keeps status current (R3)

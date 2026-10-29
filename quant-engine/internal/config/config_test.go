@@ -44,19 +44,22 @@ func TestParseValidAppliesDefaults(t *testing.T) {
 
 func TestParseRejectsInvalid(t *testing.T) {
 	cases := map[string]struct{ old, new, want string }{
-		"not confirmed":      {"confirmed_by_user: true", "confirmed_by_user: false", "confirmed_by_user"},
-		"confirm missing":    {"  confirmed_by_user: true", "", "confirmed_by_user"},
-		"strategy refuses":   {"period: 20", "period: 1", "strategy example-sma-cross: period"},
-		"strategy bad type":  {"stop_pct: 4", "stop_pct: [4]", "strategy example-sma-cross"},
-		"no symbols":         {"symbols: [AAA-USD]", "symbols: []", "symbols"},
-		"blank symbol":       {"symbols: [AAA-USD]", "symbols: [\"\"]", "symbols"},
-		"malformed exchange": {"exchange: fake", "exchange: Not An Id", "exchange"},
-		"equity off CCXT":    {"exchange: fake\nasset_class: crypto", "exchange: kraken\nasset_class: equity", "crypto"},
-		"bad mode":           {"exchange: fake", "exchange: fake\nmode: yolo", "mode"},
-		"bad interval":       {"interval: 1h", "interval: soon", "interval"},
-		"bad timezone":       {"interval: 1h", "interval: 1h\ntimezone: Mars/Base", "timezone"},
-		"negative risk":      {"confirmed_by_user: true", "confirmed_by_user: true\n  max_daily_drawdown_pct: -3", "max_daily_drawdown_pct"},
-		"unknown field":      {"interval: 1h", "interval: 1h\nintervall: 2h", "intervall"},
+		"not confirmed":       {"confirmed_by_user: true", "confirmed_by_user: false", "confirmed_by_user"},
+		"confirm missing":     {"  confirmed_by_user: true", "", "confirmed_by_user"},
+		"strategy refuses":    {"period: 20", "period: 1", "strategy example-sma-cross: period"},
+		"strategy bad type":   {"stop_pct: 4", "stop_pct: [4]", "strategy example-sma-cross"},
+		"no symbols":          {"symbols: [AAA-USD]", "symbols: []", "symbols"},
+		"blank symbol":        {"symbols: [AAA-USD]", "symbols: [\"\"]", "symbols"},
+		"malformed exchange":  {"exchange: fake", "exchange: Not An Id", "exchange"},
+		"equity without news": {"asset_class: crypto", "asset_class: equity\nnews_guard: none", "news_guard none"},
+		"bad market":          {"exchange: fake", "exchange: fake\nmarket: future", "market"},
+		"perp on spot":        {"exchange: fake", "exchange: fake\nperp: {leverage: 2}", "market: swap"},
+		"bad margin mode":     {"exchange: fake", "exchange: fake\nmarket: swap\nperp: {margin_mode: portfolio}", "margin_mode"},
+		"bad mode":            {"exchange: fake", "exchange: fake\nmode: yolo", "mode"},
+		"bad interval":        {"interval: 1h", "interval: soon", "interval"},
+		"bad timezone":        {"interval: 1h", "interval: 1h\ntimezone: Mars/Base", "timezone"},
+		"negative risk":       {"confirmed_by_user: true", "confirmed_by_user: true\n  max_daily_drawdown_pct: -3", "max_daily_drawdown_pct"},
+		"unknown field":       {"interval: 1h", "interval: 1h\nintervall: 2h", "intervall"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -111,16 +114,16 @@ func TestPerpLimits(t *testing.T) {
 		t.Fatalf("defaults: max_leverage %v, min_liquidation_buffer %v, leverage %v; want 3, 0.5, 1",
 			c.Risk.MaxLeverage, c.Risk.MinLiquidationBuffer, c.Perp.Leverage)
 	}
-	if _, err := Parse([]byte(validYAML+"perp: {leverage: 3}\n"), example.New()); err != nil {
+	if _, err := Parse([]byte(validYAML+"market: swap\nperp: {leverage: 3}\n"), example.New()); err != nil {
 		t.Fatalf("leverage = max_leverage refused: %v", err)
 	}
 	for extra, want := range map[string]string{
-		"perp: {leverage: 4}\n": "max_leverage",
-		"perp: {leverage: 5}\nrisk: {confirmed_by_user: true, max_leverage: 4}\n": "max_leverage",
-		"perp: {leverage: 0}\n":                                           "leverage",
-		"risk: {confirmed_by_user: true, max_leverage: 0}\n":              "max_leverage",
-		"risk: {confirmed_by_user: true, min_liquidation_buffer: 1}\n":    "min_liquidation_buffer",
-		"risk: {confirmed_by_user: true, min_liquidation_buffer: -0.1}\n": "min_liquidation_buffer",
+		"market: swap\nperp: {leverage: 4}\n":                                                   "max_leverage",
+		"market: swap\nperp: {leverage: 5}\nrisk: {confirmed_by_user: true, max_leverage: 4}\n": "max_leverage",
+		"market: swap\nperp: {leverage: 0}\n":                                                   "leverage",
+		"risk: {confirmed_by_user: true, max_leverage: 0}\n":                                    "max_leverage",
+		"risk: {confirmed_by_user: true, min_liquidation_buffer: 1}\n":                          "min_liquidation_buffer",
+		"risk: {confirmed_by_user: true, min_liquidation_buffer: -0.1}\n":                       "min_liquidation_buffer",
 	} {
 		y := validYAML + extra
 		if strings.HasPrefix(extra, "risk:") || strings.Contains(extra, "\nrisk:") {
@@ -129,5 +132,20 @@ func TestPerpLimits(t *testing.T) {
 		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: err = %v, want one naming %s", extra, err, want)
 		}
+	}
+}
+
+// D10: equities default to news_guard required, an explicit none is refused,
+// and swap defaults to isolated margin.
+func TestEquityAndSwapDefaults(t *testing.T) {
+	c, err := Parse([]byte(strings.Replace(validYAML, "asset_class: crypto", "asset_class: equity\nmarket: swap", 1)), example.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NewsGuard != "required" || c.Perp.MarginMode != "isolated" || c.Market != "swap" {
+		t.Fatalf("news_guard %q margin_mode %q market %q; want required, isolated, swap", c.NewsGuard, c.Perp.MarginMode, c.Market)
+	}
+	if c, _ := Parse([]byte(validYAML), example.New()); c.Market != "spot" {
+		t.Fatalf("market default %q, want spot", c.Market)
 	}
 }

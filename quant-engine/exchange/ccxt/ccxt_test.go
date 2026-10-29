@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 func f(v float64) *float64 { return &v }
 func s(v string) *string   { return &v }
+func b(v bool) *bool       { return &v }
 
 // stub is an in-memory CCXT client: no network.
 type stub struct {
@@ -26,6 +28,9 @@ type stub struct {
 	params     []map[string]any
 	delay      time.Duration
 	balances   lib.Balances
+	prices     []float64      // reference price of every CreateOrder, in order
+	positions  []lib.Position // what FetchPositions reports
+	settings   []string       // SetMarginMode / SetLeverage calls
 }
 
 func newStub(now time.Time) *stub {
@@ -34,7 +39,7 @@ func newStub(now time.Time) *stub {
 }
 
 func (c *stub) LoadMarkets(...any) (map[string]lib.MarketInterface, error) {
-	return map[string]lib.MarketInterface{"AAA/USDT": {Symbol: s("AAA/USDT"), BaseCurrency: s("AAA"), QuoteCurrency: s("USDT"),
+	return map[string]lib.MarketInterface{"AAA/USDT": {Symbol: s("AAA/USDT"), Type: s("spot"), Spot: b(true), BaseCurrency: s("AAA"), QuoteCurrency: s("USDT"),
 		Precision: lib.Precision{Amount: f(0.001)}, Limits: lib.Limits{Amount: lib.MinMax{Min: f(0.01)}}}}, nil
 }
 func (c *stub) FetchOHLCV(string, ...lib.FetchOHLCVOptions) ([]lib.OHLCV, error) { return c.ohlcv, nil }
@@ -67,6 +72,8 @@ func (c *stub) add(symbol, typ, side string, amount float64, trigger *float64, p
 	return o
 }
 
+// CreateOrder records the params and the reference price; params.triggerPrice
+// makes it a resting stop.
 func (c *stub) CreateOrder(symbol, typ, side string, amount float64, opts ...lib.CreateOrderOptions) (lib.Order, error) {
 	var o lib.CreateOrderOptionsStruct
 	for _, fn := range opts {
@@ -76,12 +83,49 @@ func (c *stub) CreateOrder(symbol, typ, side string, amount float64, opts ...lib
 	if o.Params != nil {
 		p = *o.Params
 	}
-	return c.add(symbol, typ, side, amount, nil, p), nil
+	if o.Price != nil {
+		c.prices = append(c.prices, *o.Price)
+	} else {
+		c.prices = append(c.prices, 0)
+	}
+	var trigger *float64
+	if t, ok := p["triggerPrice"].(float64); ok {
+		trigger = &t
+	}
+	ord := c.add(symbol, typ, side, amount, trigger, p)
+	if cid, ok := p["clientOrderId"].(string); ok {
+		ord.ClientOrderId = &cid
+		c.orders[*ord.Id] = ord
+	}
+	return ord, nil
 }
-func (c *stub) CreateStopMarketOrder(symbol, side string, amount, trigger float64, opts ...lib.CreateStopMarketOrderOptions) (lib.Order, error) {
-	return c.add(symbol, "market", side, amount, &trigger, nil), nil
+func (c *stub) FetchPositions(...lib.FetchPositionsOptions) ([]lib.Position, error) {
+	return c.positions, nil
 }
-func (c *stub) CancelOrder(id string, _ ...lib.CancelOrderOptions) (lib.Order, error) {
+func (c *stub) SetMarginMode(mode string, opts ...lib.SetMarginModeOptions) (map[string]any, error) {
+	c.settings = append(c.settings, "margin "+mode)
+	return map[string]any{}, nil
+}
+func (c *stub) SetLeverage(lev int64, opts ...lib.SetLeverageOptions) (map[string]any, error) {
+	c.settings = append(c.settings, "leverage "+strconv.FormatInt(lev, 10))
+	return map[string]any{}, nil
+}
+
+// CancelOrder cancels by exchange id or, with id "", by params.clientOrderId.
+func (c *stub) CancelOrder(id string, opts ...lib.CancelOrderOptions) (lib.Order, error) {
+	if id == "" {
+		var co lib.CancelOrderOptionsStruct
+		for _, fn := range opts {
+			fn(&co)
+		}
+		if co.Params != nil {
+			for oid, o := range c.orders {
+				if deref(o.ClientOrderId) == (*co.Params)["clientOrderId"] {
+					id = oid
+				}
+			}
+		}
+	}
 	o, ok := c.orders[id]
 	if !ok {
 		return o, errors.New("unknown order")
@@ -374,7 +418,7 @@ type twoMarkets struct{ *stub }
 
 func (c *twoMarkets) LoadMarkets(...any) (map[string]lib.MarketInterface, error) {
 	ms, _ := c.stub.LoadMarkets()
-	ms["BBB/USDT"] = lib.MarketInterface{Symbol: s("BBB/USDT"), BaseCurrency: s("BBB"), QuoteCurrency: s("USDT"),
+	ms["BBB/USDT"] = lib.MarketInterface{Symbol: s("BBB/USDT"), Type: s("spot"), Spot: b(true), BaseCurrency: s("BBB"), QuoteCurrency: s("USDT"),
 		Precision: lib.Precision{Amount: f(1)}, Limits: lib.Limits{Amount: lib.MinMax{Min: f(10)}}}
 	return ms, nil
 }

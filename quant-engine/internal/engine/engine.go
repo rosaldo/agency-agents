@@ -42,7 +42,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
-		Exec: &exec.Executor{Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
 		for _, k := range n.Keywords {
@@ -119,6 +119,27 @@ func (e *Engine) Restore(targets map[string]float64, positions []exchange.Positi
 	}
 }
 
+// ConfigureMarkets applies perp.margin_mode and perp.leverage to every
+// traded swap market before any order and checks what the exchange reports
+// as applied: any divergence refuses to trade (FR-P3). Spot has nothing to set.
+func (e *Engine) ConfigureMarkets(ctx context.Context) error {
+	if e.Cfg.Market != "swap" {
+		return nil
+	}
+	want := exchange.MarginSettings{Leverage: e.Cfg.Perp.Leverage, MarginMode: e.Cfg.Perp.MarginMode}
+	for _, sym := range e.Cfg.Symbols {
+		got, err := e.Ex.ConfigureMarket(ctx, e.Env, sym, want)
+		if err != nil {
+			return fmt.Errorf("configure %s: %w", sym, err)
+		}
+		if got != want {
+			return fmt.Errorf("configure %s: the exchange applied leverage %d %s, the yml asks %d %s",
+				sym, got.Leverage, got.MarginMode, want.Leverage, want.MarginMode)
+		}
+	}
+	return nil
+}
+
 // Flatten closes every position at market, cancelling its stop first.
 func (e *Engine) Flatten(ctx context.Context) error {
 	ps, err := e.Ex.Positions(ctx, e.Env)
@@ -190,9 +211,10 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		delete(e.targets, sym) // closed by its stop
 		delete(e.stops, sym)
 	}
-	// shortcut: every position is long until the perp contract gives
-	// exchange.Position a side (Task 9); shorts are refused before entry
 	side := strategy.Long
+	if p.PSide() == exchange.Short {
+		side = strategy.Short
+	}
 	if holding && TargetHit(side, last.Close, e.targets[sym]) {
 		return e.exit(ctx, p, last.Time, "target") // the exchange stop guards it if this fails
 	}
@@ -222,8 +244,12 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, err.Error())
 		return nil
 	}
-	if d.Side == strategy.Short {
-		e.skip(sym, "short entries need the perp adapter, not available yet")
+	if d.Side == strategy.Short && !e.Ex.Capabilities().Swap {
+		e.skip(sym, "short entries need a swap market; this adapter trades spot")
+		return nil
+	}
+	if p.Blocked != "" {
+		e.skip(sym, "symbol blocked: "+p.Blocked)
 		return nil
 	}
 	if why := e.newsBlocks(ctx, sym, last.Time); why != "" {
@@ -238,7 +264,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		step, minQty = l.Lot(sym) // per market when the adapter knows it
 	}
 	qty, why := risk.Size(risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
-		Stop: d.Stop, SpreadPct: e.Cfg.Costs.SpreadPct, SlippagePct: e.Cfg.Costs.SlippagePct, CommissionPct: e.Cfg.Costs.CommissionPct, QtyStep: step, MinQty: minQty})
+		Stop: d.Stop, Short: d.Side == strategy.Short, SpreadPct: e.Cfg.Costs.SpreadPct, SlippagePct: e.Cfg.Costs.SlippagePct, CommissionPct: e.Cfg.Costs.CommissionPct, QtyStep: step, MinQty: minQty})
 	if qty == 0 {
 		e.skip(sym, why)
 		return nil
@@ -249,7 +275,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		return nil
 	}
 	*free -= margin // also on a failed entry: it may have filled
-	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
+	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}
 	e.stops[sym] = d.Stop

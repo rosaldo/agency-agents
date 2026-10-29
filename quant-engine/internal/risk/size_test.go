@@ -97,3 +97,22 @@ func TestSizeCountsSpreadAndSlippageOnBothLegs(t *testing.T) {
 		t.Fatalf("qty = %v (%s), want 21", qty, why)
 	}
 }
+
+// A short mirrors the long: it sells the entry and buys back at the stop,
+// costs against both legs (Task 9).
+func TestSizeIsSideAware(t *testing.T) {
+	// a = 0.1%: sell 104.895 (105*0.999), buy back at 109.3092 (109.2*1.001):
+	// 4.4142 + 0.2142042 commission = 4.6284042 per unit; 100 / 4.6284042 = 21.6
+	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 105, Stop: 109.2, Short: true, SpreadPct: 0.2, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
+	if qty, why := Size(in); qty != 21 {
+		t.Fatalf("short qty = %v (%s), want 21", qty, why)
+	}
+	in.Stop = 100 // a short's stop below the entry is on the wrong side
+	if qty, _ := Size(in); qty != 0 {
+		t.Fatalf("short with stop below entry sized %v, want 0", qty)
+	}
+	in.Short, in.Stop = false, 109.2 // and a long's stop above it
+	if qty, _ := Size(in); qty != 0 {
+		t.Fatalf("long with stop above entry sized %v, want 0", qty)
+	}
+}

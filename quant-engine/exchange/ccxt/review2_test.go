@@ -34,11 +34,22 @@ type stopRefused struct {
 	failures, calls int
 }
 
-func (c *stopRefused) CreateStopMarketOrder(symbol, side string, amount, trigger float64, opts ...lib.CreateStopMarketOrderOptions) (lib.Order, error) {
-	if c.calls++; c.failures < 0 || c.calls <= c.failures {
-		return lib.Order{}, errors.New("exchange: stop refused")
+func (c *stopRefused) CreateOrder(symbol, typ, side string, amount float64, opts ...lib.CreateOrderOptions) (lib.Order, error) {
+	if isStop(opts) {
+		if c.calls++; c.failures < 0 || c.calls <= c.failures {
+			return lib.Order{}, lib.InvalidOrder("stop refused")
+		}
 	}
-	return c.stub.CreateStopMarketOrder(symbol, side, amount, trigger, opts...)
+	return c.stub.CreateOrder(symbol, typ, side, amount, opts...)
+}
+
+// isStop reports a CreateOrder carrying params.triggerPrice.
+func isStop(opts []lib.CreateOrderOptions) bool {
+	var o lib.CreateOrderOptionsStruct
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o.Params != nil && (*o.Params)["triggerPrice"] != nil
 }
 
 // Review 2 N1: a stop the exchange refused is never taken as placed on retry:

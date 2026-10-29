@@ -63,7 +63,7 @@ func TestParamsHash(t *testing.T) {
 	if hashOf(t, strings.Replace(validYAML, "confirmed_by_user: true", "confirmed_by_user: true\n  max_daily_drawdown_pct: 2", 1)) == base {
 		t.Error("a risk limit change kept the hash")
 	}
-	if hashOf(t, validYAML+"perp: {allow_short: true}\n") == base {
+	if hashOf(t, validYAML+"market: swap\nperp: {allow_short: true}\n") == base {
 		t.Error("allowing shorts kept the hash")
 	}
 }

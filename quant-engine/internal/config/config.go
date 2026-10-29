@@ -23,6 +23,7 @@ var exchangeID = regexp.MustCompile(`^[a-z0-9]+$`)
 type Config struct {
 	Mode           string    `yaml:"mode"`
 	Exchange       string    `yaml:"exchange"`
+	Market         string    `yaml:"market"` // spot | swap (linear)
 	AssetClass     string    `yaml:"asset_class"`
 	NewsGuard      string    `yaml:"news_guard"`
 	IntervalSpec   string    `yaml:"interval"`
@@ -41,10 +42,12 @@ type Config struct {
 }
 
 // Perp holds the perpetual-swap settings: the leverage (it sets the margin
-// locked, never the size) and whether the strategy may go short.
+// locked, never the size), the margin mode and whether the strategy may go
+// short. Leverage 1 and no margin mode on spot.
 type Perp struct {
-	Leverage   int  `yaml:"leverage"`
-	AllowShort bool `yaml:"allow_short"`
+	Leverage   int    `yaml:"leverage"`
+	MarginMode string `yaml:"margin_mode"` // isolated | cross; swap only
+	AllowShort bool   `yaml:"allow_short"`
 }
 
 type Risk struct {
@@ -68,6 +71,7 @@ type Costs struct {
 func defaults() Config {
 	return Config{
 		Mode:     "paper",
+		Market:   "spot",
 		Timezone: "UTC",
 		Perp:     Perp{Leverage: 1},
 		Risk: Risk{MaxRiskPerTradePct: 1, MaxDailyDrawdownPct: 3, MaxWeeklyDrawdownPct: 6, MinDemoPeriodDays: 30,
@@ -140,12 +144,18 @@ func (c *Config) validate() error {
 		return fmt.Errorf("mode must be paper or live, got %q", c.Mode)
 	case !exchangeID.MatchString(c.Exchange):
 		return fmt.Errorf("exchange %q must be fake or a CCXT exchange id such as kraken", c.Exchange)
-	case c.Exchange != "fake" && c.AssetClass != "crypto":
-		return errors.New("asset_class must be crypto: exchanges come through CCXT, which covers crypto only")
+	case c.Market != "spot" && c.Market != "swap":
+		return fmt.Errorf("market must be spot or swap (linear), got %q", c.Market)
+	case c.Market == "spot" && (c.Perp != Perp{Leverage: 1}):
+		return errors.New("perp settings apply to market: swap only; remove the perp block on spot")
+	case c.Market == "swap" && c.Perp.MarginMode != "" && c.Perp.MarginMode != "isolated" && c.Perp.MarginMode != "cross":
+		return fmt.Errorf("perp.margin_mode must be isolated or cross, got %q", c.Perp.MarginMode)
 	case c.AssetClass != "crypto" && c.AssetClass != "equity":
 		return fmt.Errorf("asset_class must be crypto or equity, got %q", c.AssetClass)
 	case c.NewsGuard != "" && c.NewsGuard != "none" && c.NewsGuard != "required":
 		return fmt.Errorf("news_guard must be none or required, got %q", c.NewsGuard)
+	case c.AssetClass == "equity" && c.NewsGuard == "none":
+		return errors.New("news_guard none is refused for asset_class equity: equities check news before entering")
 	case len(c.Symbols) == 0 || slices.Contains(c.Symbols, ""):
 		return errors.New("symbols must list at least one non-empty symbol")
 	case r.MaxRiskPerTradePct <= 0:
@@ -168,6 +178,9 @@ func (c *Config) validate() error {
 		return errors.New("costs must be >= 0")
 	case !r.ConfirmedByUser:
 		return errors.New("risk.confirmed_by_user is not true: review the four risk limits and confirm them")
+	}
+	if c.Market == "swap" && c.Perp.MarginMode == "" { // isolated caps a position's loss at its own margin
+		c.Perp.MarginMode = "isolated"
 	}
 	if c.NewsGuard == "" { // equities check news before entering; crypto news lags the price
 		c.NewsGuard = map[string]string{"crypto": "none", "equity": "required"}[c.AssetClass]

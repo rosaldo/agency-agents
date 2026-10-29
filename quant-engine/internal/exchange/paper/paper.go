@@ -223,6 +223,12 @@ func (s *Sim) Capabilities() exchange.Capabilities {
 	return c
 }
 
+// ConfigureMarket echoes the settings: the simulator applies no margin
+// (perp paper simulation is out of this adapter's scope).
+func (s *Sim) ConfigureMarket(_ context.Context, env exchange.Env, _ string, want exchange.MarginSettings) (exchange.MarginSettings, error) {
+	return want, check(env)
+}
+
 // Lot forwards the market data adapter's per-symbol lot, when it has one.
 func (s *Sim) Lot(symbol string) (step, min float64) {
 	if l, ok := s.data.(interface {

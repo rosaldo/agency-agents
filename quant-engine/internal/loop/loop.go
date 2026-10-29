@@ -325,6 +325,12 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string,
 	record func(kind, reason string), save func(func(*State))) string {
 	ended := func() string { return endedReason(dir) }
+	if err := en.ConfigureMarkets(ctx); err != nil { // FR-P3: before any order, reconcile included
+		if ctx.Err() != nil {
+			return ended()
+		}
+		return "refused: " + err.Error()
+	}
 	if err := en.Reconcile(ctx); err != nil {
 		if ctx.Err() != nil {
 			return ended()

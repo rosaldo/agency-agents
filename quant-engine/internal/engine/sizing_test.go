@@ -20,7 +20,7 @@ import (
 func TestLeverageDoesNotChangeTheSize(t *testing.T) {
 	qty := map[int]float64{}
 	for _, lev := range []int{1, 3} {
-		e, f, j, _ := scriptedEngine(t, fmt.Sprintf("perp: {leverage: %d}\n", lev), func(strategy.Input) strategy.Decision {
+		e, f, j, _ := scriptedEngine(t, fmt.Sprintf("market: swap\nperp: {leverage: %d}\n", lev), func(strategy.Input) strategy.Decision {
 			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 100}
 		})
 		if err := e.Step(context.Background()); err != nil {
@@ -51,7 +51,7 @@ func TestInsufficientMarginDoesNotEnter(t *testing.T) {
 	if f.Calls("PlaceOrder") != 0 || !strings.Contains(j.rejected(), "margin") {
 		t.Fatalf("orders %d, rejections %q; want none sent and a margin rejection", f.Calls("PlaceOrder"), j.rejected())
 	}
-	e, f, j, _ = scriptedEngine(t, "perp: {leverage: 3}\n", enter) // margin 7 000
+	e, f, j, _ = scriptedEngine(t, "market: swap\nperp: {leverage: 3}\n", enter) // margin 7 000
 	if err := e.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestInsufficientMarginDoesNotEnter(t *testing.T) {
 // takes an Exit to flat first, in a separate step.
 func TestReversalOnlyThroughFlat(t *testing.T) {
 	answer := strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 100}
-	e, f, j, _ := scriptedEngine(t, "perp: {allow_short: true}\n", func(strategy.Input) strategy.Decision { return answer })
+	e, f, j, _ := scriptedEngine(t, "market: swap\nperp: {allow_short: true}\n", func(strategy.Input) strategy.Decision { return answer })
 	ctx := context.Background()
 	if err := e.Step(ctx); err != nil {
 		t.Fatal(err)

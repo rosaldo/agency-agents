@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	ccxtx "github.com/rosaldo/agency-agents/quant-engine/exchange/ccxt"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
@@ -79,21 +81,91 @@ func TestStopFlattenWithoutALoop(t *testing.T) {
 	}
 }
 
-func TestCCXTExchangeChecks(t *testing.T) {
-	cfgFor := func(t *testing.T, exch, mode string) *config.Config {
-		t.Helper()
-		c, err := config.Parse([]byte(strings.Replace(cfg, "exchange: fake", "exchange: "+exch, 1)+mode), testApp().Strategy)
+// dialed records how the venue was dialed and stops there.
+type dialed struct {
+	cred    map[string]string
+	sandbox bool
+	symbols []string
+}
+
+func testVenue(id string, equity bool, got *dialed) ccxtx.Venue {
+	return ccxtx.Venue{ID: id, Credentials: []string{"WALLET_ADDRESS", "PRIVATE_KEY"}, Equity: equity,
+		Dial: func(cred map[string]string, sandbox bool, symbols []string) (ccxtx.Client, error) {
+			*got = dialed{cred, sandbox, symbols}
+			return nil, errors.New("dialed")
+		}}
+}
+
+func writeYML(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test-strategy.yml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// D9: the yml's exchange must be the venue compiled into the binary; D10: an
+// equity needs a venue that lists equities.
+func TestTheYmlMustNameTheBinarysVenue(t *testing.T) {
+	var got dialed
+	app := testApp()
+	app.Venue = testVenue("hyperliquid", false, &got)
+	for body, want := range map[string]string{
+		strings.Replace(cfg, "exchange: fake", "exchange: okx", 1):                                                   "built for \"hyperliquid\"",
+		strings.Replace(cfg, "exchange: fake\nasset_class: crypto", "exchange: hyperliquid\nasset_class: equity", 1): "equity",
+	} {
+		if _, err := app.load(writeYML(t, body)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err %v, want it naming %s", err, want)
+		}
+	}
+	if _, err := testApp().load(writeYML(t, strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1))); err == nil {
+		t.Error("a binary without a venue accepted an exchange")
+	}
+	app.Venue.Equity = true
+	c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake\nasset_class: crypto", "exchange: hyperliquid\nasset_class: equity", 1)))
+	if err != nil || c.NewsGuard != "required" {
+		t.Fatalf("equity on an equity venue: %v, news_guard %q", err, c.NewsGuard)
+	}
+	if _, err := app.load(writeYML(t, cfg)); err != nil {
+		t.Fatalf("fake refused: %v", err)
+	}
+}
+
+// §9: live reads only mainnet credentials, paper only testnet ones (and
+// trades the sandbox with them); paper without them uses public data.
+func TestCredentialsFollowTheMode(t *testing.T) {
+	var got dialed
+	app := testApp()
+	app.Venue = testVenue("hyperliquid", false, &got)
+	load := func(mode string) *config.Config {
+		c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1)+mode))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return c
 	}
-	if _, _, err := testApp().newExchange(cfgFor(t, "nosuchexchange", ""), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "unknown") {
-		t.Fatalf("unknown CCXT id: %v", err)
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_WALLET_ADDRESS", "0xmain")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "main-hunter2")
+	if _, _, err := app.newExchange(load("mode: paper\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred != nil || got.sandbox {
+		t.Fatalf("paper with mainnet credentials only: cred %v sandbox %v (%v); want public data", got.cred, got.sandbox, err)
 	}
-	t.Setenv("TEST_STRATEGY_KRAKEN_API_KEY", "")
-	if _, _, err := testApp().newExchange(cfgFor(t, "kraken", "mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_KRAKEN_API_KEY") {
-		t.Fatalf("live without credentials: %v", err)
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_WALLET_ADDRESS", "0xtest")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_PRIVATE_KEY", "test-hunter2")
+	if _, _, err := app.newExchange(load("mode: paper\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || !got.sandbox {
+		t.Fatalf("paper with testnet credentials: cred %v sandbox %v", got.cred != nil, got.sandbox)
+	}
+	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "main-hunter2" || got.sandbox {
+		t.Fatalf("live: mainnet credential not used, sandbox %v", got.sandbox)
+	}
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "")
+	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY") {
+		t.Fatalf("live without its key: %v", err)
+	}
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "test-hunter2") // the testnet key reused on mainnet
+	_, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "separate") || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("crossed credentials: %v", err)
 	}
 }
 

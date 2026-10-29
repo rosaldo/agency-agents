@@ -66,9 +66,9 @@ func TestBadEntriesAreRefusedAndJournaled(t *testing.T) {
 		{"no stop", "", strategy.Decision{Action: strategy.Enter, Side: strategy.Long}, "no stop"},
 		{"long stop above entry", "", strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 106}, "wrong side"},
 		{"long stop at entry", "", strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 105}, "wrong side"},
-		{"short stop below entry", "perp: {allow_short: true}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 104}, "wrong side"},
-		{"short not allowed", "perp: {allow_short: false}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 110}, "allow_short"},
-		{"short allowed but not tradable yet", "perp: {allow_short: true}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 110}, "short"},
+		{"short stop below entry", "market: swap\nperp: {allow_short: true}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 104}, "wrong side"},
+		{"short not allowed", "market: swap\nperp: {allow_short: false}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 110}, "allow_short"},
+		{"short on a spot adapter", "market: swap\nperp: {allow_short: true}\n", strategy.Decision{Action: strategy.Enter, Side: strategy.Short, Stop: 110}, "short"},
 		{"unknown side", "", strategy.Decision{Action: strategy.Enter, Side: "up", Stop: 100}, "side"},
 	}
 	for _, tc := range cases {

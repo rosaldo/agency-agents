@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -16,31 +17,36 @@ func (Secret) MarshalJSON() ([]byte, error) { return []byte(`"***"`), nil }
 func (Secret) MarshalYAML() (any, error)    { return "***", nil }
 func (s Secret) Reveal() string             { return string(s) }
 
-type Credentials struct {
-	Key, Secret, Passphrase Secret
-}
-
-// EnvPrefix is the variable prefix of a strategy on an adapter:
-// ("example-sma-cross", "my-ex") -> "EXAMPLE_SMA_CROSS_MY_EX_".
-func EnvPrefix(name, adapter string) string {
-	return strings.ToUpper(strings.ReplaceAll(name+"_"+adapter, "-", "_")) + "_"
-}
-
-// LoadCredentials reads <NAME>_<ADAPTER>_API_KEY, _API_SECRET and, when the
-// adapter needs one, _PASSPHRASE. Errors name the variable, never a value.
-func LoadCredentials(name, adapter string, needPassphrase bool, getenv func(string) string) (Credentials, error) {
-	p := EnvPrefix(name, adapter)
-	names := []string{p + "API_KEY", p + "API_SECRET"}
-	if needPassphrase {
-		names = append(names, p+"PASSPHRASE")
+// EnvPrefix is the variable prefix of a strategy on a venue, mainnet or
+// testnet: ("example-sma-cross", "my-ex", true) -> "EXAMPLE_SMA_CROSS_MY_EX_TESTNET_".
+func EnvPrefix(name, venue string, testnet bool) string {
+	p := name + "_" + venue
+	if testnet {
+		p += "_TESTNET"
 	}
-	vals := make([]Secret, 3)
-	for i, n := range names {
-		if vals[i] = Secret(getenv(n)); vals[i] == "" {
-			return Credentials{}, fmt.Errorf("credentials: environment variable %s is not set", n)
+	return strings.ToUpper(strings.ReplaceAll(p, "-", "_")) + "_"
+}
+
+// LoadCredentials reads <PREFIX><SUFFIX> for every required and optional
+// suffix, with the testnet or the mainnet prefix. A required variable that is
+// unset, or a secret equal to the other network's, fails: a real key never
+// serves the demo, nor the other way round. Errors name variables, never values.
+func LoadCredentials(name, venue string, testnet bool, required, optional []string, getenv func(string) string) (map[string]Secret, error) {
+	p, other := EnvPrefix(name, venue, testnet), EnvPrefix(name, venue, !testnet)
+	out := map[string]Secret{}
+	for i, suffix := range append(slices.Clone(required), optional...) {
+		v := getenv(p + suffix)
+		switch {
+		case v == "" && i < len(required):
+			return nil, fmt.Errorf("credentials: environment variable %s is not set", p+suffix)
+		case v == "":
+			continue
+		case v == getenv(other+suffix) && !strings.HasSuffix(suffix, "ADDRESS"): // an address is public and may be the same account on both
+			return nil, fmt.Errorf("credentials: %s and %s hold the same value; testnet and mainnet need separate credentials", p+suffix, other+suffix)
 		}
+		out[suffix] = Secret(v)
 	}
-	return Credentials{Key: vals[0], Secret: vals[1], Passphrase: vals[2]}, nil
+	return out, nil
 }
 
 // refuseSecrets rejects a yml carrying a credential-looking key at any depth,
@@ -51,7 +57,7 @@ func refuseSecrets(b []byte) error {
 		return fmt.Errorf("config: %s", oneLine(err.Error()))
 	}
 	if k := findSecretKey(&root); k != "" {
-		return fmt.Errorf("config: key %q looks like a credential; credentials go only in environment variables (<STRATEGY>_<EXCHANGE>_API_KEY, ...)", k)
+		return fmt.Errorf("config: key %q looks like a credential; credentials go only in environment variables (<STRATEGY>_<EXCHANGE>[_TESTNET]_<NAME>)", k)
 	}
 	return nil
 }
@@ -70,7 +76,7 @@ func findSecretKey(n *yaml.Node) string {
 
 func isSecretKey(k string) bool {
 	k = strings.ToLower(k)
-	for _, w := range []string{"secret", "token", "passphrase", "password", "apikey"} {
+	for _, w := range []string{"secret", "token", "passphrase", "password", "apikey", "privatekey", "mnemonic"} {
 		if strings.Contains(k, w) {
 			return true
 		}

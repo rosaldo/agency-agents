@@ -125,7 +125,8 @@ func drawdown(open, equity float64) float64 {
 type SizeInput struct {
 	Equity      float64 // account equity in quote currency
 	RiskPct     float64 // risk.max_risk_per_trade_pct
-	Entry, Stop float64 // long: 0 < Stop < Entry
+	Entry, Stop float64 // long: 0 < Stop < Entry; short: Stop > Entry
+	Short       bool
 	SpreadPct   float64 // costs.spread_pct: half of it is paid on each fill
 	SlippagePct float64 // costs.slippage_pct: paid on each fill, entry and stop
 	// CommissionPct is the taker fee per fill (costs.commission_pct), paid on
@@ -140,11 +141,17 @@ type SizeInput struct {
 // budget, with both fills at their worst: half the spread plus the slippage
 // against each leg, and the commission on each fill's notional. qty 0 means do not enter; why says why.
 func Size(in SizeInput) (qty float64, why string) {
-	if in.Stop <= 0 || in.Stop >= in.Entry {
-		return 0, fmt.Sprintf("stop %.8g is not between 0 and the entry %.8g", in.Stop, in.Entry)
+	switch {
+	case !in.Short && (in.Stop <= 0 || in.Stop >= in.Entry):
+		return 0, fmt.Sprintf("stop %.8g is not between 0 and the long entry %.8g", in.Stop, in.Entry)
+	case in.Short && (in.Entry <= 0 || in.Stop <= in.Entry):
+		return 0, fmt.Sprintf("stop %.8g is not above the short entry %.8g", in.Stop, in.Entry)
 	}
 	adj := (in.SpreadPct/2 + in.SlippagePct) / 100
-	buy, sell := in.Entry*(1+adj), in.Stop*(1-adj)
+	buy, sell := in.Entry*(1+adj), in.Stop*(1-adj) // long: buy the entry, sell at the stop
+	if in.Short {
+		buy, sell = in.Stop*(1+adj), in.Entry*(1-adj) // short: sell the entry, buy back at the stop
+	}
 	perUnit := buy - sell + (buy+sell)*in.CommissionPct/100
 	raw := in.Equity * in.RiskPct / 100 / perUnit
 	if in.QtyStep > 0 {

@@ -19,6 +19,7 @@ import (
 var ErrHalt = errors.New("exec: halt")
 
 type Executor struct {
+	Name    string // Strategy.Name(): part of every client ID, so strategies sharing an account never collide
 	Ex      exchange.Exchange
 	Env     exchange.Env
 	Now     func() time.Time
@@ -58,17 +59,29 @@ type Gate interface {
 	Allow(now time.Time, equity float64) error
 }
 
-// Plan is a long entry with its protective stop and optional target
-// (0 = none). Qty comes from risk.Size.
+// Plan is an entry on Side ("" = long) with its protective stop and
+// optional target (0 = none). Qty comes from risk.Size.
 type Plan struct {
+	Side                     exchange.PositionSide
 	Entry, Stop, Target, Qty float64
 }
 
-// ClientID derives an idempotent order ID from symbol, candle and purpose, so
-// a resend after a lost response can never open a second order.
-func ClientID(symbol string, candle time.Time, purpose string) string {
-	h := sha256.Sum256(fmt.Appendf(nil, "%s|%d|%s", symbol, candle.Unix(), purpose))
-	return hex.EncodeToString(h[:])[:24]
+// ClientID derives an idempotent 16-byte order digest from strategy name,
+// symbol, candle and purpose, so a resend after a lost response can never
+// open a second order.
+func ClientID(name, symbol string, candle time.Time, purpose string) [16]byte {
+	h := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%d|%s", name, symbol, candle.Unix(), purpose))
+	return [16]byte(h[:16])
+}
+
+// ID is the client order ID for symbol, candle and purpose, in the shape the
+// adapter's venue accepts (32 hex characters by default).
+func (e *Executor) ID(symbol string, candle time.Time, purpose string) string {
+	d := ClientID(e.Name, symbol, candle, purpose)
+	if f, ok := e.Ex.(exchange.IDFormatter); ok {
+		return f.FormatClientID(d)
+	}
+	return hex.EncodeToString(d[:])
 }
 
 func (e *Executor) retry(ctx context.Context, call func() (exchange.OrderState, error)) (st exchange.OrderState, err error) {
@@ -87,7 +100,7 @@ func (e *Executor) retry(ctx context.Context, call func() (exchange.OrderState, 
 	return st, err
 }
 
-// Enter buys plan.Qty of symbol at market with the stop on the exchange:
+// Enter opens plan.Qty of symbol at market on plan.Side with the stop on the exchange:
 // attached to the entry when the adapter supports it, otherwise sent as soon
 // as the entry fills. A stop that cannot be placed flattens the position and
 // returns ErrHalt.
@@ -103,14 +116,18 @@ func (e *Executor) Enter(ctx context.Context, symbol string, candle time.Time, p
 		e.record(journal.Event{Kind: journal.Limit, Symbol: symbol, Reason: err.Error()})
 		return err
 	}
-	req := exchange.OrderRequest{ClientID: ClientID(symbol, candle, "entry"), Symbol: symbol,
-		Side: exchange.Buy, Qty: plan.Qty, Type: exchange.Market}
+	side := plan.Side
+	if side == "" {
+		side = exchange.Long
+	}
+	req := exchange.OrderRequest{ClientID: e.ID(symbol, candle, "entry"), Symbol: symbol,
+		Side: side.Opening(), Qty: plan.Qty, Type: exchange.Market}
 	if e.Ex.Capabilities().AttachedStop {
 		req.AttachedStop = plan.Stop
 	}
-	ev := journal.Event{ClientID: req.ClientID, Symbol: symbol, Side: string(exchange.Buy), Qty: plan.Qty}
-	e.record(journal.Event{Kind: journal.Proposed, ClientID: req.ClientID, Symbol: symbol, Side: string(exchange.Buy), Qty: plan.Qty,
-		Price: plan.Entry, Reason: fmt.Sprintf("stop %.8g target %.8g", plan.Stop, plan.Target)})
+	ev := journal.Event{ClientID: req.ClientID, Symbol: symbol, Side: string(req.Side), Qty: plan.Qty}
+	e.record(journal.Event{Kind: journal.Proposed, ClientID: req.ClientID, Symbol: symbol, Side: string(req.Side), Qty: plan.Qty,
+		Price: plan.Entry, Reason: fmt.Sprintf("%s stop %.8g target %.8g", side, plan.Stop, plan.Target)})
 	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.PlaceOrder(ctx, e.Env, req) })
 	if err != nil || st.Status != exchange.Filled {
 		return e.unconfirmed(ctx, req, st, err, plan.Stop)
@@ -118,7 +135,7 @@ func (e *Executor) Enter(ctx context.Context, symbol string, candle time.Time, p
 	if req.AttachedStop > 0 {
 		return nil
 	}
-	return e.protect(ctx, symbol, st.Qty, plan.Stop, ClientID(symbol, candle, "stop"), ClientID(symbol, candle, "flatten"))
+	return e.protect(ctx, symbol, side, st.Qty, plan.Stop, e.ID(symbol, candle, "stop"), e.ID(symbol, candle, "flatten"))
 }
 
 // protectiveTimeout bounds actions that must finish even after a stop
@@ -150,15 +167,15 @@ func (e *Executor) unconfirmed(ctx context.Context, req exchange.OrderRequest, s
 }
 
 // protect places the stop or, failing that, flattens and halts.
-func (e *Executor) protect(ctx context.Context, symbol string, qty, stop float64, stopID, flatID string) error {
+func (e *Executor) protect(ctx context.Context, symbol string, side exchange.PositionSide, qty, stop float64, stopID, flatID string) error {
 	ctx, cancel := protective(ctx)
 	defer cancel()
 	if stop <= 0 { // no known stop price: flatten rather than guess one
-		return e.flattenAndHalt(ctx, symbol, qty, flatID, errors.New("no stop price known"))
+		return e.flattenAndHalt(ctx, symbol, side, qty, flatID, errors.New("no stop price known"))
 	}
-	ev := journal.Event{ClientID: stopID, Symbol: symbol, Side: string(exchange.Sell), Qty: qty, Price: stop}
+	ev := journal.Event{ClientID: stopID, Symbol: symbol, Side: string(side.Closing()), Qty: qty, Price: stop}
 	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) {
-		return e.Ex.PlaceStop(ctx, e.Env, stopID, symbol, exchange.Sell, qty, stop)
+		return e.Ex.PlaceStop(ctx, e.Env, stopID, symbol, side.Closing(), qty, stop)
 	})
 	if err == nil && st.Status != exchange.Open {
 		err = fmt.Errorf("stop not resting (status %q)", st.Status)
@@ -166,13 +183,18 @@ func (e *Executor) protect(ctx context.Context, symbol string, qty, stop float64
 	if err == nil {
 		return nil
 	}
-	return e.flattenAndHalt(ctx, symbol, qty, flatID, err)
+	if !errors.Is(err, exchange.ErrRefused) { // R2: it may rest on the exchange; never leave it behind
+		cev := journal.Event{ClientID: stopID, Symbol: symbol, Side: string(side.Closing()), Qty: qty,
+			Reason: "cancel the stop of unknown fate before flattening"}
+		_, _ = e.send(ctx, cev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, stopID) })
+	}
+	return e.flattenAndHalt(ctx, symbol, side, qty, flatID, err)
 }
 
 // flattenAndHalt closes an unprotectable position at market and halts.
-func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, qty float64, flatID string, err error) error {
-	flat := exchange.OrderRequest{ClientID: flatID, Symbol: symbol, Side: exchange.Sell, Qty: qty, Type: exchange.Market}
-	ev := journal.Event{ClientID: flatID, Symbol: symbol, Side: string(exchange.Sell), Qty: qty}
+func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, side exchange.PositionSide, qty float64, flatID string, err error) error {
+	flat := exchange.OrderRequest{ClientID: flatID, Symbol: symbol, Side: side.Closing(), Qty: qty, Type: exchange.Market, ReduceOnly: true}
+	ev := journal.Event{ClientID: flatID, Symbol: symbol, Side: string(side.Closing()), Qty: qty}
 	_, ferr := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.PlaceOrder(ctx, e.Env, flat) })
 	herr := fmt.Errorf("%w: stop for %s failed (%v); position flattened", ErrHalt, symbol, err)
 	if ferr != nil {
@@ -184,7 +206,7 @@ func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, qty float6
 
 // Reconcile runs before any decision: every position without a stop on the
 // exchange gets one at stopFor(position), or is flattened when that stop is
-// unknown (0) or does not fit below the market.
+// unknown (0) or does not fit on the losing side of the market.
 func (e *Executor) Reconcile(ctx context.Context, stopFor func(exchange.Position) float64) error {
 	ps, err := e.Ex.Positions(ctx, e.Env)
 	if err != nil {
@@ -196,14 +218,14 @@ func (e *Executor) Reconcile(ctx context.Context, stopFor func(exchange.Position
 		if p.Qty <= 0 || p.StopClientID != "" {
 			continue
 		}
-		errs = append(errs, e.protect(ctx, p.Symbol, p.Qty, stopFor(p),
-			ClientID(p.Symbol, now, "reconcile-stop"), ClientID(p.Symbol, now, "reconcile-flatten")))
+		errs = append(errs, e.protect(ctx, p.Symbol, p.PSide(), p.Qty, stopFor(p),
+			e.ID(p.Symbol, now, "reconcile-stop"), e.ID(p.Symbol, now, "reconcile-flatten")))
 	}
 	return errors.Join(errs...)
 }
 
 // Exit closes a position at market: its stop is cancelled first so a
-// resting sell stop cannot outlive the position; if the sell then fails, the
+// resting stop cannot outlive the position; if the sell then fails, the
 // stop is put back (or the position flattened and the engine halted).
 func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Time, reason string) error {
 	if err := ctx.Err(); err != nil {
@@ -214,14 +236,15 @@ func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Ti
 	pctx, cancel := protective(ctx)
 	defer cancel()
 	if p.StopClientID != "" {
-		ev := journal.Event{ClientID: p.StopClientID, Symbol: p.Symbol, Side: string(exchange.Sell), Qty: p.Qty, Reason: reason}
+		ev := journal.Event{ClientID: p.StopClientID, Symbol: p.Symbol, Side: string(p.PSide().Closing()), Qty: p.Qty, Reason: reason}
 		if _, err := e.send(pctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(pctx, e.Env, p.StopClientID) }); err != nil {
 			return errors.Join(fmt.Errorf("exit %s: cancel stop: %w", p.Symbol, err),
 				e.Reconcile(pctx, func(exchange.Position) float64 { return p.StopPrice }))
 		}
 	}
-	req := exchange.OrderRequest{ClientID: ClientID(p.Symbol, candle, "exit"), Symbol: p.Symbol, Side: exchange.Sell, Qty: p.Qty, Type: exchange.Market}
-	ev := journal.Event{ClientID: req.ClientID, Symbol: p.Symbol, Side: string(exchange.Sell), Qty: p.Qty, Reason: reason}
+	req := exchange.OrderRequest{ClientID: e.ID(p.Symbol, candle, "exit"), Symbol: p.Symbol, Side: p.PSide().Closing(), Qty: p.Qty,
+		Type: exchange.Market, ReduceOnly: true}
+	ev := journal.Event{ClientID: req.ClientID, Symbol: p.Symbol, Side: string(req.Side), Qty: p.Qty, Reason: reason}
 	st, err := e.send(pctx, ev, func() (exchange.OrderState, error) { return e.Ex.PlaceOrder(pctx, e.Env, req) })
 	if err == nil && st.Status == exchange.Filled {
 		return nil

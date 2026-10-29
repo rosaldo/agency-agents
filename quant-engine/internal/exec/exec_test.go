@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -148,11 +149,23 @@ func TestReconcileFlattensWhenNoStopFits(t *testing.T) {
 }
 
 func TestClientIDIsDeterministic(t *testing.T) {
-	a, b := ClientID("AAA", t0, "entry"), ClientID("AAA", t0, "entry")
-	if a != b || a == ClientID("AAA", t0, "stop") || a == ClientID("AAA", t0.Add(time.Hour), "entry") || len(a) > 32 {
-		t.Fatalf("client IDs: %s %s", a, b)
+	a, b := ClientID("s", "AAA", t0, "entry"), ClientID("s", "AAA", t0, "entry")
+	if a != b || a == ClientID("s", "AAA", t0, "stop") || a == ClientID("s", "AAA", t0.Add(time.Hour), "entry") ||
+		a == ClientID("other", "AAA", t0, "entry") {
+		t.Fatalf("client IDs: %x %x", a, b)
+	}
+	if id := (&Executor{Name: "s", Ex: fake.New(fake.Options{})}).ID("AAA", t0, "entry"); len(id) != 32 {
+		t.Fatalf("default client ID %q, want 32 hex characters", id)
+	}
+	if id := (&Executor{Name: "s", Ex: hexed{}}).ID("AAA", t0, "entry"); id != "0x"+hex.EncodeToString(a[:]) {
+		t.Fatalf("venue-formatted client ID %q", id)
 	}
 }
+
+// hexed is an adapter whose venue wants 0x-prefixed IDs.
+type hexed struct{ exchange.Exchange }
+
+func (hexed) FormatClientID(d [16]byte) string { return "0x" + hex.EncodeToString(d[:]) }
 
 func TestLossesCrossingTheDailyLimitBlockNewEntries(t *testing.T) {
 	f, e := setup(t, false)
@@ -205,7 +218,7 @@ func TestEveryOrderIsJournaled(t *testing.T) {
 	if got := kinds(m); got != "proposed,sent,filled,sent,open" {
 		t.Fatalf("journal kinds = %s", got)
 	}
-	if m.evs[2].ClientID != ClientID("AAA", t0, "entry") || m.evs[4].ClientID != ClientID("AAA", t0, "stop") || m.evs[2].Price != 100 {
+	if m.evs[2].ClientID != e.ID("AAA", t0, "entry") || m.evs[4].ClientID != e.ID("AAA", t0, "stop") || m.evs[2].Price != 100 {
 		t.Fatalf("events = %+v", m.evs)
 	}
 }

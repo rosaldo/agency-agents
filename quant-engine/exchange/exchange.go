@@ -40,7 +40,32 @@ const (
 	Filled   Status = "filled"
 	Canceled Status = "canceled"
 	Rejected Status = "rejected"
+	Unknown  Status = "unknown" // sent, fate not known yet: never taken as resting nor as refused
 )
+
+// PositionSide is the side of a position; spot holdings are always Long.
+type PositionSide string
+
+const (
+	Long  PositionSide = "long"
+	Short PositionSide = "short"
+)
+
+// Opening is the order side that opens a position on side.
+func (s PositionSide) Opening() Side {
+	if s == Short {
+		return Sell
+	}
+	return Buy
+}
+
+// Closing is the order side of a stop or exit of a position on side.
+func (s PositionSide) Closing() Side {
+	if s == Short {
+		return Buy
+	}
+	return Sell
+}
 
 // OrderRequest is an entry or exit. AttachedStop > 0 asks the exchange to
 // place the protective stop together with the entry (Capabilities.AttachedStop).
@@ -52,37 +77,65 @@ type OrderRequest struct {
 	Type         OrderType
 	Limit        float64
 	AttachedStop float64
+	ReduceOnly   bool // exits and flatten: may only shrink a position (FR-P2)
 }
 
 type OrderState struct {
-	ClientID  string
-	Symbol    string
-	Side      Side
-	Qty       float64
-	FillPrice float64
-	StopPrice float64
-	Status    Status
+	ClientID   string
+	ExchangeID string // the exchange's order id, once known
+	Symbol     string
+	Side       Side
+	Qty        float64
+	Filled     float64 // executed quantity
+	FillPrice  float64
+	StopPrice  float64
+	Status     Status
 }
 
-// Position is a long holding and the stop resting on the exchange for it
-// (StopClientID empty = unprotected).
+// Position is the engine's OWN position in a symbol and the stop resting on
+// the exchange for it (StopClientID empty = unprotected). Side "" is Long.
 type Position struct {
-	Symbol       string
-	Qty          float64
-	AvgPrice     float64
-	StopClientID string
-	StopPrice    float64
+	Symbol           string
+	Side             PositionSide
+	Qty              float64 // own quantity
+	AvgPrice         float64
+	StopClientID     string
+	StopPrice        float64
+	AccountQty       float64 // what the exchange reports on Side (netting); 0 = not reported
+	Leverage         float64 // applied; 0 = not reported (spot)
+	MarginMode       string  // "isolated" | "cross" | "" (spot or not reported)
+	LiquidationPrice float64 // 0 = not reported
+	Blocked          string  // non-empty: no entries on this symbol, with the reason
+}
+
+// PSide is the position's side, Long when unset.
+func (p Position) PSide() PositionSide {
+	if p.Side == Short {
+		return Short
+	}
+	return Long
 }
 
 type Quote struct{ Bid, Ask, Last float64 }
 
+// Balance: Cash is free cash (spot) or free margin (perp) in the quote or
+// settle currency; Equity is the account value with unrealized P&L.
 type Balance struct{ Cash, Equity float64 }
 
+// MarginSettings are a perp market's leverage and margin mode.
+type MarginSettings struct {
+	Leverage   int
+	MarginMode string // "isolated" | "cross"; "" on spot
+}
+
 type Capabilities struct {
-	AttachedStop bool    // entry and stop in one order (bracket/OCO)
-	Demo         bool    // has a demo/testnet environment
-	QtyStep      float64 // quantity increment
-	MinQty       float64 // minimum order quantity
+	AttachedStop       bool    // entry and stop in one order (bracket/OCO)
+	Demo               bool    // has a demo/testnet environment
+	QtyStep            float64 // quantity increment
+	MinQty             float64 // minimum order quantity
+	Swap               bool    // bound to linear swap markets: shorts allowed, exits reduce-only
+	ReportsLiquidation bool    // a position must carry LiquidationPrice; missing = violation
+	Netting            bool    // one net position per symbol on the account
 }
 
 type Exchange interface {
@@ -94,9 +147,22 @@ type Exchange interface {
 	Positions(ctx context.Context, env Env) ([]Position, error)
 	Balance(ctx context.Context, env Env) (Balance, error)
 	Capabilities() Capabilities
+	// ConfigureMarket applies margin mode and leverage on symbol and returns
+	// what the exchange reports as applied; spot returns {1, ""}.
+	ConfigureMarket(ctx context.Context, env Env, symbol string, want MarginSettings) (MarginSettings, error)
 }
 
-var ErrRealInPaper = errors.New("exchange: real environment refused in paper mode")
+var (
+	ErrRealInPaper = errors.New("exchange: real environment refused in paper mode")
+	// ErrRefused wraps an answer by which the venue did NOT take the order.
+	ErrRefused = errors.New("exchange: refused")
+)
+
+// IDFormatter is implemented by adapters whose venue needs client order IDs
+// in a given shape; the engine hands it a 16-byte digest.
+type IDFormatter interface {
+	FormatClientID(digest [16]byte) string
+}
 
 // CheckEnv is the guard every adapter runs first: a paper engine never
 // reaches the real environment.

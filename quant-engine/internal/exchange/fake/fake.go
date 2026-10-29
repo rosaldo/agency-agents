@@ -27,11 +27,25 @@ type Options struct {
 	// plus slippage; commission is charged on each fill's notional.
 	SpreadPct, SlippagePct, CommissionPct float64
 	Latency                               time.Duration // per call; honours ctx cancellation
+	// Shorts makes the fake a linear swap: a sell with no position opens a
+	// short (cash-settled), and Capabilities reports Swap.
+	Shorts bool
+	// Applied, when set, is what ConfigureMarket reports whatever is asked.
+	Applied *exchange.MarginSettings
 }
 
 type position struct {
+	side     exchange.PositionSide
 	qty, avg float64
 	stopID   string
+}
+
+// sign is +1 for a long, -1 for a short.
+func (p *position) sign() float64 {
+	if p.side == exchange.Short {
+		return -1
+	}
+	return 1
 }
 
 type failure struct {
@@ -81,12 +95,19 @@ func (f *Fake) Unprotected() int {
 func (f *Fake) SetPosition(symbol string, qty, price float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pos[symbol] = &position{qty: qty, avg: price}
+	f.pos[symbol] = &position{side: exchange.Long, qty: qty, avg: price}
+}
+
+// SetShort plants a short without a stop, as left by a crash.
+func (f *Fake) SetShort(symbol string, qty, price float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pos[symbol] = &position{side: exchange.Short, qty: qty, avg: price}
 }
 
 // Advance moves every symbol to its next candle, fills stops the candle
-// crossed (at the stop, or the open on a gap down) and reports false when
-// the candles are exhausted.
+// crossed (at the stop, or the open on a gap through it) and reports false
+// when the candles are exhausted.
 func (f *Fake) Advance() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -101,12 +122,18 @@ func (f *Fake) Advance() bool {
 			continue
 		}
 		st := f.orders[p.stopID]
-		if c.Low <= st.StopPrice {
-			st.FillPrice, st.Status = f.fill(min(c.Open, st.StopPrice), exchange.Sell, p.qty), exchange.Filled
-			f.orders[p.stopID] = st
-			f.cash += p.qty * st.FillPrice
-			delete(f.pos, sym)
+		switch {
+		case p.side != exchange.Short && c.Low <= st.StopPrice:
+			st.FillPrice = f.fill(min(c.Open, st.StopPrice), exchange.Sell, p.qty)
+		case p.side == exchange.Short && c.High >= st.StopPrice:
+			st.FillPrice = f.fill(max(c.Open, st.StopPrice), exchange.Buy, p.qty)
+		default:
+			continue
 		}
+		st.Status, st.Filled = exchange.Filled, p.qty
+		f.orders[p.stopID] = st
+		f.cash += p.sign() * p.qty * st.FillPrice
+		delete(f.pos, sym)
 	}
 	return true
 }
@@ -239,27 +266,40 @@ func (f *Fake) place(r exchange.OrderRequest) (exchange.OrderState, error) {
 		return st, errors.New("fake: attached stop must be below the price of a buy")
 	}
 	p := f.pos[r.Symbol]
-	if r.Side == exchange.Sell && (p == nil || r.Qty > p.qty) {
+	reduces := p != nil && r.Side == p.side.Closing()
+	switch {
+	case reduces && r.Qty > p.qty:
+		return st, errors.New("fake: order exceeds the position (reverse through flat)")
+	case !reduces && r.ReduceOnly:
+		return st, errors.New("fake: reduce-only order would open or grow a position")
+	case !reduces && r.Side == exchange.Sell && !f.opt.Shorts:
 		return st, errors.New("fake: sell exceeds the position")
 	}
 	px = f.fill(px, r.Side, r.Qty)
-	if r.Side == exchange.Buy {
+	signed := r.Qty
+	if r.Side == exchange.Sell {
+		signed = -r.Qty
+	}
+	f.cash -= px * signed
+	if reduces {
+		p.qty -= r.Qty
+		if p.qty <= 1e-12 {
+			f.cancelStop(p)
+			delete(f.pos, r.Symbol)
+		}
+	} else {
 		if p == nil {
-			p = &position{}
+			side := exchange.Long
+			if r.Side == exchange.Sell {
+				side = exchange.Short
+			}
+			p = &position{side: side}
 			f.pos[r.Symbol] = p
 		}
 		p.avg = (p.avg*p.qty + px*r.Qty) / (p.qty + r.Qty)
 		p.qty += r.Qty
-		f.cash -= px * r.Qty
-	} else {
-		p.qty -= r.Qty
-		f.cash += px * r.Qty
-		if p.qty == 0 {
-			f.cancelStop(p)
-			delete(f.pos, r.Symbol)
-		}
 	}
-	st.FillPrice, st.Status = px, exchange.Filled
+	st.FillPrice, st.Status, st.Filled = px, exchange.Filled, r.Qty
 	f.orders[r.ClientID] = st
 	if r.AttachedStop > 0 {
 		id := r.ClientID + "-stop"
@@ -293,10 +333,12 @@ func (f *Fake) PlaceStop(ctx context.Context, env exchange.Env, clientID, symbol
 	switch {
 	case err != nil:
 		return st, err
-	case side != exchange.Sell || p == nil || qty <= 0 || qty > p.qty:
-		return st, errors.New("fake: a stop must sell at most the held quantity")
-	case stopPrice >= px:
-		return st, errors.New("fake: stop must be below the current price")
+	case p == nil || side != p.side.Closing() || qty <= 0 || qty > p.qty:
+		return st, errors.Join(exchange.ErrRefused, errors.New("fake: a stop must close at most the held quantity"))
+	case p.side != exchange.Short && stopPrice >= px:
+		return st, errors.Join(exchange.ErrRefused, errors.New("fake: a long's stop must be below the current price"))
+	case p.side == exchange.Short && stopPrice <= px:
+		return st, errors.Join(exchange.ErrRefused, errors.New("fake: a short's stop must be above the current price"))
 	}
 	f.cancelStop(p)
 	st.Status = exchange.Open
@@ -331,7 +373,7 @@ func (f *Fake) Positions(ctx context.Context, env exchange.Env) ([]exchange.Posi
 	}
 	out := []exchange.Position{}
 	for sym, p := range f.pos {
-		ep := exchange.Position{Symbol: sym, Qty: p.qty, AvgPrice: p.avg}
+		ep := exchange.Position{Symbol: sym, Side: p.side, Qty: p.qty, AvgPrice: p.avg, AccountQty: p.qty}
 		if p.stopID != "" {
 			ep.StopClientID, ep.StopPrice = p.stopID, f.orders[p.stopID].StopPrice
 		}
@@ -351,11 +393,29 @@ func (f *Fake) Balance(ctx context.Context, env exchange.Env) (exchange.Balance,
 	b := exchange.Balance{Cash: f.cash, Equity: f.cash}
 	for sym, p := range f.pos {
 		px, _ := f.price(sym)
-		b.Equity += p.qty * px
+		b.Equity += p.sign() * p.qty * px
+		if p.side == exchange.Short { // a short's proceeds and its notional stay locked
+			b.Cash -= 2 * p.qty * p.avg
+		}
 	}
 	return b, late
 }
 
 func (f *Fake) Capabilities() exchange.Capabilities {
-	return exchange.Capabilities{AttachedStop: f.opt.AttachedStop, Demo: true, QtyStep: f.opt.QtyStep, MinQty: f.opt.MinQty}
+	return exchange.Capabilities{AttachedStop: f.opt.AttachedStop, Demo: true, QtyStep: f.opt.QtyStep, MinQty: f.opt.MinQty, Swap: f.opt.Shorts}
+}
+
+// ConfigureMarket records and echoes the settings (Configured reads them);
+// FailNext("ConfigureMarket", ...) and Applied override the answer in tests.
+func (f *Fake) ConfigureMarket(ctx context.Context, env exchange.Env, symbol string, want exchange.MarginSettings) (exchange.MarginSettings, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	late, err := f.begin(ctx, "ConfigureMarket", env)
+	if err != nil {
+		return exchange.MarginSettings{}, err
+	}
+	if f.opt.Applied != nil {
+		return *f.opt.Applied, late
+	}
+	return want, late
 }

@@ -51,13 +51,13 @@ func TestCorruptLastLineIsSkippedWithAWarning(t *testing.T) {
 
 func TestNoSecretReachesTheJournal(t *testing.T) {
 	env := map[string]string{"TEST_FAKE_API_KEY": "key-hunter2", "TEST_FAKE_API_SECRET": "secret-hunter2"}
-	cred, err := config.LoadCredentials("test", "fake", false, func(k string) string { return env[k] })
+	cred, err := config.LoadCredentials("test", "fake", false, []string{"API_KEY", "API_SECRET"}, nil, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	j, _ := Open(dir, "paper", "abc")
-	_ = j.Append(Event{Kind: Rejected, Reason: fmt.Sprintf("auth failed for %v / %s", cred, cred.Secret)})
+	_ = j.Append(Event{Kind: Rejected, Reason: fmt.Sprintf("auth failed for %v / %s", cred, cred["API_SECRET"])})
 	j.Close()
 	b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
 	if strings.Contains(string(b), "hunter2") {
