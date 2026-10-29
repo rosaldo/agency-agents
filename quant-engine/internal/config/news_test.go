@@ -66,3 +66,12 @@ type withNews struct {
 }
 
 func (w withNews) NewsPolicy() strategy.NewsPolicy { return w.p }
+
+// Feeds without keywords would match no headline and leave the guard always
+// clear: fail open. Parse refuses such a policy.
+func TestNewsPolicyFeedsWithoutKeywordsRefused(t *testing.T) {
+	s := withNews{example.New(), strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}}}
+	if _, err := Parse([]byte(validYAML), s); err == nil || !strings.Contains(err.Error(), "keywords") {
+		t.Fatalf("feeds without keywords: %v", err)
+	}
+}

@@ -14,7 +14,7 @@ import (
 
 // openTTY opens the controlling terminal itself, never stdin, so a plain tool
 // call or pipe cannot answer. It is not proof of a human: a process of the
-// same user can open a pseudo-terminal and type (references/gates.md, Limit).
+// same user can open a pseudo-terminal and type.
 // The trading process calls it, so no file or variable handed over by another
 // process stands in for the answer. Tests replace it.
 var openTTY = openTerminal

@@ -103,6 +103,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 	c.name = s.Name()
 	if ns, ok := s.(strategy.NewsSource); ok {
 		p := ns.NewsPolicy()
+		if len(p.Feeds) > 0 && len(p.Keywords) == 0 { // no keyword matches nothing: the guard would always clear
+			return nil, fmt.Errorf("config: strategy %s: news policy has feeds but no keywords", s.Name())
+		}
 		c.news = &p
 	}
 	return &c, nil

@@ -15,8 +15,8 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
 )
 
-// Validation is the walk-forward verdict file the Statistician signs off;
-// format in references/gates.md.
+// Validation is the walk-forward verdict file the Statistician signs off:
+// status: validated, method: walk-forward, params_hash: <the run's hash>.
 type Validation struct {
 	Status     string `yaml:"status"`
 	Method     string `yaml:"method"`
