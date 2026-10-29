@@ -59,17 +59,17 @@ func TestCredentialsFromEnvironment(t *testing.T) {
 	}
 }
 
-// The same secret in the testnet and mainnet variables is refused: a real key
-// must never serve the demo, nor the other way round.
-func TestCrossedCredentialsRefused(t *testing.T) {
+// The same key in the testnet and mainnet variables is accepted, each read
+// from its own variable: Hyperliquid signs the two networks apart.
+func TestSameKeyOnBothNetworksIsAccepted(t *testing.T) {
 	env := map[string]string{
 		"EXAMPLE_SMA_CROSS_MY_EX_WALLET_ADDRESS": "0xsame", "EXAMPLE_SMA_CROSS_MY_EX_PRIVATE_KEY": "same-hunter2",
 		"EXAMPLE_SMA_CROSS_MY_EX_TESTNET_WALLET_ADDRESS": "0xsame", "EXAMPLE_SMA_CROSS_MY_EX_TESTNET_PRIVATE_KEY": "same-hunter2",
 	}
 	for _, testnet := range []bool{false, true} {
-		_, err := LoadCredentials(example.Name, "my-ex", testnet, suffixes, nil, func(k string) string { return env[k] })
-		if err == nil || !strings.Contains(err.Error(), "PRIVATE_KEY") || strings.Contains(err.Error(), "hunter2") {
-			t.Fatalf("testnet=%v: crossed credential: %v", testnet, err)
+		got, err := LoadCredentials(example.Name, "my-ex", testnet, suffixes, nil, func(k string) string { return env[k] })
+		if err != nil || got["PRIVATE_KEY"].Reveal() != "same-hunter2" {
+			t.Fatalf("testnet=%v: same key on both networks: %v", testnet, err)
 		}
 	}
 }

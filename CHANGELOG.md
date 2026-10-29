@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.39.2** (2026-10-29) · `fix` — quant-engine: the same key may sit in the _TESTNET_ and mainnet variables - Hyperliquid signs the two networks apart; the variables stay separate
 - **v1.39.1** (2026-10-29) · `fix` — quant-engine: a late or empty fetchPositions never cuts own_qty nor sweeps its stop - the drop is applied only when a reading at least 1 min later agrees; meanwhile entries are blocked and the stop stays (QA-T11 B1); tests close M4-M7
 - **v1.39.0** (2026-10-29) · `feat` — quant-engine: the engine manages only what it opened (FR-P8/FR-P6) - exits, flatten and stops capped at own_qty (spot never sells the account's other coins); swap accounts netted per symbol (ownbook.Reconcile: foreign_qty_detected blocks entries, own_qty only goes down, opposite side left untouched and refused); oversized stops resized new-first, orphan own stops swept; cancel outside the registry is ErrNotOwn; R1b unknown order blocks only its symbol; N2 fresh protective context and final reconcile; trail partial fill, unknown-fate lookup and immediate stale save (QA-T10b-1/2/3); funding journaled (FR-P5)
 - **v1.38.1** (2026-10-29) · `test` — quant-engine: TestSecondLoopIsImpossible waits for the loop process to exit before TempDir cleanup (shared waitGone helper)

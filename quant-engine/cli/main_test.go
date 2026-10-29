@@ -162,10 +162,9 @@ func TestCredentialsFollowTheMode(t *testing.T) {
 	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY") {
 		t.Fatalf("live without its key: %v", err)
 	}
-	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "test-hunter2") // the testnet key reused on mainnet
-	_, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "separate") || strings.Contains(err.Error(), "hunter2") {
-		t.Fatalf("crossed credentials: %v", err)
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "test-hunter2") // one key on both networks: accepted
+	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || got.sandbox {
+		t.Fatalf("live with the testnet's key: cred %v sandbox %v", got.cred != nil, got.sandbox)
 	}
 }
 

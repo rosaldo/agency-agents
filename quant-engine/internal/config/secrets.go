@@ -29,10 +29,11 @@ func EnvPrefix(name, venue string, testnet bool) string {
 
 // LoadCredentials reads <PREFIX><SUFFIX> for every required and optional
 // suffix, with the testnet or the mainnet prefix. A required variable that is
-// unset, or a secret equal to the other network's, fails: a real key never
-// serves the demo, nor the other way round. Errors name variables, never values.
+// unset fails; errors name variables, never values. The two networks keep
+// separate variables, yet may hold the same key: Hyperliquid signs testnet
+// and mainnet actions apart (source "b" / "a"), so one key serves both.
 func LoadCredentials(name, venue string, testnet bool, required, optional []string, getenv func(string) string) (map[string]Secret, error) {
-	p, other := EnvPrefix(name, venue, testnet), EnvPrefix(name, venue, !testnet)
+	p := EnvPrefix(name, venue, testnet)
 	out := map[string]Secret{}
 	for i, suffix := range append(slices.Clone(required), optional...) {
 		v := getenv(p + suffix)
@@ -41,8 +42,6 @@ func LoadCredentials(name, venue string, testnet bool, required, optional []stri
 			return nil, fmt.Errorf("credentials: environment variable %s is not set", p+suffix)
 		case v == "":
 			continue
-		case v == getenv(other+suffix) && !strings.HasSuffix(suffix, "ADDRESS"): // an address is public and may be the same account on both
-			return nil, fmt.Errorf("credentials: %s and %s hold the same value; testnet and mainnet need separate credentials", p+suffix, other+suffix)
 		}
 		out[suffix] = Secret(v)
 	}
