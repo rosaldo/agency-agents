@@ -65,6 +65,9 @@ func (e *Engine) trail(ctx context.Context, p exchange.Position, in strategy.Inp
 	stale, err := e.Exec.MoveStop(ctx, p, next, candle)
 	if stale != "" {
 		e.staleStops[p.Symbol] = stale
+		if e.OnStale != nil {
+			e.OnStale()
+		}
 	}
 	switch {
 	case errors.Is(err, exec.ErrStopFilled):

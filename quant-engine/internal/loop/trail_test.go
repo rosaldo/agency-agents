@@ -64,8 +64,7 @@ func TestTrailedStopAndStaleStopSurviveARestart(t *testing.T) {
 		switch i {
 		case 1: // entered at 100; the move at 105 will not get the old stop cancelled
 			ex.fail = true
-		case 2:
-			ex.fail = false
+		case 2: // still failing: the final reconcile's retry leaves it stale too
 			_ = RequestStop(dir, false)
 		}
 	}
@@ -75,6 +74,7 @@ func TestTrailedStopAndStaleStopSurviveARestart(t *testing.T) {
 		t.Fatalf("state after stop = %+v; want the stop at 102 and the old one stale", st)
 	}
 	stale := st.StaleStops["AAA"]
+	ex.fail = false
 	if _, err := f.CancelOrder(context.Background(), exchange.Demo, st.Positions[0].StopClientID); err != nil { // the venue drops it
 		t.Fatal(err)
 	}

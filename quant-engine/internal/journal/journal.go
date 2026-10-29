@@ -22,6 +22,15 @@ const (
 	Rejected = "rejected"
 	Limit    = "limit" // a risk limit was reached
 	Halt     = "halt"
+	// FR-P8 / R1b: a symbol takes no new entry, with the reason; ForeignQty
+	// when the account holds more than the engine's own quantity.
+	Blocked    = "blocked"
+	ForeignQty = "foreign_qty_detected"
+	Unblocked  = "unblocked"
+	// ClosedOutside: the engine's position is gone without its own exit
+	// (stop, liquidation or a close outside the engine); target cleared.
+	ClosedOutside = "closed_outside"
+	Funding       = "funding" // FR-P5: a funding payment as the venue reports it (Amount)
 )
 
 type Event struct {
@@ -34,6 +43,7 @@ type Event struct {
 	Side       string    `json:"side,omitempty"`
 	Qty        float64   `json:"qty,omitempty"`
 	Price      float64   `json:"price,omitempty"`
+	Amount     float64   `json:"amount,omitempty"` // funding, in the settle currency
 	Reason     string    `json:"reason,omitempty"`
 }
 

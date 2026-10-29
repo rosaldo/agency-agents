@@ -264,6 +264,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		_ = j.Append(journal.Event{Time: tick.Now(), Kind: kind, Reason: reason})
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
+	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
 	beatDone := make(chan struct{})
 	go func() {
 		defer close(beatDone)
@@ -305,6 +306,14 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			reason += "; positions flattened"
 		}
 		fdone()
+	} else if restored {
+		// N2: a stop the exchange dropped late (a cancel cut short by the stop
+		// request may still land) is put back before the loop goes
+		rctx, rdone := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := en.Reconcile(rctx); err != nil {
+			reason += "; final reconcile failed: " + err.Error()
+		}
+		rdone()
 	}
 	_ = os.Remove(stopPath(dir)) // honoured; a stop sent before the loop started is honoured too
 	fin, done := context.WithTimeout(context.Background(), 500*time.Millisecond)

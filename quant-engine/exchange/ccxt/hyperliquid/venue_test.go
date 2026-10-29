@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ type venueServer struct {
 	info     []string // raw /info bodies
 	nextOid  int
 	status   map[int]string // oid -> filled | open | canceled
+	held     float64        // the account's BTC position, moved by filled market orders
 }
 
 func newVenueServer(t *testing.T) *venueServer {
@@ -70,7 +72,12 @@ func newVenueServer(t *testing.T) *venueServer {
 		}
 		switch q.Type {
 		case "clearinghouseState":
-			_, _ = io.WriteString(w, `{"marginSummary":{"accountValue":"1000.0","totalMarginUsed":"0.0"},"withdrawable":"1000.0","assetPositions":[],"time":1793282400000}`)
+			pos := ""
+			if v.held != 0 { // the account must show what the engine holds: the adapter nets against it (FR-P8)
+				pos = `{"type":"oneWay","position":{"coin":"BTC","szi":"` + strconv.FormatFloat(v.held, 'f', -1, 64) +
+					`","entryPx":"80000.0","leverage":{"type":"isolated","value":2},"liquidationPx":"40000.0","positionValue":"160.0","unrealizedPnl":"0.0","marginUsed":"80.0","maxLeverage":40}}`
+			}
+			_, _ = io.WriteString(w, `{"marginSummary":{"accountValue":"1000.0","totalMarginUsed":"0.0"},"withdrawable":"1000.0","assetPositions":[`+pos+`],"time":1793282400000}`)
 			return
 		case "userAbstraction":
 			_, _ = io.WriteString(w, `"default"`)
@@ -106,6 +113,11 @@ func (v *venueServer) answer(body string) string {
 		return `{"status":"ok","response":{"type":"default"}}`
 	}
 	v.status[v.nextOid] = "filled"
+	if strings.Contains(body, `"b":true`) {
+		v.held += 0.002
+	} else {
+		v.held -= 0.002
+	}
 	return `{"status":"ok","response":{"type":"order","data":{"statuses":[{"filled":{"totalSz":"0.002","avgPx":"80000.0","oid":` + itoa(v.nextOid) + `}}]}}}`
 }
 

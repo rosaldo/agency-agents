@@ -73,7 +73,6 @@ func TestContractSizedSwapTradesInBase(t *testing.T) {
 	if err := e.Enter(ctx, btc, now, exec.Plan{Side: exchange.Long, Entry: 100, Stop: 90, Qty: 0.03}); err != nil {
 		t.Fatal(err)
 	}
-	c.positions = []lib.Position{{Symbol: s(btc), Side: s("long"), Contracts: f(3)}}
 	ps, err := a.Positions(ctx, exchange.Real)
 	if err != nil || len(ps) != 1 || !near(ps[0].Qty, 0.03) || !near(ps[0].AccountQty, 0.03) || ps[0].StopPrice != 90 {
 		t.Fatalf("positions %+v %v; want 0.03 BTC held and on the exchange (3 contracts), stop at 90", ps, err)

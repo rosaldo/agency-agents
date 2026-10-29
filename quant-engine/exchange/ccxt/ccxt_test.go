@@ -31,6 +31,8 @@ type stub struct {
 	prices     []float64      // reference price of every CreateOrder, in order
 	positions  []lib.Position // what FetchPositions reports
 	settings   []string       // SetMarginMode / SetLeverage calls
+	funding    []lib.FundingHistory
+	sent       []float64 // amount of every order created, in order
 }
 
 func newStub(now time.Time) *stub {
@@ -65,6 +67,7 @@ func (c *stub) add(symbol, typ, side string, amount float64, trigger *float64, p
 		status, c.nextStatus = c.nextStatus, ""
 	}
 	o := lib.Order{Id: id, Symbol: s(symbol), Type: s(typ), Side: s(side), Amount: f(amount), Status: s(status), TriggerPrice: trigger}
+	c.sent = append(c.sent, amount)
 	if status == "closed" {
 		o.Average = f(100)
 	}
@@ -99,8 +102,38 @@ func (c *stub) CreateOrder(symbol, typ, side string, amount float64, opts ...lib
 	}
 	return ord, nil
 }
+func (c *stub) FetchFundingHistory(...lib.FetchFundingHistoryOptions) ([]lib.FundingHistory, error) {
+	return c.funding, nil
+}
+
+// FetchPositions reports c.positions when a test sets them, else the
+// account's net position per symbol from the filled orders, as a one-way
+// (netting) venue does.
 func (c *stub) FetchPositions(...lib.FetchPositionsOptions) ([]lib.Position, error) {
-	return c.positions, nil
+	if c.positions != nil {
+		return c.positions, nil
+	}
+	net := map[string]float64{}
+	for _, o := range c.orders {
+		if deref(o.Status) == "closed" {
+			q := val(o.Amount)
+			if deref(o.Side) == "sell" {
+				q = -q
+			}
+			net[deref(o.Symbol)] += q
+		}
+	}
+	var out []lib.Position
+	for sym, q := range net {
+		side := "long"
+		if q < 0 {
+			side, q = "short", -q
+		}
+		if q > 1e-12 {
+			out = append(out, lib.Position{Symbol: s(sym), Side: s(side), Contracts: f(q)})
+		}
+	}
+	return out, nil
 }
 func (c *stub) SetMarginMode(mode string, opts ...lib.SetMarginModeOptions) (map[string]any, error) {
 	c.settings = append(c.settings, "margin "+mode)

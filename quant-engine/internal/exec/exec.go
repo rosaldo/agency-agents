@@ -138,14 +138,15 @@ func (e *Executor) Enter(ctx context.Context, symbol string, candle time.Time, p
 	return e.protect(ctx, symbol, side, st.Qty, plan.Stop, e.ID(symbol, candle, "stop"), e.ID(symbol, candle, "flatten"))
 }
 
-// protectiveTimeout bounds actions that must finish even after a stop
-// request cancelled the loop's context.
-const protectiveTimeout = 30 * time.Second
+// ProtectiveTimeout bounds actions that must finish even after a stop
+// request cancelled the loop's context (a variable only so tests can
+// shorten it).
+var ProtectiveTimeout = 30 * time.Second
 
 // protective detaches ctx from cancellation: once a position may exist, the
 // actions that protect it are not abandoned halfway.
 func protective(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), protectiveTimeout)
+	return context.WithTimeout(context.WithoutCancel(ctx), ProtectiveTimeout)
 }
 
 // unconfirmed handles an order whose fill is not confirmed (an error, or a
@@ -206,7 +207,9 @@ func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, side excha
 
 // Reconcile runs before any decision: every position without a stop on the
 // exchange gets one at stopFor(position), or is flattened when that stop is
-// unknown (0) or does not fit on the losing side of the market.
+// unknown (0) or does not fit on the losing side of the market. A stop that
+// closes more than the own quantity (the account netted it down, FR-P8) is
+// resized to it, new stop first.
 func (e *Executor) Reconcile(ctx context.Context, stopFor func(exchange.Position) float64) error {
 	ps, err := e.Ex.Positions(ctx, e.Env)
 	if err != nil {
@@ -215,7 +218,15 @@ func (e *Executor) Reconcile(ctx context.Context, stopFor func(exchange.Position
 	now := e.Now()
 	var errs []error
 	for _, p := range ps {
-		if p.Qty <= 0 || p.StopClientID != "" {
+		if p.Qty <= 0 {
+			continue
+		}
+		if p.StopClientID != "" && p.StopQty > p.Qty*(1+1e-9) {
+			_, err := e.resize(ctx, p, e.ID(p.Symbol, now, "resize-stop"), "the stop closes more than the own quantity")
+			errs = append(errs, err)
+			continue
+		}
+		if p.StopClientID != "" {
 			continue
 		}
 		errs = append(errs, e.protect(ctx, p.Symbol, p.PSide(), p.Qty, stopFor(p),
@@ -238,8 +249,7 @@ func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Ti
 	if p.StopClientID != "" {
 		ev := journal.Event{ClientID: p.StopClientID, Symbol: p.Symbol, Side: string(p.PSide().Closing()), Qty: p.Qty, Reason: reason}
 		if _, err := e.send(pctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(pctx, e.Env, p.StopClientID) }); err != nil {
-			return errors.Join(fmt.Errorf("exit %s: cancel stop: %w", p.Symbol, err),
-				e.Reconcile(pctx, func(exchange.Position) float64 { return p.StopPrice }))
+			return errors.Join(fmt.Errorf("exit %s: cancel stop: %w", p.Symbol, err), e.restore(ctx, p))
 		}
 	}
 	req := exchange.OrderRequest{ClientID: e.ID(p.Symbol, candle, "exit"), Symbol: p.Symbol, Side: p.PSide().Closing(), Qty: p.Qty,
@@ -252,8 +262,16 @@ func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Ti
 	if st.Status != exchange.Rejected {
 		_, _ = e.Ex.CancelOrder(pctx, e.Env, req.ClientID)
 	}
-	perr := e.Reconcile(pctx, func(exchange.Position) float64 { return p.StopPrice })
-	return errors.Join(fmt.Errorf("exit %s not confirmed (status %q): %v", p.Symbol, st.Status, err), perr)
+	return errors.Join(fmt.Errorf("exit %s not confirmed (status %q): %v", p.Symbol, st.Status, err), e.restore(ctx, p))
+}
+
+// restore puts p's stop back after a failed exit, in a protective context of
+// its own (N2): the exit's may have run out on a cancel that hung, which may
+// still land and leave p naked.
+func (e *Executor) restore(ctx context.Context, p exchange.Position) error {
+	rctx, cancel := protective(ctx)
+	defer cancel()
+	return e.Reconcile(rctx, func(exchange.Position) float64 { return p.StopPrice })
 }
 
 // ErrStopFilled means the old stop fired while MoveStop was swapping it: the
@@ -288,10 +306,12 @@ func (e *Executor) MoveStop(ctx context.Context, p exchange.Position, next float
 	}
 	if err != nil {
 		if !errors.Is(err, exchange.ErrRefused) { // R2: it may rest; never leave it behind
-			e.cancel(ctx, p, newID, "cancel the trail stop of unknown fate") // as protect does: an order never placed has nothing to cancel
+			// the adapter looks it up by client ID first: one found resting and
+			// not cancelled is stale; one the venue does not have is not
+			stale = e.cancel(ctx, p, newID, "cancel the trail stop of unknown fate")
 		}
 		// the old stop is the protection; one the venue dropped meanwhile goes back
-		return "", errors.Join(fmt.Errorf("trail %s: %w", p.Symbol, err),
+		return stale, errors.Join(fmt.Errorf("trail %s: %w", p.Symbol, err),
 			e.Reconcile(ctx, func(exchange.Position) float64 { return p.StopPrice }))
 	}
 	if p.StopClientID == "" || p.StopClientID == newID {
@@ -302,16 +322,45 @@ func (e *Executor) MoveStop(ctx context.Context, p exchange.Position, next float
 	switch {
 	case old.Status == exchange.Filled: // it fired in between: the position is gone, so is the new stop's purpose
 		return e.cancel(ctx, p, newID, "trail: the old stop filled; cancel the new one"), ErrStopFilled
-	case cerr != nil:
+	case cerr != nil && !gone(old.Status): // not cancelled, and the venue's answer does not say it is gone
 		return p.StopClientID, nil
+	case old.Filled > 0: // it fired in part: the new stop closes more than what is left (QA-T10b-1)
+		q := p
+		q.Qty, q.StopClientID, q.StopPrice = p.Qty-old.Filled, newID, next
+		return e.resize(ctx, q, e.ID(p.Symbol, candle, "trail-rest"), "trail: the old stop filled in part")
 	}
 	return "", nil
 }
 
-// cancel asks to cancel a stop and returns its ID when that failed.
+// gone: a cancelled or refused order no longer rests.
+func gone(st exchange.Status) bool { return st == exchange.Canceled || st == exchange.Rejected }
+
+// resize swaps p's stop for one of p.Qty at the same price, new first, so p
+// is never without a stop; the old one's ID comes back when its cancel failed
+// (the adapter's sweep also cancels own stops that protect nothing).
+func (e *Executor) resize(ctx context.Context, p exchange.Position, id, reason string) (stale string, err error) {
+	ctx, cancel := protective(ctx)
+	defer cancel()
+	side := p.PSide().Closing()
+	ev := journal.Event{ClientID: id, Symbol: p.Symbol, Side: string(side), Qty: p.Qty, Price: p.StopPrice, Reason: reason}
+	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) {
+		return e.Ex.PlaceStop(ctx, e.Env, id, p.Symbol, side, p.Qty, p.StopPrice)
+	})
+	if err == nil && st.Status != exchange.Open {
+		err = fmt.Errorf("stop not resting (status %q)", st.Status)
+	}
+	if err != nil { // the larger stop stays: it still protects
+		return "", fmt.Errorf("resize the stop of %s: %w", p.Symbol, err)
+	}
+	return e.cancel(ctx, p, p.StopClientID, reason+": cancel the larger stop"), nil
+}
+
+// cancel asks to cancel a stop and returns its ID when that failed and the
+// answer leaves it possibly resting.
 func (e *Executor) cancel(ctx context.Context, p exchange.Position, id, reason string) string {
 	ev := journal.Event{ClientID: id, Symbol: p.Symbol, Side: string(p.PSide().Closing()), Qty: p.Qty, Reason: reason}
-	if _, err := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, id) }); err != nil {
+	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, id) })
+	if err != nil && (st.Status == exchange.Open || st.Status == exchange.Unknown) {
 		return id
 	}
 	return ""

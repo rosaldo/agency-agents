@@ -101,6 +101,7 @@ type Position struct {
 	AvgPrice         float64
 	StopClientID     string
 	StopPrice        float64
+	StopQty          float64 // quantity the stop still closes; above Qty = oversized, the executor resizes it
 	AccountQty       float64 // what the exchange reports on Side (netting); 0 = not reported
 	Leverage         float64 // applied; 0 = not reported (spot)
 	MarginMode       string  // "isolated" | "cross" | "" (spot or not reported)
@@ -135,7 +136,7 @@ type Capabilities struct {
 	MinQty             float64 // minimum order quantity
 	Swap               bool    // bound to linear swap markets: shorts allowed, exits reduce-only
 	ReportsLiquidation bool    // a position must carry LiquidationPrice; missing = violation
-	Netting            bool    // one net position per symbol on the account
+	Netting            bool    // one net position per symbol on the account (FR-P8 netting rule applies)
 }
 
 type Exchange interface {
@@ -156,7 +157,24 @@ var (
 	ErrRealInPaper = errors.New("exchange: real environment refused in paper mode")
 	// ErrRefused wraps an answer by which the venue did NOT take the order.
 	ErrRefused = errors.New("exchange: refused")
+	// ErrNotOwn: the order is not in the engine's registry; it is never
+	// cancelled nor changed (FR-P8).
+	ErrNotOwn = errors.New("exchange: order not opened by this engine")
 )
+
+// FundingReporter is implemented by adapters whose venue reports the funding
+// paid or received on a symbol (FR-P5): the engine journals it.
+type FundingReporter interface {
+	Funding(ctx context.Context, env Env, symbol string, since time.Time) ([]FundingPayment, error)
+}
+
+// FundingPayment is one funding settlement; Amount is as the venue reports
+// it, in the settle currency.
+type FundingPayment struct {
+	Time   time.Time
+	Symbol string
+	Amount float64
+}
 
 // IDFormatter is implemented by adapters whose venue needs client order IDs
 // in a given shape; the engine hands it a 16-byte digest.

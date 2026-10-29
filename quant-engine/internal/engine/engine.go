@@ -16,6 +16,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/ownbook"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
@@ -32,10 +33,15 @@ type Engine struct {
 	// no checker is configured, so such entries are refused.
 	News        NewsChecker
 	NewsTimeout time.Duration // 0 = 10s
+	// OnStale, when set, persists the stale stops at once: a crash right
+	// after a move must not lose the one left behind (QA-T10b-3).
+	OnStale func()
 
 	targets    map[string]float64
 	stops      map[string]float64 // stop given at entry or moved by the trail, re-placed if the exchange drops it
 	staleStops map[string]string  // symbol -> old stop a trail could not cancel (FR-P9)
+	blocked    map[string]string  // last journaled block reason per symbol
+	funding    map[string]time.Time
 }
 
 // New wires the executor and the breaker from the config; cfg must have been
@@ -43,7 +49,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
-		staleStops: map[string]string{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
 		for _, k := range n.Keywords {
@@ -153,6 +159,9 @@ func (e *Engine) Flatten(ctx context.Context) error {
 	}
 	var errs []error
 	for _, p := range ps {
+		if p.Qty <= 0 { // a blocked symbol with nothing of the engine's
+			continue
+		}
 		if err := e.Exec.Exit(ctx, p, e.Exec.Now(), "flatten"); err != nil {
 			errs = append(errs, err)
 			continue
@@ -166,7 +175,10 @@ func (e *Engine) Flatten(ctx context.Context) error {
 // Reconcile protects positions left without a stop, before any decision: the
 // stop goes back at the price the strategy gave at entry. A position whose
 // stop the engine does not know gets stop 0, which the executor flattens.
+// The stale stops of earlier moves are retried first, here, so the guard
+// after a halt and the start retry them too.
 func (e *Engine) Reconcile(ctx context.Context) error {
+	e.retryStale(ctx)
 	return e.Exec.Reconcile(ctx, func(p exchange.Position) float64 { return e.stops[p.Symbol] })
 }
 
@@ -179,7 +191,6 @@ func (e *Engine) Step(ctx context.Context) error {
 	if err := e.Risk.Allow(e.Exec.Now(), bal.Equity); err != nil {
 		return err
 	}
-	e.retryStale(ctx)
 	// every step, not only at start: a late fill or a stop the exchange
 	// dropped gets protected before anything else
 	if err := e.Reconcile(ctx); err != nil {
@@ -196,6 +207,8 @@ func (e *Engine) Step(ctx context.Context) error {
 		}
 		held[p.Symbol] = p
 	}
+	e.journalBlocks(held)
+	e.journalFunding(ctx, held)
 	var errs []error
 	free := bal.Cash // free margin left for this step's entries
 	for _, sym := range e.Cfg.Symbols {
@@ -215,9 +228,12 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		return fmt.Errorf("step: candles %s: %v", sym, err)
 	}
 	last := cs[len(cs)-1]
-	p, holding := held[sym]
-	if !holding {
-		delete(e.targets, sym) // closed by its stop
+	p := held[sym]
+	holding := p.Qty > 0 // a blocked symbol may come back with nothing held
+	if _, known := e.stops[sym]; known && !holding {
+		e.note(journal.ClosedOutside, sym, "the engine's position is gone without an exit of this step "+
+			"(its stop, a liquidation or a close outside the engine); target cleared")
+		delete(e.targets, sym)
 		delete(e.stops, sym)
 	}
 	side := strategy.Long
@@ -341,6 +357,72 @@ func TargetHit(side strategy.Side, close, target float64) bool {
 		return close <= target
 	}
 	return close >= target
+}
+
+// journalBlocks journals each change of a symbol's block (FR-P8, R1b): the
+// account holding foreign quantity, an own order of unknown fate, a position
+// on the other side; and its lifting.
+func (e *Engine) journalBlocks(held map[string]exchange.Position) {
+	for _, sym := range e.Cfg.Symbols {
+		why := held[sym].Blocked
+		switch was := e.blocked[sym]; {
+		case why == was:
+			continue
+		case why == "":
+			e.note(journal.Unblocked, sym, "was: "+was)
+		case strings.HasPrefix(why, ownbook.ForeignQty):
+			e.note(journal.ForeignQty, sym, why)
+		default:
+			e.note(journal.Blocked, sym, why)
+		}
+		e.blocked[sym] = why
+	}
+}
+
+// journalFunding journals the funding the venue reports on the held swap
+// positions since the last look (FR-P5); none before the engine first saw
+// the position. A failed read is tried again next step.
+func (e *Engine) journalFunding(ctx context.Context, held map[string]exchange.Position) {
+	fr, ok := e.Ex.(exchange.FundingReporter)
+	if !ok || e.Cfg.Market != "swap" {
+		return
+	}
+	now := e.Exec.Now()
+	for sym, p := range held {
+		since, seen := e.funding[sym]
+		if p.Qty <= 0 || !seen {
+			if p.Qty > 0 {
+				e.funding[sym] = now
+			}
+			continue
+		}
+		pays, err := fr.Funding(ctx, e.Env, sym, since)
+		if err != nil {
+			continue
+		}
+		for _, f := range pays {
+			if f.Time.After(since) {
+				_ = e.appendEvent(journal.Event{Time: f.Time, Kind: journal.Funding, Symbol: sym, Amount: f.Amount, Reason: "funding as the venue reports it"})
+				e.funding[sym] = f.Time
+			}
+		}
+	}
+	for sym := range e.funding {
+		if held[sym].Qty <= 0 {
+			delete(e.funding, sym)
+		}
+	}
+}
+
+func (e *Engine) note(kind, sym, reason string) {
+	_ = e.appendEvent(journal.Event{Time: e.Exec.Now(), Kind: kind, Symbol: sym, Reason: reason})
+}
+
+func (e *Engine) appendEvent(ev journal.Event) error {
+	if e.Exec.Journal == nil {
+		return nil
+	}
+	return e.Exec.Journal.Append(ev)
 }
 
 // skip journals a signal that did not become an order.

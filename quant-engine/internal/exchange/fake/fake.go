@@ -388,7 +388,7 @@ func (f *Fake) Positions(ctx context.Context, env exchange.Env) ([]exchange.Posi
 		ep := exchange.Position{Symbol: sym, Side: p.side, Qty: p.qty, AvgPrice: p.avg, AccountQty: p.qty,
 			Leverage: f.opt.Leverage, LiquidationPrice: f.liq[sym]}
 		if p.stopID != "" {
-			ep.StopClientID, ep.StopPrice = p.stopID, f.orders[p.stopID].StopPrice
+			ep.StopClientID, ep.StopPrice, ep.StopQty = p.stopID, f.orders[p.stopID].StopPrice, f.orders[p.stopID].Qty
 		}
 		out = append(out, ep)
 	}

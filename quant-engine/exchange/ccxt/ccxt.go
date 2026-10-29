@@ -23,6 +23,7 @@ import (
 	lib "github.com/rosaldo/ccxt/v5"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/ownbook"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 )
 
@@ -42,6 +43,7 @@ type Client interface {
 	FetchPositions(options ...lib.FetchPositionsOptions) ([]lib.Position, error)
 	SetMarginMode(marginMode string, options ...lib.SetMarginModeOptions) (map[string]any, error)
 	SetLeverage(leverage int64, options ...lib.SetLeverageOptions) (map[string]any, error)
+	FetchFundingHistory(options ...lib.FetchFundingHistoryOptions) ([]lib.FundingHistory, error)
 }
 
 // Venue is one exchange variant, chosen by the strategy's main at build time
@@ -103,7 +105,20 @@ type ref struct {
 	Stop       bool    // a protective stop
 	Opens      bool    // opens or grows a position (else reduces it)
 	Applied    float64 // net quantity already applied to the holding
+	// Absent: a stop of unknown fate the venue said it does not have (lookup
+	// by client order ID empty, cancel answered not found). It is taken as
+	// cancelled, yet looked up until absentWatch after Created: if it shows
+	// up, the orphan sweep cancels it.
+	Absent bool
 }
+
+// absentWatch is how long an absent stop is still looked up for (the lookup
+// window itself starts an hour before Created, refresh).
+const absentWatch = time.Hour
+
+// errNotFound: the venue answered both order lookups and has no order with
+// the client order ID.
+var errNotFound = errors.New("not found by client order ID")
 
 type holding struct {
 	Side     exchange.PositionSide
@@ -395,6 +410,9 @@ func (a *Adapter) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.O
 		if px <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: no reference price for %s", r.Symbol)
 		}
+		if r.ReduceOnly { // FR-P8: an exit never closes more than the engine's own quantity
+			r.Qty = min(r.Qty, a.b.Positions[r.Symbol].Qty)
+		}
 		amount := a.toContracts(r.Symbol, r.Qty)
 		if amount <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: %s quantity %g is below one amount step", r.Symbol, r.Qty)
@@ -511,6 +529,9 @@ func (a *Adapter) refresh(clientID string) error {
 			return nil
 		}
 	}
+	if oerr == nil && cerr == nil {
+		return fmt.Errorf("ccxt: order %s sent without an answer: %w", clientID, errNotFound)
+	}
 	return fmt.Errorf("ccxt: order %s sent without an answer and not found by client order ID (%v)", clientID, errors.Join(oerr, cerr))
 }
 
@@ -519,6 +540,7 @@ func (a *Adapter) refresh(clientID string) error {
 // any fee charged in the base asset.
 func (a *Adapter) settle(clientID string, o lib.Order) {
 	r := a.b.Orders[clientID]
+	r.Absent = false // it exists after all
 	if id := deref(o.Id); id != "" {
 		r.ID = id
 		r.State.ExchangeID = id
@@ -593,9 +615,10 @@ func (a *Adapter) PlaceStop(ctx context.Context, env exchange.Env, clientID, sym
 			return known.State, nil
 		}
 		h := a.b.Positions[symbol]
-		if h == nil || side != h.Side.Closing() || qty > h.Qty+1e-12 {
-			return exchange.OrderState{Status: exchange.Rejected}, errors.New("ccxt: a stop must close at most the engine's own position")
+		if h == nil || side != h.Side.Closing() {
+			return exchange.OrderState{Status: exchange.Rejected}, errors.New("ccxt: a stop must close the engine's own position")
 		}
+		qty = min(qty, h.Qty) // FR-P8: never more than the engine's own quantity
 		amount := a.toContracts(symbol, qty)
 		if amount <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: %s stop quantity %g is below one amount step", symbol, qty)
@@ -631,7 +654,7 @@ func (a *Adapter) CancelOrder(ctx context.Context, env exchange.Env, clientID st
 	return do(ctx, a, env, func() (exchange.OrderState, error) {
 		r, ok := a.b.Orders[clientID]
 		if !ok {
-			return exchange.OrderState{}, fmt.Errorf("ccxt: unknown order %s", clientID)
+			return exchange.OrderState{}, fmt.Errorf("%w: %s", exchange.ErrNotOwn, clientID)
 		}
 		if terminal(r.State.Status) {
 			return r.State, nil
@@ -666,6 +689,13 @@ func (a *Adapter) CancelOrder(ctx context.Context, env exchange.Env, clientID st
 func (a *Adapter) cancelByClientID(clientID string, lookup error) (exchange.OrderState, error) {
 	r := a.b.Orders[clientID]
 	o, err := a.c.CancelOrder("", lib.WithCancelOrderSymbol(r.Symbol), lib.WithCancelOrderParams(map[string]any{"clientOrderId": clientID}))
+	var ce *lib.Error
+	if err != nil && r.Stop && errors.Is(lookup, errNotFound) && errors.As(err, &ce) && ce.Type == lib.OrderNotFoundErrType {
+		// the venue has no such stop: resolved, not stale, and still watched (Absent)
+		r.State.Status, r.Absent = exchange.Canceled, true
+		a.b.Orders[clientID] = r
+		return r.State, a.save()
+	}
 	if err != nil {
 		return r.State, errors.Join(lookup, err, a.save())
 	}
@@ -681,12 +711,22 @@ func (a *Adapter) cancelByClientID(clientID string, lookup error) (exchange.Orde
 // Positions returns the engine's holdings after bringing every open order up
 // to date: late fills are applied, filled stops close their holding, and a
 // stop the exchange dropped leaves its holding unprotected for reconcile.
+// Trouble in one symbol never fails the call (R1b): an own order of unknown
+// fate that cannot be found blocks entries on its symbol (Position.Blocked,
+// with Qty 0 when nothing is held). On swap the account is netted against the
+// own holdings (FR-P8, ownbook.Reconcile), and the own stops left without a
+// holding to protect are cancelled.
 func (a *Adapter) Positions(ctx context.Context, env exchange.Env) ([]exchange.Position, error) {
 	return do(ctx, a, env, func() ([]exchange.Position, error) {
-		var errs []error
+		blocked := map[string]string{}
+		now := a.opt.Now()
 		for id, r := range a.b.Orders {
-			if !terminal(r.State.Status) {
-				errs = append(errs, a.refresh(id))
+			watched := r.Absent && now.Before(r.Created.Add(absentWatch))
+			if terminal(r.State.Status) && !watched {
+				continue
+			}
+			if err := a.refresh(id); err != nil && !watched {
+				blocked[r.Symbol] = fmt.Sprintf("own order %s of unknown fate: %v", id, err)
 			}
 		}
 		for _, h := range a.b.Positions {
@@ -694,20 +734,58 @@ func (a *Adapter) Positions(ctx context.Context, env exchange.Env) ([]exchange.P
 				h.StopID, h.Stop = "", 0
 			}
 		}
-		if err := errors.Join(append(errs, a.save())...); err != nil {
+		var acct map[string]accountPos
+		if a.swap() {
+			acct = a.net(blocked)
+		}
+		a.sweep()
+		if err := a.save(); err != nil {
 			return nil, err
 		}
 		out := []exchange.Position{}
 		for sym, h := range a.b.Positions {
-			out = append(out, exchange.Position{Symbol: sym, Side: h.Side, Qty: h.Qty, AvgPrice: h.Avg,
-				StopClientID: h.StopID, StopPrice: h.Stop, AccountQty: h.Qty})
+			p := exchange.Position{Symbol: sym, Side: h.Side, Qty: h.Qty, AvgPrice: h.Avg,
+				StopClientID: h.StopID, StopPrice: h.Stop, AccountQty: h.Qty, Blocked: blocked[sym]}
+			if r, ok := a.b.Orders[h.StopID]; ok {
+				p.StopQty = r.State.Qty - r.State.Filled
+			}
+			if ap, ok := acct[sym]; ok {
+				p.AccountQty, p.Leverage, p.MarginMode, p.LiquidationPrice = ap.qty, ap.leverage, ap.marginMode, ap.liquidation
+				if ap.side != "" && ap.side != p.PSide() {
+					p.AccountQty = 0
+				}
+			}
+			out = append(out, p)
+			delete(blocked, sym)
+		}
+		for sym, why := range blocked { // nothing held, entries blocked all the same
+			out = append(out, exchange.Position{Symbol: sym, Blocked: why})
 		}
 		slices.SortFunc(out, func(x, y exchange.Position) int { return strings.Compare(x.Symbol, y.Symbol) })
-		if a.swap() && len(out) > 0 {
-			a.account(out)
-		}
 		return out, nil
 	})
+}
+
+// sweep cancels the engine's own resting stops that protect no holding: a
+// stop whose position closed outside the engine, an old stop a move or a
+// resize left behind, or a stop of unknown fate that showed up after all.
+// A failed cancel is tried again on the next look.
+func (a *Adapter) sweep() {
+	for id, r := range a.b.Orders {
+		h := a.b.Positions[r.Symbol]
+		if !r.Stop || r.ID == "" || r.State.Status != exchange.Open || (h != nil && h.StopID == id) {
+			continue
+		}
+		o, err := a.c.CancelOrder(r.ID, lib.WithCancelOrderSymbol(r.Symbol))
+		if err != nil {
+			continue
+		}
+		a.settle(id, o)
+		if r := a.b.Orders[id]; r.State.Status == exchange.Open {
+			r.State.Status = exchange.Canceled
+			a.b.Orders[id] = r
+		}
+	}
 }
 
 // Balance: on spot, cash is the free quote currency of the traded markets
@@ -744,7 +822,9 @@ func (a *Adapter) Balance(ctx context.Context, env exchange.Env) (exchange.Balan
 // CCXT's amount precision as a tick size (CCXT's usual precision mode; to be
 // verified per exchange), in base (Lot).
 func (a *Adapter) Capabilities() exchange.Capabilities {
-	c := exchange.Capabilities{Swap: a.swap(), ReportsLiquidation: a.swap() && a.opt.Venue.ReportsLiquidation}
+	// Netting on every swap: Hyperliquid is one-way (V13), and the adapter sends
+	// no position side, so a CEX account in hedge mode is not traded as one
+	c := exchange.Capabilities{Swap: a.swap(), ReportsLiquidation: a.swap() && a.opt.Venue.ReportsLiquidation, Netting: a.swap()}
 	for sym := range a.markets {
 		step, minQty := a.Lot(sym)
 		c.QtyStep = max(c.QtyStep, step)
@@ -820,43 +900,83 @@ func (a *Adapter) swapBalance() (exchange.Balance, error) {
 	return exchange.Balance{Cash: *free, Equity: *total}, nil
 }
 
-// account adds to the engine's own positions what the exchange reports for
-// the symbol: account quantity on the same side, leverage, margin mode and
-// liquidation price. A position the exchange reports on the other side, or
-// with a leverage or margin mode other than configured, blocks entries on the
-// symbol; an unreadable answer blocks them all (fail closed).
-func (a *Adapter) account(own []exchange.Position) {
-	syms := make([]string, len(own))
-	for i, p := range own {
-		syms[i] = p.Symbol
+// accountPos is what the exchange reports for one symbol, quantity in base.
+type accountPos struct {
+	side                  exchange.PositionSide // "" = flat
+	qty                   float64
+	leverage, liquidation float64
+	marginMode            string
+	hedged                bool
+}
+
+// net reads the account's positions on every traded symbol and applies the
+// netting rule (ownbook.Reconcile) to the engine's own holdings: a holding
+// the account no longer covers shrinks (its stop is then resized or swept),
+// and a symbol with foreign quantity, or a position on the other side, takes
+// no new entry. A position with a leverage or margin mode other than
+// configured blocks the symbol too; an unreadable answer blocks every symbol
+// (fail closed) and changes nothing. A hedged account (positions per side)
+// is not netted: only the engine's own fills count there.
+func (a *Adapter) net(blocked map[string]string) map[string]accountPos {
+	syms := slices.Clone(a.opt.Symbols)
+	for sym := range a.b.Positions {
+		if !slices.Contains(syms, sym) {
+			syms = append(syms, sym)
+		}
 	}
 	eps, err := a.c.FetchPositions(lib.WithFetchPositionsSymbols(syms))
 	if err != nil {
-		for i := range own {
-			own[i].Blocked = "exchange positions unreadable: " + err.Error()
+		for _, sym := range syms {
+			blocked[sym] = "exchange positions unreadable: " + err.Error()
 		}
-		return
+		return nil
 	}
-	for i := range own {
-		p := &own[i]
-		p.AccountQty = 0
-		for _, ep := range eps {
-			if deref(ep.Symbol) != p.Symbol {
-				continue
-			}
-			if exchange.PositionSide(deref(ep.Side)) != p.PSide() {
-				p.Blocked = fmt.Sprintf("the exchange reports a %s position against the engine's %s", deref(ep.Side), p.PSide())
-				continue
-			}
-			p.AccountQty += val(ep.Contracts) * a.contractSize(p.Symbol) // CCXT positions count contracts
-			p.Leverage, p.MarginMode, p.LiquidationPrice = val(ep.Leverage), deref(ep.MarginMode), val(ep.LiquidationPrice)
+	acct := map[string]accountPos{}
+	for _, ep := range eps {
+		sym := deref(ep.Symbol)
+		qty := val(ep.Contracts) * a.contractSize(sym) // CCXT positions count contracts
+		if qty <= 0 {
+			continue
 		}
-		if a.want.Leverage > 0 && p.Leverage > 0 && (p.Leverage != float64(a.want.Leverage) ||
-			(p.MarginMode != "" && p.MarginMode != a.want.MarginMode)) {
-			p.Blocked = fmt.Sprintf("the exchange applies leverage %g %s, the yml asks %d %s",
-				p.Leverage, p.MarginMode, a.want.Leverage, a.want.MarginMode)
+		ap := acct[sym]
+		side := exchange.PositionSide(deref(ep.Side))
+		ap.hedged = ap.hedged || flag(ep.Hedged)
+		if h := a.b.Positions[sym]; ap.side == "" || (h != nil && side == h.Side) { // the own side's numbers win
+			ap.side, ap.qty = side, qty
+			ap.leverage, ap.marginMode, ap.liquidation = val(ep.Leverage), deref(ep.MarginMode), val(ep.LiquidationPrice)
 		}
+		acct[sym] = ap
 	}
+	for _, sym := range syms {
+		ap := acct[sym]
+		h := a.b.Positions[sym]
+		own := ownbook.Holding{}
+		if h != nil {
+			own = ownbook.Holding{Side: h.Side, Qty: h.Qty}
+		}
+		if ap.hedged {
+			if h != nil && ap.side != h.Side {
+				ap = accountPos{} // the other side is not the engine's business on a hedged account
+			}
+		} else {
+			kept, why := ownbook.Reconcile(own, ownbook.Holding{Side: ap.side, Qty: ap.qty})
+			if why != "" {
+				blocked[sym] = why
+			}
+			if h != nil && kept.Qty < h.Qty {
+				if h.Qty = kept.Qty; h.Qty <= 0 {
+					delete(a.b.Positions, sym) // its stop is swept
+				}
+			}
+		}
+		if a.want.Leverage > 0 && ap.leverage > 0 && h != nil && (ap.leverage != float64(a.want.Leverage) ||
+			(ap.marginMode != "" && ap.marginMode != a.want.MarginMode)) {
+			blocked[sym] = fmt.Sprintf("the exchange applies leverage %g %s, the yml asks %d %s",
+				ap.leverage, ap.marginMode, a.want.Leverage, a.want.MarginMode)
+		}
+		acct[sym] = ap
+	}
+	return acct
 }
 
 // ConfigureMarket sets margin mode and leverage on a swap market (FR-P3).
@@ -902,5 +1022,27 @@ func (a *Adapter) ConfigureMarket(ctx context.Context, env exchange.Env, symbol 
 			}
 		}
 		return got, nil
+	})
+}
+
+// Funding is the funding the venue reports on symbol since a time (FR-P5),
+// for the journal; spot has none.
+func (a *Adapter) Funding(ctx context.Context, env exchange.Env, symbol string, since time.Time) ([]exchange.FundingPayment, error) {
+	if !a.swap() {
+		return nil, nil
+	}
+	return do(ctx, a, env, func() ([]exchange.FundingPayment, error) {
+		hs, err := a.c.FetchFundingHistory(lib.WithFetchFundingHistorySymbol(symbol), lib.WithFetchFundingHistorySince(since.UnixMilli()))
+		if err != nil {
+			return nil, fmt.Errorf("ccxt: funding %s: %w", symbol, err)
+		}
+		var out []exchange.FundingPayment
+		for _, h := range hs {
+			if h.Timestamp == nil || h.Amount == nil || (h.Symbol != nil && *h.Symbol != symbol) {
+				continue
+			}
+			out = append(out, exchange.FundingPayment{Time: time.UnixMilli(*h.Timestamp).UTC(), Symbol: symbol, Amount: *h.Amount})
+		}
+		return out, nil
 	})
 }
