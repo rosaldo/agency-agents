@@ -66,6 +66,14 @@ func (e *Engine) liquidationViolation(p exchange.Position) error {
 		}
 		liq = risk.LiquidationPrice(short, p.AvgPrice, e.liquidationDistance(p.Symbol, p.PSide(), p.AvgPrice, lev))
 	}
+	if !short && stop >= p.AvgPrice || short && stop <= p.AvgPrice {
+		// a stop trailed to or past the entry fires before any loss, so before a
+		// liquidation on the losing side
+		if !short && liq < p.AvgPrice || short && liq > p.AvgPrice {
+			return nil
+		}
+		return fmt.Errorf("liquidation %.8g is not on the losing side of the entry %.8g", liq, p.AvgPrice)
+	}
 	return risk.StopBeforeLiquidation(short, p.AvgPrice, stop, liq, e.Cfg.Risk.MinLiquidationBuffer)
 }
 

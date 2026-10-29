@@ -96,3 +96,56 @@ func TestBacktestAndLoopDecideAlike(t *testing.T) {
 		t.Fatalf("orders differ:\nbacktest %q\nloop     %q", want, got)
 	}
 }
+
+// trailer enters long on the first rise, stop 90, and trails 3 below the close.
+type trailer struct{ *scripted.Strategy }
+
+func (trailer) Trail(in strategy.Input) (float64, bool) {
+	return in.Candles[len(in.Candles)-1].Close - 3, true
+}
+
+func enterOnRise(in strategy.Input) strategy.Decision {
+	if len(in.Candles) < 2 || in.Position != nil {
+		return strategy.Decision{}
+	}
+	if last, prev := in.Candles[len(in.Candles)-1].Close, in.Candles[len(in.Candles)-2].Close; last > prev && in.Now.Hour() == 1 {
+		return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 90, Reason: "up"}
+	}
+	return strategy.Decision{}
+}
+
+// FR-P9 parity: the same Trail on the same candles moves the same stops in
+// the backtest and in the loop (each Decide sees the stop), and the stop
+// moved at 110 (107) is the one the drop fills, on the next candle.
+func TestBacktestAndLoopTrailAlike(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for i, b := range [][4]float64{{100, 100, 100, 100}, {101, 101, 101, 101}, {105, 105, 105, 105}, {110, 110, 110, 110},
+		{110, 110, 100, 100}, {100, 100, 100, 100}} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: b[0], High: b[1], Low: b[2], Close: b[3], Volume: 10})
+	}
+	bs := trailer{&scripted.Strategy{Decider: enterOnRise}}
+	res, err := Run(context.Background(), bs, []byte(parityYAML), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Trades) != 1 || res.Trades[0].ExitReason != "stop" || res.Trades[0].ExitPrice != 107 || res.Trades[0].Stop != 90 {
+		t.Fatalf("backtest trades %+v; want one stop exit at the trailed 107, R on the initial 90", res.Trades)
+	}
+
+	ls := trailer{&scripted.Strategy{Decider: enterOnRise}}
+	c, err := config.Parse([]byte(parityYAML), ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
+	dir := filepath.Join(t.TempDir(), ".scripted")
+	loop.Run(context.Background(), c, ls, f, exchange.Demo, &loop.FakeTicker{Ex: f, Candles: cs}, dir)
+	if !slices.Equal(bs.Log, ls.Log) {
+		t.Fatalf("Decide calls (stops included) differ:\nbacktest %q\nloop     %q", bs.Log, ls.Log)
+	}
+	st, err := loop.LoadState(dir, "paper")
+	if err != nil || st.Equity != res.Summary.EndEquity || len(st.Positions) != 0 {
+		t.Fatalf("loop state %+v (%v); want flat at the backtest's end equity %v", st, err, res.Summary.EndEquity)
+	}
+}

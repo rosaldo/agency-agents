@@ -255,3 +255,74 @@ func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Ti
 	perr := e.Reconcile(pctx, func(exchange.Position) float64 { return p.StopPrice })
 	return errors.Join(fmt.Errorf("exit %s not confirmed (status %q): %v", p.Symbol, st.Status, err), perr)
 }
+
+// ErrStopFilled means the old stop fired while MoveStop was swapping it: the
+// position is gone and the new stop was cancelled too.
+var ErrStopFilled = errors.New("exec: the stop filled during the move")
+
+// MoveStop moves p's stop to next without an instant where p rests without
+// one (FR-P9 d): the new stop is placed first, reduce-only, and only then the
+// old one is cancelled.
+//   - new stop refused or of unknown fate: the old one stays (an unknown new
+//     one is cancelled, and a position left naked gets the old price back);
+//     err is returned and nothing moved;
+//   - old stop filled meanwhile: the new one is cancelled, ErrStopFilled;
+//   - old stop not cancelled: the move holds, its client ID comes back as
+//     stale for the engine to retry; while it rests two stops guard p.
+//
+// stale is also set when the new stop could not be cancelled after the old
+// one filled.
+func (e *Executor) MoveStop(ctx context.Context, p exchange.Position, next float64, candle time.Time) (stale string, err error) {
+	ctx, cancel := protective(ctx)
+	defer cancel()
+	side := p.PSide()
+	newID := e.ID(p.Symbol, candle, "trail")
+	e.record(journal.Event{Kind: journal.Proposed, ClientID: newID, Symbol: p.Symbol, Side: string(side.Closing()), Qty: p.Qty,
+		Price: next, Reason: fmt.Sprintf("trail %.8g -> %.8g", p.StopPrice, next)})
+	ev := journal.Event{ClientID: newID, Symbol: p.Symbol, Side: string(side.Closing()), Qty: p.Qty, Price: next, Reason: "trail"}
+	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) {
+		return e.Ex.PlaceStop(ctx, e.Env, newID, p.Symbol, side.Closing(), p.Qty, next)
+	})
+	if err == nil && st.Status != exchange.Open {
+		err = fmt.Errorf("trail stop not resting (status %q)", st.Status)
+	}
+	if err != nil {
+		if !errors.Is(err, exchange.ErrRefused) { // R2: it may rest; never leave it behind
+			e.cancel(ctx, p, newID, "cancel the trail stop of unknown fate") // as protect does: an order never placed has nothing to cancel
+		}
+		// the old stop is the protection; one the venue dropped meanwhile goes back
+		return "", errors.Join(fmt.Errorf("trail %s: %w", p.Symbol, err),
+			e.Reconcile(ctx, func(exchange.Position) float64 { return p.StopPrice }))
+	}
+	if p.StopClientID == "" || p.StopClientID == newID {
+		return "", nil
+	}
+	cev := journal.Event{ClientID: p.StopClientID, Symbol: p.Symbol, Side: string(side.Closing()), Qty: p.Qty, Reason: "trail: cancel the old stop"}
+	old, cerr := e.send(ctx, cev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, p.StopClientID) })
+	switch {
+	case old.Status == exchange.Filled: // it fired in between: the position is gone, so is the new stop's purpose
+		return e.cancel(ctx, p, newID, "trail: the old stop filled; cancel the new one"), ErrStopFilled
+	case cerr != nil:
+		return p.StopClientID, nil
+	}
+	return "", nil
+}
+
+// cancel asks to cancel a stop and returns its ID when that failed.
+func (e *Executor) cancel(ctx context.Context, p exchange.Position, id, reason string) string {
+	ev := journal.Event{ClientID: id, Symbol: p.Symbol, Side: string(p.PSide().Closing()), Qty: p.Qty, Reason: reason}
+	if _, err := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, id) }); err != nil {
+		return id
+	}
+	return ""
+}
+
+// CancelStale retries the cancel of a stop left behind by a move; true when
+// it is gone (cancelled or filled).
+func (e *Executor) CancelStale(ctx context.Context, symbol, id string) bool {
+	ctx, cancel := protective(ctx)
+	defer cancel()
+	ev := journal.Event{ClientID: id, Symbol: symbol, Reason: "trail: retry the cancel of the old stop"}
+	st, err := e.send(ctx, ev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, id) })
+	return err == nil && st.Status != exchange.Open && st.Status != exchange.Unknown
+}

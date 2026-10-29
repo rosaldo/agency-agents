@@ -79,3 +79,14 @@ type NewsPolicy struct {
 	Aliases  map[string][]string // base asset -> extra names
 	Lookback time.Duration
 }
+
+// Trailer is optional: a strategy that implements it moves its own stop by
+// any rule it likes (moving average, ATR, structure...). The engine calls
+// Trail once per step for every open position it holds, after Decide
+// returned no Exit, and decides itself whether the answer is applied:
+// tighten only, on the right side of the price, clear of the liquidation,
+// swapped on the exchange without a moment unprotected. ok=false or stop<=0
+// keeps the current stop. A stop moved on candle t guards from t+1 on.
+type Trailer interface {
+	Trail(in Input) (stop float64, ok bool)
+}

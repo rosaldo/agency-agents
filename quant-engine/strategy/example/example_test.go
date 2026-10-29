@@ -68,3 +68,27 @@ func TestConfigureDefaultsAndRefusals(t *testing.T) {
 		}
 	}
 }
+
+// D11: the neutral trailing rule is the average of the last trail_period
+// closes; 0 disables it; the warmup covers the longer window.
+func TestTrailIsTheMovingAverage(t *testing.T) {
+	s := configured(t, "{period: 3, stop_pct: 4, trail_period: 4}")
+	if s.Warmup() != 5 {
+		t.Fatalf("warmup = %d, want 5", s.Warmup())
+	}
+	tr := s.(strategy.Trailer)
+	if got, ok := tr.Trail(strategy.Input{Candles: closes(1, 100, 102, 104, 106)}); !ok || got != 103 {
+		t.Fatalf("trail = %v %v, want 103", got, ok)
+	}
+	if _, ok := tr.Trail(strategy.Input{Candles: closes(100, 102, 104)}); ok {
+		t.Fatal("trail with too few candles must answer no")
+	}
+	if _, ok := configured(t, "{period: 3, stop_pct: 4}").(strategy.Trailer).Trail(strategy.Input{Candles: closes(1, 2, 3, 4)}); ok {
+		t.Fatal("trail_period 0 must not trail")
+	}
+	var n yaml.Node
+	_ = yaml.Unmarshal([]byte("{trail_period: 1}"), &n)
+	if err := New().Configure(*n.Content[0]); err == nil {
+		t.Fatal("trail_period 1 accepted")
+	}
+}

@@ -33,8 +33,9 @@ type Engine struct {
 	News        NewsChecker
 	NewsTimeout time.Duration // 0 = 10s
 
-	targets map[string]float64
-	stops   map[string]float64 // stop given at entry, re-placed if the exchange drops it
+	targets    map[string]float64
+	stops      map[string]float64 // stop given at entry or moved by the trail, re-placed if the exchange drops it
+	staleStops map[string]string  // symbol -> old stop a trail could not cancel (FR-P9)
 }
 
 // New wires the executor and the breaker from the config; cfg must have been
@@ -42,7 +43,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
-		Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
 		for _, k := range n.Keywords {
@@ -107,10 +108,14 @@ func (e *Engine) Targets() map[string]float64 {
 	return out
 }
 
-// Restore reloads the targets and the positions' stops saved by a previous run.
-func (e *Engine) Restore(targets map[string]float64, positions []exchange.Position) {
+// Restore reloads the targets, the positions' stops and the stale stops
+// saved by a previous run.
+func (e *Engine) Restore(targets map[string]float64, positions []exchange.Position, stale map[string]string) {
 	for k, v := range targets {
 		e.targets[k] = v
+	}
+	for k, v := range stale {
+		e.staleStops[k] = v
 	}
 	for _, p := range positions {
 		if p.StopPrice > 0 {
@@ -174,6 +179,7 @@ func (e *Engine) Step(ctx context.Context) error {
 	if err := e.Risk.Allow(e.Exec.Now(), bal.Equity); err != nil {
 		return err
 	}
+	e.retryStale(ctx)
 	// every step, not only at start: a late fill or a stop the exchange
 	// dropped gets protected before anything else
 	if err := e.Reconcile(ctx); err != nil {
@@ -237,6 +243,8 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	switch {
 	case d.Action == strategy.Exit && holding:
 		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
+	case d.Action == strategy.None && holding:
+		return e.trail(ctx, p, in, last.Close, last.Time)
 	case d.Action != strategy.Enter:
 		return nil
 	case holding:
@@ -253,6 +261,10 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	if p.Blocked != "" {
 		e.skip(sym, "symbol blocked: "+p.Blocked)
+		return nil
+	}
+	if id := e.staleStops[sym]; id != "" {
+		e.skip(sym, "symbol blocked: old stop "+id+" not cancelled yet")
 		return nil
 	}
 	if err := e.entryClearsLiquidation(sym, exchange.PositionSide(d.Side), last.Close, d.Stop); err != nil {

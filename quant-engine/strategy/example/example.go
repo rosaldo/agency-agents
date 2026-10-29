@@ -22,6 +22,10 @@ type Params struct {
 	Period    int     `yaml:"period"`     // closes in the moving average, >= 2
 	StopPct   float64 `yaml:"stop_pct"`   // stop this far below the entry, in (0, 100)
 	TargetPct float64 `yaml:"target_pct"` // exit this far above the entry, 0 = no target
+	// TrailPeriod, when >= 2, trails the stop at the average of the last
+	// TrailPeriod closes; 0 = no trailing. The engine drops any answer that
+	// does not tighten or sits above the price.
+	TrailPeriod int `yaml:"trail_period"`
 }
 
 type SMACross struct{ p Params }
@@ -30,7 +34,7 @@ func New() strategy.Strategy { return &SMACross{} }
 
 func (*SMACross) Name() string     { return Name }
 func (*SMACross) Inputs() []string { return nil }
-func (s *SMACross) Warmup() int    { return s.p.Period + 1 }
+func (s *SMACross) Warmup() int    { return max(s.p.Period, s.p.TrailPeriod) + 1 }
 
 func (s *SMACross) Configure(n yaml.Node) error {
 	p := Params{Period: 20, StopPct: 2}
@@ -46,6 +50,8 @@ func (s *SMACross) Configure(n yaml.Node) error {
 		return errors.New("stop_pct must be in (0, 100)")
 	case p.TargetPct < 0:
 		return errors.New("target_pct must be >= 0 (0 = no target)")
+	case p.TrailPeriod != 0 && p.TrailPeriod < 2:
+		return errors.New("trail_period must be 0 (no trailing) or >= 2")
 	}
 	s.p = p
 	return nil
@@ -73,4 +79,17 @@ func (s *SMACross) Decide(in strategy.Input) strategy.Decision {
 		d.Target = last * (1 + s.p.TargetPct/100)
 	}
 	return d
+}
+
+// Trail is the moving average of the last TrailPeriod closes.
+func (s *SMACross) Trail(in strategy.Input) (float64, bool) {
+	n, cs := s.p.TrailPeriod, in.Candles
+	if n == 0 || len(cs) < n {
+		return 0, false
+	}
+	closes := make([]float64, n)
+	for i := range closes {
+		closes[i] = cs[len(cs)-n+i].Close
+	}
+	return indicators.SMA(closes)
 }
