@@ -71,6 +71,11 @@ type Venue struct {
 	// as a fraction of the notional; ok=false = unknown. With it the adapter
 	// estimates the liquidation distance (exchange.LiquidationEstimator).
 	MaintenanceMargin func(m lib.MarketInterface) (rate float64, ok bool)
+	// SetMargin, when set, applies margin mode and leverage on symbol in
+	// place of CCXT's unified setMarginMode + setLeverage, for a venue whose
+	// fork has no setMarginMode; an error refuses to start. Its positions
+	// carry no margin mode, so the read-back keeps the requested one.
+	SetMargin func(c Client, symbol string, want exchange.MarginSettings) error
 }
 
 type Options struct {
@@ -827,13 +832,19 @@ func (a *Adapter) ConfigureMarket(ctx context.Context, env exchange.Env, symbol 
 		if _, ok := a.markets[symbol]; !ok {
 			return exchange.MarginSettings{}, fmt.Errorf("ccxt: market %s not loaded", symbol)
 		}
-		if _, err := a.c.SetMarginMode(want.MarginMode, lib.WithSetMarginModeSymbol(symbol),
-			lib.WithSetMarginModeParams(map[string]any{"leverage": want.Leverage})); err != nil {
-			return exchange.MarginSettings{}, fmt.Errorf("ccxt: set margin mode %s on %s: %w", want.MarginMode, symbol, err)
-		}
-		if _, err := a.c.SetLeverage(int64(want.Leverage), lib.WithSetLeverageSymbol(symbol),
-			lib.WithSetLeverageParams(map[string]any{"marginMode": want.MarginMode})); err != nil {
-			return exchange.MarginSettings{}, fmt.Errorf("ccxt: set leverage %d on %s: %w", want.Leverage, symbol, err)
+		if set := a.opt.Venue.SetMargin; set != nil {
+			if err := set(a.c, symbol, want); err != nil {
+				return exchange.MarginSettings{}, fmt.Errorf("ccxt: %s: set %s leverage %d on %s: %w", a.opt.Venue.ID, want.MarginMode, want.Leverage, symbol, err)
+			}
+		} else {
+			if _, err := a.c.SetMarginMode(want.MarginMode, lib.WithSetMarginModeSymbol(symbol),
+				lib.WithSetMarginModeParams(map[string]any{"leverage": want.Leverage})); err != nil {
+				return exchange.MarginSettings{}, fmt.Errorf("ccxt: set margin mode %s on %s: %w", want.MarginMode, symbol, err)
+			}
+			if _, err := a.c.SetLeverage(int64(want.Leverage), lib.WithSetLeverageSymbol(symbol),
+				lib.WithSetLeverageParams(map[string]any{"marginMode": want.MarginMode})); err != nil {
+				return exchange.MarginSettings{}, fmt.Errorf("ccxt: set leverage %d on %s: %w", want.Leverage, symbol, err)
+			}
 		}
 		a.want = want
 		eps, err := a.c.FetchPositions(lib.WithFetchPositionsSymbols([]string{symbol}))
@@ -844,6 +855,9 @@ func (a *Adapter) ConfigureMarket(ctx context.Context, env exchange.Env, symbol 
 		for _, ep := range eps {
 			if deref(ep.Symbol) == symbol && val(ep.Leverage) > 0 {
 				got = exchange.MarginSettings{Leverage: int(val(ep.Leverage)), MarginMode: deref(ep.MarginMode)}
+				if a.opt.Venue.SetMargin != nil && got.MarginMode == "" {
+					got.MarginMode = want.MarginMode
+				}
 			}
 		}
 		return got, nil

@@ -13,8 +13,9 @@ type APIKeyClient interface {
 // APIKeyVenue is the venue of such an exchange: credentials API_KEY and
 // API_SECRET, PASSPHRASE when set. newClient must reference only that
 // exchange's constructor, so the binary links nothing else. Centralized
-// exchanges are basic here: no venue-specific code, not verified per
-// exchange.
+// exchanges are basic here: no venue-specific code (except
+// coinbaseinternational's SetMargin, owner's decision 29/10), not verified
+// per exchange.
 func APIKeyVenue(id string, newClient func() APIKeyClient) Venue {
 	return Venue{
 		ID:          id,
