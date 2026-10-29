@@ -64,12 +64,13 @@ func TestOneKnownTrade(t *testing.T) {
 	}
 }
 
-// Commission 0.1% and spread 0.2%: fills 105.105 and 110.889, commissions
-// 2.417415 + 2.550447, so P&L = 23 x 5.784 - 4.967862 = 128.064138.
+// Commission 0.1% and spread 0.2%: sizing counts the round-trip commission,
+// floor(100 / (4.2 + 205.8 x 0.1%)) = 22; fills 105.105 and 110.889,
+// commissions 2.31231 + 2.439558, so P&L = 22 x 5.784 - 4.751868 = 122.496132.
 func TestCostsChangeTheResultByTheExpectedAmount(t *testing.T) {
 	res, _, _ := runWith(t, "costs: {commission_pct: 0.1, spread_pct: 0.2}\n")
-	if len(res.Trades) != 1 || !near(res.Trades[0].PnL, 128.064138) {
-		t.Fatalf("trades = %+v, want P&L 128.064138", res.Trades)
+	if len(res.Trades) != 1 || res.Trades[0].Qty != 22 || !near(res.Trades[0].PnL, 122.496132) {
+		t.Fatalf("trades = %+v, want 22 units, P&L 122.496132", res.Trades)
 	}
 }
 

@@ -52,3 +52,28 @@ func TestRiskNeverExceedsTheBudget(t *testing.T) {
 		}
 	}
 }
+
+// FR-R1: the round-trip commission (entry and stop fill) counts against the
+// budget, on the notional.
+func TestSizeCountsRoundTripFees(t *testing.T) {
+	// per unit: 2 + (50+48) x 0.1% = 2.098; 100 / 2.098 = 47.66
+	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 50, Stop: 48, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
+	if qty, why := Size(in); qty != 47 {
+		t.Fatalf("qty = %v (%s), want 47", qty, why)
+	}
+}
+
+// Property: loss at the stop plus slippage plus round-trip fees never exceeds the budget.
+func TestRiskWithCostsNeverExceedsTheBudget(t *testing.T) {
+	r := rand.New(rand.NewSource(2))
+	for i := 0; i < 5000; i++ {
+		entry := 1 + r.Float64()*1000
+		in := SizeInput{Equity: 10 + r.Float64()*1e6, RiskPct: 0.1 + r.Float64()*2, Entry: entry,
+			Stop: entry * (1 - (0.1+r.Float64()*20)/100), SlippagePct: r.Float64() * 0.5, CommissionPct: r.Float64() * 0.2, QtyStep: 0.001, MinQty: 0.001}
+		qty, _ := Size(in)
+		cost := qty * (entry - in.Stop + entry*in.SlippagePct/100 + (entry+in.Stop)*in.CommissionPct/100)
+		if budget := in.Equity * in.RiskPct / 100; cost > budget*(1+1e-9) {
+			t.Fatalf("case %d: cost %.6f exceeds budget %.6f (%+v)", i, cost, budget, in)
+		}
+	}
+}

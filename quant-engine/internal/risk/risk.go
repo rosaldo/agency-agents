@@ -127,17 +127,21 @@ type SizeInput struct {
 	RiskPct     float64 // risk.max_risk_per_trade_pct
 	Entry, Stop float64 // long: 0 < Stop < Entry
 	SlippagePct float64 // expected slippage on the stop fill, percent of entry
-	QtyStep     float64 // market's quantity increment (0 = fractional)
-	MinQty      float64 // market's minimum quantity
+	// CommissionPct is the taker fee per fill (costs.commission_pct), paid on
+	// the entry and on the stop notional. No leverage here: the size comes
+	// from the risk budget, leverage only sets the margin locked (FR-R1).
+	CommissionPct float64
+	QtyStep       float64 // market's quantity increment (0 = fractional)
+	MinQty        float64 // market's minimum quantity
 }
 
-// Size is the quantity whose loss at the stop plus expected slippage stays
-// within the per-trade risk budget. qty 0 means do not enter; why says why.
+// Size is the quantity whose loss at the stop plus expected slippage and the
+// round-trip fees on the notional stays within the per-trade risk budget. qty 0 means do not enter; why says why.
 func Size(in SizeInput) (qty float64, why string) {
 	if in.Stop <= 0 || in.Stop >= in.Entry {
 		return 0, fmt.Sprintf("stop %.8g is not between 0 and the entry %.8g", in.Stop, in.Entry)
 	}
-	perUnit := in.Entry - in.Stop + in.Entry*in.SlippagePct/100
+	perUnit := in.Entry - in.Stop + in.Entry*in.SlippagePct/100 + (in.Entry+in.Stop)*in.CommissionPct/100
 	raw := in.Equity * in.RiskPct / 100 / perUnit
 	if in.QtyStep > 0 {
 		raw = math.Floor(raw/in.QtyStep) * in.QtyStep

@@ -40,9 +40,10 @@ type Config struct {
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
 }
 
-// Perp holds the perpetual-swap settings; for now only whether the strategy
-// may go short (refused when false).
+// Perp holds the perpetual-swap settings: the leverage (it sets the margin
+// locked, never the size) and whether the strategy may go short.
 type Perp struct {
+	Leverage   int  `yaml:"leverage"`
 	AllowShort bool `yaml:"allow_short"`
 }
 
@@ -51,6 +52,8 @@ type Risk struct {
 	MaxDailyDrawdownPct  float64 `yaml:"max_daily_drawdown_pct"`
 	MaxWeeklyDrawdownPct float64 `yaml:"max_weekly_drawdown_pct"`
 	MinDemoPeriodDays    int     `yaml:"min_demo_period_days"`
+	MaxLeverage          int     `yaml:"max_leverage"`           // hard ceiling for perp.leverage
+	MinLiquidationBuffer float64 `yaml:"min_liquidation_buffer"` // share of the distance to liquidation the stop leaves free
 	ConfirmedByUser      bool    `yaml:"confirmed_by_user"`
 }
 
@@ -66,7 +69,9 @@ func defaults() Config {
 	return Config{
 		Mode:     "paper",
 		Timezone: "UTC",
-		Risk:     Risk{MaxRiskPerTradePct: 1, MaxDailyDrawdownPct: 3, MaxWeeklyDrawdownPct: 6, MinDemoPeriodDays: 30},
+		Perp:     Perp{Leverage: 1},
+		Risk: Risk{MaxRiskPerTradePct: 1, MaxDailyDrawdownPct: 3, MaxWeeklyDrawdownPct: 6, MinDemoPeriodDays: 30,
+			MaxLeverage: 3, MinLiquidationBuffer: 0.5},
 	}
 }
 
@@ -151,6 +156,14 @@ func (c *Config) validate() error {
 		return errors.New("risk.max_weekly_drawdown_pct must be > 0")
 	case r.MinDemoPeriodDays <= 0:
 		return errors.New("risk.min_demo_period_days must be > 0")
+	case r.MaxLeverage < 1:
+		return errors.New("risk.max_leverage must be >= 1")
+	case r.MinLiquidationBuffer < 0 || r.MinLiquidationBuffer >= 1:
+		return errors.New("risk.min_liquidation_buffer must be >= 0 and < 1")
+	case c.Perp.Leverage < 1:
+		return errors.New("perp.leverage must be >= 1")
+	case c.Perp.Leverage > r.MaxLeverage:
+		return fmt.Errorf("perp.leverage %d is above risk.max_leverage %d", c.Perp.Leverage, r.MaxLeverage)
 	case c.Costs.CommissionPct < 0 || c.Costs.SpreadPct < 0 || c.Costs.SlippagePct < 0:
 		return errors.New("costs must be >= 0")
 	case !r.ConfirmedByUser:

@@ -99,3 +99,35 @@ func unwrapAll(err error) error {
 		err = u.Unwrap()
 	}
 }
+
+// FR-R3 (O1): perp limits default to max_leverage 3 and buffer 0.5; a
+// leverage above max_leverage, or out-of-range values, refuse the yml.
+func TestPerpLimits(t *testing.T) {
+	c, err := Parse([]byte(validYAML), example.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Risk.MaxLeverage != 3 || c.Risk.MinLiquidationBuffer != 0.5 || c.Perp.Leverage != 1 {
+		t.Fatalf("defaults: max_leverage %v, min_liquidation_buffer %v, leverage %v; want 3, 0.5, 1",
+			c.Risk.MaxLeverage, c.Risk.MinLiquidationBuffer, c.Perp.Leverage)
+	}
+	if _, err := Parse([]byte(validYAML+"perp: {leverage: 3}\n"), example.New()); err != nil {
+		t.Fatalf("leverage = max_leverage refused: %v", err)
+	}
+	for extra, want := range map[string]string{
+		"perp: {leverage: 4}\n": "max_leverage",
+		"perp: {leverage: 5}\nrisk: {confirmed_by_user: true, max_leverage: 4}\n": "max_leverage",
+		"perp: {leverage: 0}\n":                                           "leverage",
+		"risk: {confirmed_by_user: true, max_leverage: 0}\n":              "max_leverage",
+		"risk: {confirmed_by_user: true, min_liquidation_buffer: 1}\n":    "min_liquidation_buffer",
+		"risk: {confirmed_by_user: true, min_liquidation_buffer: -0.1}\n": "min_liquidation_buffer",
+	} {
+		y := validYAML + extra
+		if strings.HasPrefix(extra, "risk:") || strings.Contains(extra, "\nrisk:") {
+			y = strings.Replace(validYAML, "risk:\n  confirmed_by_user: true\n", "", 1) + extra
+		}
+		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err = %v, want one naming %s", extra, err, want)
+		}
+	}
+}
