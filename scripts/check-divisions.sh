@@ -30,7 +30,8 @@ JSON="divisions.json"
 # runbooks (no agent frontmatter), not agents. Neither is a division — they must
 # never be scanned as source-agent categories.
 # skills/ holds Claude Code skills (SKILL.md, e.g. /maestro) shipped by install.sh, not agents.
-NON_DIVISION_DIRS=(examples scripts integrations strategy skills)
+# quant-engine/ is a Go library module (the public trading engine), not agents.
+NON_DIVISION_DIRS=(examples scripts integrations strategy skills quant-engine)
 
 errors=0
 fail() { echo "ERROR $*"; errors=$((errors + 1)); }

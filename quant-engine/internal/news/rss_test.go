@@ -1,0 +1,101 @@
+package news
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+var at = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+func server(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.Dir("../../testdata")))
+	mux.HandleFunc("/broken", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", 500) })
+	mux.HandleFunc("/garbage", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<rss><channel><item>")) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func checker(srv *httptest.Server, feeds ...string) *RSS {
+	var urls []string
+	for _, f := range feeds {
+		urls = append(urls, srv.URL+"/"+f)
+	}
+	return &RSS{Feeds: urls, Keywords: testKeywords, Aliases: map[string][]string{"BTC": {"bitcoin"}},
+		Lookback: 24 * time.Hour, Client: srv.Client()}
+}
+
+func TestRSS(t *testing.T) {
+	srv := server(t)
+	cases := []struct {
+		symbol string
+		feeds  []string
+		clear  bool
+	}{
+		{"AAA/USDT", []string{"news_rss.xml"}, false},                 // hack, recent
+		{"BTC/USDT", []string{"news_rss.xml"}, false},                 // "paused", matched through the alias
+		{"CCC/USDT", []string{"news_rss.xml"}, true},                  // mentioned, no alarming keyword
+		{"DDD/USDT", []string{"news_rss.xml"}, true},                  // bankruptcy, but a month old
+		{"ZZZ/USDT", []string{"news_rss.xml"}, true},                  // not mentioned
+		{"EEE-USD", []string{"news_rss.xml", "news_atom.xml"}, false}, // Atom delisting
+	}
+	for _, tc := range cases {
+		ok, reason, err := checker(srv, tc.feeds...).Clear(context.Background(), tc.symbol, at)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.symbol, err)
+		}
+		if ok != tc.clear {
+			t.Errorf("%s: clear = %v (%s), want %v", tc.symbol, ok, reason, tc.clear)
+		}
+		if !ok && reason == "" {
+			t.Errorf("%s: a block needs the headline as reason", tc.symbol)
+		}
+	}
+}
+
+func TestFeedFailuresAreErrors(t *testing.T) {
+	srv := server(t)
+	for _, f := range []string{"broken", "garbage", "missing.xml"} {
+		if _, _, err := checker(srv, "news_rss.xml", f).Clear(context.Background(), "ZZZ/USDT", at); err == nil {
+			t.Errorf("%s: a failing feed must be an error (fail-closed upstream)", f)
+		}
+	}
+}
+
+// testKeywords stand in for a strategy's policy: the engine has no default list.
+var testKeywords = []string{"hack", "paused", "bankruptcy", "delisting", "halt"}
+
+func TestKeywordsMatchWholeWords(t *testing.T) {
+	if mentions("the shalt of it", []string{"halt"}) {
+		t.Error("keyword matched inside another word")
+	}
+	if !mentions("Trading HALT on AAA", []string{"halt"}) {
+		t.Error("keyword missed")
+	}
+}
+
+// Review minor 5: a feed URL's query (where tokens live) never reaches an
+// error or a reason, which end up in the journal.
+func TestFeedQueryIsRedacted(t *testing.T) {
+	srv := server(t)
+	for _, f := range []string{"broken?apikey=hunter2", "news_rss.xml?apikey=hunter2"} {
+		ok, reason, err := checker(srv, f).Clear(context.Background(), "AAA/USDT", at)
+		msg := reason
+		if err != nil {
+			msg += err.Error()
+		}
+		if ok || strings.Contains(msg, "hunter2") {
+			t.Errorf("%s: clear=%v, message leaks the query: %s", f, ok, msg)
+		}
+	}
+	dead := &RSS{Feeds: []string{"http://127.0.0.1:1/rss?token=hunter2"}, Lookback: time.Hour, Client: srv.Client()}
+	if _, _, err := dead.Clear(context.Background(), "AAA/USDT", at); err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("connection error leaks the query: %v", err)
+	}
+}
