@@ -47,6 +47,21 @@ func processGone(pid int) bool {
 	return got == pid || err != nil
 }
 
+// waitGone waits for the loop to exit (stop only signals it), so it no longer
+// writes into dir when t.TempDir's cleanup removes it.
+func waitGone(t *testing.T, dir string, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !processGone(pid) {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			log, _ := os.ReadFile(filepath.Join(dir, "engine.log"))
+			t.Fatalf("loop process still running after stop; engine.log:\n%s", log)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestStartStatusStop(t *testing.T) {
 	t.Setenv("TEST_STRATEGY_TEST_MAIN", "1")
 	work, cfgPath := writeConfig(t)
@@ -76,15 +91,7 @@ func TestStartStatusStop(t *testing.T) {
 	if d := time.Since(t0); d > time.Second {
 		t.Fatalf("stop took %v", d)
 	}
-	deadline = time.Now().Add(3 * time.Second)
-	for !processGone(pid) {
-		if time.Now().After(deadline) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-			log, _ := os.ReadFile(filepath.Join(dir, "engine.log"))
-			t.Fatalf("loop process still running after stop; engine.log:\n%s", log)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitGone(t, dir, pid)
 	s := status(t, dir)
 	if s["alive"] != false || !strings.Contains(s["stop_reason"].(string), "stop command") {
 		t.Fatalf("status after stop = %v", s)
@@ -108,10 +115,18 @@ func TestSecondLoopIsImpossible(t *testing.T) {
 	dir := filepath.Join(work, ".test-strategy")
 	candles, _ := filepath.Abs("../testdata/loop_two_days.csv")
 	args := []string{"--config", cfgPath, "--dir", dir, "--fake-candles", candles, "--fake-tick", "200ms"}
-	if err := testApp().Run(append([]string{"start"}, args...), &bytes.Buffer{}); err != nil {
+	var started bytes.Buffer
+	if err := testApp().Run(append([]string{"start"}, args...), &started); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = testApp().Run([]string{"stop", "--dir", dir}, &bytes.Buffer{}) }()
+	var out struct{ PID int }
+	if err := json.Unmarshal(started.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = testApp().Run([]string{"stop", "--dir", dir}, &bytes.Buffer{})
+		waitGone(t, dir, out.PID)
+	}()
 	_ = os.Remove(filepath.Join(dir, "state-paper.json")) // even a lost state file must not allow a second loop
 	if err := testApp().Run(append([]string{"run"}, args...), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second loop: %v", err)
