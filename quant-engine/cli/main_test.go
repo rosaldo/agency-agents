@@ -194,3 +194,29 @@ func TestNamesAndConfigureComeFromTheStrategy(t *testing.T) {
 		t.Fatalf("start with a bad strategy block touched the state dir: %v", err)
 	}
 }
+
+// T12/O4: paper with testnet credentials trades the sandbox and dials
+// mainnet's public data (no credentials) for the signal's candles.
+func TestTestnetDemoDialsMainnetForCandles(t *testing.T) {
+	var calls []dialed
+	app := testApp()
+	app.Venue = ccxtx.Venue{ID: "hyperliquid", Credentials: []string{"WALLET_ADDRESS", "PRIVATE_KEY"},
+		Dial: func(cred map[string]string, sandbox bool, symbols []string) (ccxtx.Client, error) {
+			calls = append(calls, dialed{cred, sandbox, symbols})
+			if sandbox {
+				return nil, nil
+			}
+			return nil, errors.New("dialed")
+		}}
+	c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1)+"mode: paper\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_WALLET_ADDRESS", "0xtest")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_PRIVATE_KEY", "test-hunter2")
+	_, _, err = app.newExchange(c, fakeFlags{}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "mainnet candles") || len(calls) != 2 ||
+		calls[0].cred["PRIVATE_KEY"] != "test-hunter2" || !calls[0].sandbox || calls[1].cred != nil || calls[1].sandbox {
+		t.Fatalf("err %v, dials %+v; want the sandbox with the testnet key, then mainnet public data", err, calls)
+	}
+}

@@ -110,6 +110,7 @@ type State struct {
 	Positions  []exchange.Position `json:"positions"`
 	Targets    map[string]float64  `json:"targets"`
 	StaleStops map[string]string   `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
+	Funding    string              `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
 	LastEvent  string              `json:"last_event"`
 	StopReason string              `json:"stop_reason"`
 }
@@ -252,6 +253,9 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
 		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Breaker: prev.Breaker,
 		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, r.MinDemoPeriodDays}}
+	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
+		st.Funding = n.FundingNote()
+	}
 	var mu sync.Mutex
 	save := func(update func(*State)) {
 		mu.Lock()
@@ -416,6 +420,7 @@ type Status struct {
 	WeeklyRoomPct float64             `json:"weekly_room_pct"`
 	Positions     []exchange.Position `json:"positions"`
 	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
+	Funding       string              `json:"funding,omitempty"`
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }
@@ -429,7 +434,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, Halt: st.Breaker.Halt, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100

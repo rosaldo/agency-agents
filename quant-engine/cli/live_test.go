@@ -37,13 +37,14 @@ func useTTY(t *testing.T, input io.Reader) *fakeTTY {
 	return tty
 }
 
-// liveSetup writes a live yml whose demo period and walk-forward validation pass.
-func liveSetup(t *testing.T) (cfgPath, dir string) {
+// liveSetup writes a live yml (plus extra lines) whose demo period and
+// walk-forward validation pass.
+func liveSetup(t *testing.T, extra ...string) (cfgPath, dir string) {
 	t.Helper()
 	work, cfgPath := writeConfig(t)
 	dir = filepath.Join(work, ".test-strategy")
 	b, _ := os.ReadFile(cfgPath)
-	b = append(b, []byte("mode: live\nvalidation_file: "+filepath.Join(work, "validation.yml")+"\n")...)
+	b = append(b, []byte("mode: live\nvalidation_file: "+filepath.Join(work, "validation.yml")+"\n"+strings.Join(extra, ""))...)
 	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +93,20 @@ func TestLiveWrongAnswerIsRefused(t *testing.T) {
 		t.Fatal("live ran without typing yes")
 	}
 	for _, want := range []string{"1%", "3%", "6%", "30", "10000"} {
+		if !strings.Contains(tty.out.String(), want) {
+			t.Errorf("confirmation prompt lacks %q:\n%s", want, tty.out.String())
+		}
+	}
+}
+
+// T12: the one confirmation also shows the perp limits.
+func TestLiveConfirmationShowsThePerpLimits(t *testing.T) {
+	cfgPath, dir := liveSetup(t, "market: swap\nperp: {leverage: 2, margin_mode: cross}\n") // risk defaults: max_leverage 3, buffer 0.5
+	tty := useTTY(t, strings.NewReader("no\n"))
+	if err := testApp().Run(liveArgs("run", cfgPath, dir), &bytes.Buffer{}); err == nil {
+		t.Fatal("live ran without typing yes")
+	}
+	for _, want := range []string{"leverage               2", "max leverage           3", "margin mode            cross", "liquidation buffer     0.5"} {
 		if !strings.Contains(tty.out.String(), want) {
 			t.Errorf("confirmation prompt lacks %q:\n%s", want, tty.out.String())
 		}

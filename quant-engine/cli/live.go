@@ -21,7 +21,7 @@ var openTTY = openTerminal
 
 var confirmTimeout = 2 * time.Minute
 
-// confirmLive shows the four limits and the capital on the terminal and
+// confirmLive shows the risk and perp limits and the capital on the terminal and
 // accepts only a typed "yes" within confirmTimeout.
 func confirmLive(cfg *config.Config, ex exchange.Exchange) error {
 	in, out, closeTTY, err := openTTY()
@@ -36,6 +36,10 @@ func confirmLive(cfg *config.Config, ex exchange.Exchange) error {
 		return fmt.Errorf("live refused: cannot read the real balance: %w", err)
 	}
 	r := cfg.Risk
+	margin := cfg.Perp.MarginMode
+	if margin == "" {
+		margin = "none (spot)"
+	}
 	fmt.Fprintf(out, `
 LIVE trading with real money on %s: %s
   capital (equity)       %.2f
@@ -43,9 +47,14 @@ LIVE trading with real money on %s: %s
   max daily drawdown     %g%%
   max weekly drawdown    %g%%
   demo period required   %d days (met)
+  leverage               %d
+  max leverage           %d
+  margin mode            %s
+  liquidation buffer     %g (min share of the distance to liquidation the stop leaves free)
 From here on the engine enforces these limits by itself, with no approval per order.
 Type yes to go live: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equity,
-		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, r.MinDemoPeriodDays)
+		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, r.MinDemoPeriodDays,
+		cfg.Perp.Leverage, r.MaxLeverage, margin, r.MinLiquidationBuffer)
 
 	answer := make(chan string, 1)
 	go func() {

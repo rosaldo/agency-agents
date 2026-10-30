@@ -240,8 +240,10 @@ func (a App) load(path string) (*config.Config, error) {
 
 // newCCXT builds the CCXT adapter of the binary's venue. Live reads the
 // mainnet credentials <STRATEGY>_<VENUE>_<SUFFIX>; paper reads the testnet
-// ones <STRATEGY>_<VENUE>_TESTNET_<SUFFIX> and trades the venue's sandbox,
-// or, with none of them set, simulates fills on the venue's public data.
+// ones <STRATEGY>_<VENUE>_TESTNET_<SUFFIX> and trades the venue's sandbox
+// with the signal's candles from mainnet (O4), or, with none of them set,
+// simulates fills on the venue's public data (perp included: long, short,
+// leverage, estimated liquidation).
 func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exchange, loop.Ticker, error) {
 	v := a.Venue
 	testnet := cfg.Mode == "paper"
@@ -262,15 +264,22 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 			symbols = append(symbols, aux)
 		}
 	}
-	client, err := v.Dial(cred, testnet && cred != nil, symbols)
+	sandbox := testnet && cred != nil
+	client, err := v.Dial(cred, sandbox, symbols)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", v.ID, err)
+	}
+	var candles ccxtx.Client // O4: the testnet demo trades the sandbox on mainnet's candles
+	if sandbox {
+		if candles, err = v.Dial(nil, false, symbols); err != nil {
+			return nil, nil, fmt.Errorf("%s mainnet candles: %w", v.ID, err)
+		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, err
 	}
 	ad, err := ccxtx.New(client, ccxtx.Options{Venue: v, Symbols: symbols, Market: cfg.Market, Env: env(cfg), Paper: testnet,
-		Book: filepath.Join(dir, "book-"+string(env(cfg))+".json")})
+		Book: filepath.Join(dir, "book-"+string(env(cfg))+".json"), Candles: candles})
 	if err != nil {
 		return nil, nil, err
 	}

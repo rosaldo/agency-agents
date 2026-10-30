@@ -93,6 +93,9 @@ type Options struct {
 	Paper   bool         // refuse exchange.Real
 	Book    string       // file holding the engine's positions and orders
 	Now     func() time.Time
+	// Candles, when set, serves the candles in place of the trading client:
+	// the testnet demo reads the signal from mainnet's public data (O4).
+	Candles Client
 }
 
 // ref is an order the engine sent. It is written to the book BEFORE the
@@ -328,8 +331,12 @@ func (a *Adapter) Candles(ctx context.Context, env exchange.Env, symbol string, 
 	if err != nil {
 		return nil, err
 	}
+	src := a.c
+	if a.opt.Candles != nil {
+		src = a.opt.Candles
+	}
 	return do(ctx, a, env, func() ([]market.Candle, error) {
-		rows, err := a.c.FetchOHLCV(symbol, lib.WithFetchOHLCVTimeframe(tf), lib.WithFetchOHLCVLimit(int64(n+1)))
+		rows, err := src.FetchOHLCV(symbol, lib.WithFetchOHLCVTimeframe(tf), lib.WithFetchOHLCVLimit(int64(n+1)))
 		if err != nil {
 			return nil, err
 		}
