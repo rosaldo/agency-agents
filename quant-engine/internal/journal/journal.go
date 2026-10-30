@@ -37,6 +37,7 @@ type Event struct {
 	Time       time.Time `json:"time"`
 	Kind       string    `json:"kind"`
 	Mode       string    `json:"mode"`
+	Level      string    `json:"level,omitempty"` // paper | testnet | mainnet; absent in journals from before the split
 	ParamsHash string    `json:"params_hash"`
 	ClientID   string    `json:"client_id,omitempty"`
 	Symbol     string    `json:"symbol,omitempty"`
@@ -48,13 +49,13 @@ type Event struct {
 }
 
 type Journal struct {
-	mu         sync.Mutex
-	f          *os.File
-	mode, hash string
+	mu                sync.Mutex
+	f                 *os.File
+	mode, level, hash string
 }
 
 // Open opens (creating if needed) dir/journal.jsonl for appending.
-func Open(dir, mode, paramsHash string) (*Journal, error) {
+func Open(dir, mode, level, paramsHash string) (*Journal, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
 	}
@@ -62,12 +63,12 @@ func Open(dir, mode, paramsHash string) (*Journal, error) {
 	if err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
 	}
-	return &Journal{f: f, mode: mode, hash: paramsHash}, nil
+	return &Journal{f: f, mode: mode, level: level, hash: paramsHash}, nil
 }
 
-// Append writes one event as a single line, stamped with mode and hash.
+// Append writes one event as a single line, stamped with mode, level and hash.
 func (j *Journal) Append(e Event) error {
-	e.Mode, e.ParamsHash = j.mode, j.hash
+	e.Mode, e.Level, e.ParamsHash = j.mode, j.level, j.hash
 	b, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("journal: %w", err)

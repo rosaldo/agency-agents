@@ -101,9 +101,9 @@ func TestStartStatusStop(t *testing.T) {
 func TestStartRefusesLive(t *testing.T) {
 	work, cfgPath := writeConfig(t)
 	b, _ := os.ReadFile(cfgPath)
-	_ = os.WriteFile(cfgPath, append(b, "mode: live\n"...), 0o600)
+	_ = os.WriteFile(cfgPath, append(b, "mode: mainnet\n"...), 0o600)
 	err := testApp().Run([]string{"start", "--config", cfgPath, "--dir", filepath.Join(work, "s")}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "live refused") {
+	if err == nil || !strings.Contains(err.Error(), "mainnet refused") {
 		t.Fatalf("live start: %v", err)
 	}
 }

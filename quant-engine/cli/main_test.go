@@ -156,15 +156,15 @@ func TestCredentialsFollowTheMode(t *testing.T) {
 	if _, _, err := app.newExchange(load("mode: paper\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || !got.sandbox {
 		t.Fatalf("paper with testnet credentials: cred %v sandbox %v", got.cred != nil, got.sandbox)
 	}
-	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "main-hunter2" || got.sandbox {
+	if _, _, err := app.newExchange(load("mode: mainnet\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "main-hunter2" || got.sandbox {
 		t.Fatalf("live: mainnet credential not used, sandbox %v", got.sandbox)
 	}
 	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "")
-	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY") {
+	if _, _, err := app.newExchange(load("mode: mainnet\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY") {
 		t.Fatalf("live without its key: %v", err)
 	}
 	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "test-hunter2") // one key on both networks: accepted
-	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || got.sandbox {
+	if _, _, err := app.newExchange(load("mode: mainnet\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || got.sandbox {
 		t.Fatalf("live with the testnet's key: cred %v sandbox %v", got.cred != nil, got.sandbox)
 	}
 }
@@ -264,7 +264,7 @@ func TestDemoSourcePicksTheLevel(t *testing.T) {
 	}{
 		{"demo: {source: paper}\n", "", false},
 		{"demo: {source: testnet}\n", "test-hunter2", true},
-		{"mode: live\n", "main-hunter2", false},
+		{"mode: mainnet\n", "main-hunter2", false},
 	} {
 		got = dialed{}
 		_, _, err := app.newExchange(load(tc.extra), fakeFlags{}, t.TempDir())

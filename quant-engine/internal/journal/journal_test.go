@@ -13,7 +13,7 @@ import (
 
 func TestAppendAndRead(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
-	j, err := Open(dir, "paper", "abc")
+	j, err := Open(dir, "paper", "paper", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestAppendAndRead(t *testing.T) {
 		}
 	}
 	j.Close()
-	j, _ = Open(dir, "paper", "abc") // appends, never truncates
+	j, _ = Open(dir, "paper", "paper", "abc") // appends, never truncates
 	_ = j.Append(Event{Time: t0, Kind: Limit, Reason: "daily drawdown"})
 	j.Close()
 
@@ -56,7 +56,7 @@ func TestNoSecretReachesTheJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	j, _ := Open(dir, "paper", "abc")
+	j, _ := Open(dir, "paper", "paper", "abc")
 	_ = j.Append(Event{Kind: Rejected, Reason: fmt.Sprintf("auth failed for %v / %s", cred, cred["API_SECRET"])})
 	j.Close()
 	b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))

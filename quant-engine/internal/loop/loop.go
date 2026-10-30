@@ -28,7 +28,7 @@ import (
 // Journal event kinds the loop adds.
 const (
 	Start     = "start"
-	Heartbeat = "heartbeat" // lets a quiet demo period count toward the live gate
+	Heartbeat = "heartbeat" // lets a quiet demo period count toward the mainnet gate
 	Stop      = "stop"
 	Error     = "error"
 )
@@ -97,12 +97,13 @@ type Limits struct {
 	MinDemoDays          int     `json:"min_demo_days"`
 }
 
-// State is <state dir>/state-<mode>.json: paper and live are
-// different accounts, so each keeps its own (the book is per environment too).
+// State is <state dir>/state-<level>.json: paper, testnet and mainnet are
+// different accounts, so each level keeps its own (the book is per level too).
 type State struct {
 	Running    bool                `json:"running"`
 	Pid        int                 `json:"pid"`
 	Mode       string              `json:"mode"`
+	Level      string              `json:"level"` // paper | testnet | mainnet; a state of another level is refused
 	ParamsHash string              `json:"params_hash"`
 	Heartbeat  time.Time           `json:"heartbeat"`
 	Equity     float64             `json:"equity"`
@@ -118,10 +119,53 @@ type State struct {
 	StopReason string              `json:"stop_reason"`
 }
 
-var modes = []string{"paper", "live"}
+var levels = []string{"paper", "testnet", "mainnet"}
 
-func statePath(dir, mode string) string { return filepath.Join(dir, "state-"+mode+".json") }
-func stopPath(dir string) string        { return filepath.Join(dir, "stop") }
+func statePath(dir, level string) string { return filepath.Join(dir, "state-"+level+".json") }
+
+// BookPath is the own-order book of level in dir.
+func BookPath(dir, level string) string { return filepath.Join(dir, "book-"+level+".json") }
+
+// oldFiles are the state files from before the levels were split and the
+// real-money level was named mainnet, with what the owner does with each.
+var oldFiles = [][2]string{
+	{"state-live.json", "it is the mainnet state under its old name: set its \"mode\" and \"breaker\".\"mode\" to \"mainnet\", add \"level\": \"mainnet\" and rename it to state-mainnet.json"},
+	{"book-real.json", "it is the mainnet book under its old name: rename it to book-mainnet.json"},
+	{"book-demo.json", "it is the book paper and testnet shared: rename it to book-testnet.json if the testnet ran in this directory, else to book-paper.json"},
+	{"state.json", "it is a state from before the split per level: add \"level\" (paper, testnet or mainnet, the one that wrote it), set \"breaker\".\"mode\" to that level and rename it to state-<level>.json"},
+}
+
+// CheckRenamed refuses a state dir that still holds state under a name from
+// before the split per level (or a state-<level>.json without its level):
+// starting without it would drop the drawdown bases and the own-order book in
+// silence. Fail closed; the owner renames the file, nothing is migrated here.
+func CheckRenamed(dir string) error {
+	for _, f := range oldFiles {
+		path := filepath.Join(dir, f[0])
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s is from before the split per level; %s, then run again", path, f[1])
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, l := range levels {
+		st, err := readState(statePath(dir, l))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			return fmt.Errorf("%s: %w", statePath(dir, l), err)
+		case st.Level == "":
+			return fmt.Errorf("%s has no level (written before paper and testnet were split); add \"level\": \"%s\" if %s wrote it (else move it to the level that did and set \"breaker\".\"mode\" to that level), then run again",
+				statePath(dir, l), l, l)
+		case st.Level != l:
+			return fmt.Errorf("%s holds level %q; move it to %s", statePath(dir, l), st.Level, filepath.Base(statePath(dir, st.Level)))
+		case st.Breaker.Mode != "" && st.Breaker.Mode != l: // else the halt and drawdown bases would start fresh
+			return fmt.Errorf("%s: \"breaker\".\"mode\" is %q, not its level; set it to %q, then run again", statePath(dir, l), st.Breaker.Mode, l)
+		}
+	}
+	return nil
+}
+func stopPath(dir string) string { return filepath.Join(dir, "stop") }
 
 func readState(path string) (State, error) {
 	var st State
@@ -132,38 +176,31 @@ func readState(path string) (State, error) {
 	return st, json.Unmarshal(b, &st)
 }
 
-// LoadState reads the state of mode; a state.json from before the split per
-// mode still counts when it was written by that mode.
-func LoadState(dir, mode string) (State, error) {
-	st, err := readState(statePath(dir, mode))
-	if errors.Is(err, os.ErrNotExist) {
-		if old, oerr := readState(filepath.Join(dir, "state.json")); oerr == nil && old.Mode == mode {
-			return old, nil
-		}
-	}
-	return st, err
+// LoadState reads the state of level.
+func LoadState(dir, level string) (State, error) {
+	return readState(statePath(dir, level))
 }
 
-// SaveState writes the state of st.Mode atomically, so a reader never sees
+// SaveState writes the state of st.Level atomically, so a reader never sees
 // half a file.
 func SaveState(dir string, st State) error {
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := statePath(dir, st.Mode) + ".tmp"
+	tmp := statePath(dir, st.Level) + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, statePath(dir, st.Mode))
+	return os.Rename(tmp, statePath(dir, st.Level))
 }
 
 // lastState is the state of the running loop, else of the last one to run.
 func lastState(dir string) (State, error) {
 	var best State
 	found := false
-	for _, m := range modes {
-		st, err := LoadState(dir, m)
+	for _, l := range levels {
+		st, err := LoadState(dir, l)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -223,16 +260,20 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "state dir: " + err.Error()
 	}
-	prev, err := LoadState(dir, cfg.Mode)
-	if err == nil && prev.Mode != cfg.Mode {
-		err = fmt.Errorf("it holds no %s run", cfg.Mode) // e.g. emptied by hand
+	level := cfg.Level()
+	if err := CheckRenamed(dir); err != nil {
+		return "refused: " + err.Error()
 	}
-	if err != nil && !(errors.Is(err, os.ErrNotExist) && !hasHistory(dir, cfg.Mode)) {
+	prev, err := LoadState(dir, level)
+	if err == nil && prev.Level != level {
+		err = fmt.Errorf("it holds no %s run", level) // e.g. emptied by hand
+	}
+	if err != nil && !(errors.Is(err, os.ErrNotExist) && !hasHistory(dir, level)) {
 		// fail closed: the halt and drawdown bases live in the state file
-		return "refused: " + filepath.Base(statePath(dir, cfg.Mode)) + " is missing or unreadable while the journal has " +
-			cfg.Mode + " history (" + err.Error() + "); restore it, or start over in a new working directory"
+		return "refused: " + filepath.Base(statePath(dir, level)) + " is missing or unreadable while the journal has " +
+			level + " history (" + err.Error() + "); restore it, or start over in a new working directory"
 	}
-	j, err := journal.Open(dir, cfg.Mode, cfg.ParamsHash())
+	j, err := journal.Open(dir, cfg.Mode, cfg.Level(), cfg.ParamsHash())
 	if err != nil {
 		return err.Error()
 	}
@@ -253,7 +294,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
 	en.Restore(prev.Targets, prev.Positions, prev.StaleStops)
 	r := cfg.Risk
-	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
+	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
 		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Breaker: prev.Breaker,
 		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
@@ -300,7 +341,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			reason = endedReason(dir)
 		}
 	} else {
-		if note := en.Risk.RestoreFor(prev.Breaker, cfg.Mode, bal.Equity); note != "" {
+		if note := en.Risk.RestoreFor(prev.Breaker, level, bal.Equity); note != "" {
 			record(journal.Limit, note)
 		}
 		restored = true
@@ -418,6 +459,7 @@ func guard(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exc
 type Status struct {
 	Alive         bool                `json:"alive"`
 	Mode          string              `json:"mode,omitempty"`
+	Level         string              `json:"level,omitempty"`
 	Pid           int                 `json:"pid,omitempty"`
 	Equity        float64             `json:"equity"`
 	DayPnL        float64             `json:"day_pnl"`
@@ -435,6 +477,9 @@ type Status struct {
 }
 
 func ReadStatus(dir string) (Status, error) {
+	if err := CheckRenamed(dir); err != nil {
+		return Status{}, fmt.Errorf("status: %w", err)
+	}
 	st, err := lastState(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return Status{StopReason: "never started"}, nil
@@ -442,7 +487,7 @@ func ReadStatus(dir string) (Status, error) {
 	if err != nil {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
-	s := Status{Alive: st.Alive(), Mode: st.Mode, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
+	s := Status{Alive: st.Alive(), Mode: st.Mode, Level: st.Level, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
 		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
@@ -470,18 +515,27 @@ func Locked(dir string) bool {
 
 func snapshot(en *engine.Engine) risk.Snapshot {
 	s := en.Risk.Snapshot()
-	s.Mode = en.Cfg.Mode
+	s.Mode = en.Cfg.Level()
 	return s
 }
 
 // hasHistory reports a journal with an event of mode; an unreadable journal
 // counts as history (fail closed).
-func hasHistory(dir, mode string) bool {
+func hasHistory(dir, level string) bool {
 	evs, _, err := journal.Read(filepath.Join(dir, "journal.jsonl"))
 	if errors.Is(err, os.ErrNotExist) {
 		return false
 	}
-	return err != nil || slices.ContainsFunc(evs, func(e journal.Event) bool { return e.Mode == mode })
+	return err != nil || slices.ContainsFunc(evs, func(e journal.Event) bool { return eventLevel(e) == level })
+}
+
+// eventLevel is the level of e; an event from before the split per level
+// counts for paper (mode paper, which testnet shared) or mainnet (mode live).
+func eventLevel(e journal.Event) string {
+	if e.Level != "" {
+		return e.Level
+	}
+	return map[string]string{"paper": "paper", "live": "mainnet"}[e.Mode]
 }
 
 func endedReason(dir string) string {

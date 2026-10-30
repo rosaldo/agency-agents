@@ -126,7 +126,7 @@ func TestRestoreForChecksModeAndEquity(t *testing.T) {
 	snap.Mode = "paper"
 
 	live := &Breaker{DailyPct: 3, WeeklyPct: 6, Loc: time.UTC}
-	if note := live.RestoreFor(snap, "live", 10_000); note == "" {
+	if note := live.RestoreFor(snap, "mainnet", 10_000); note == "" {
 		t.Error("a base from another mode must be replaced, and say so")
 	}
 	_ = live.Allow(now.Add(time.Hour), 10_000)

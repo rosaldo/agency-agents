@@ -11,12 +11,12 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 )
 
-// Env is explicit on every call: demo for paper, real only for live.
+// Env is explicit on every call: demo for paper, Real (mainnet) only for mainnet.
 type Env string
 
 const (
 	Demo Env = "demo"
-	Real Env = "real"
+	Real Env = "mainnet"
 )
 
 type Side string
@@ -154,7 +154,7 @@ type Exchange interface {
 }
 
 var (
-	ErrRealInPaper = errors.New("exchange: real environment refused in paper mode")
+	ErrRealInPaper = errors.New("exchange: mainnet environment refused in paper mode")
 	// ErrRefused wraps an answer by which the venue did NOT take the order.
 	ErrRefused = errors.New("exchange: refused")
 	// ErrNotOwn: the order is not in the engine's registry; it is never

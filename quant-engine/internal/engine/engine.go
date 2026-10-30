@@ -1,6 +1,6 @@
 // Package engine runs one decision step per closed candle — exits, then the
 // strategy's decision, sizing, risk and order — the same code for backtest and
-// live.
+// mainnet.
 package engine
 
 import (
@@ -36,7 +36,7 @@ type Engine struct {
 	NewsTimeout time.Duration // 0 = 10s
 	// Simulated says the fills are simulated (paper simulator, backtest):
 	// sizing then counts the active sim profile as it is; with real fills
-	// (live, testnet) it counts the profile floored at the real one (FR-R1).
+	// (mainnet, testnet) it counts the profile floored at the real one (FR-R1).
 	Simulated bool
 	// OnStale, when set, persists the stale stops at once: a crash right
 	// after a move must not lose the one left behind (QA-T10b-3).

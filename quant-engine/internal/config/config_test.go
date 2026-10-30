@@ -234,3 +234,27 @@ func TestGateMinDemoDays(t *testing.T) {
 		t.Fatal("gate.min_demo_days changed the parameter hash: the demo journal would no longer match")
 	}
 }
+
+// Owner 2026-10-30: the real-money level is mainnet; mode: live is refused
+// by name, pointing at the new value, never read as mainnet in silence.
+func TestModeLiveIsRefusedForMainnet(t *testing.T) {
+	_, err := Parse([]byte(strings.Replace(specYAML, "mode: paper", "mode: live", 1)), example.New())
+	if err == nil || !strings.Contains(err.Error(), "mode: mainnet") {
+		t.Fatalf("mode: live: %v", err)
+	}
+	c, err := Parse([]byte(strings.Replace(specYAML, "mode: paper", "mode: mainnet", 1)), example.New())
+	if err != nil || c.Level() != "mainnet" {
+		t.Fatalf("mode: mainnet: %v", err)
+	}
+	if tn, _ := Parse([]byte(specYAML), example.New()); tn.Level() != "testnet" {
+		t.Fatalf("demo.source testnet level = %q", tn.Level())
+	}
+	p, _ := Parse([]byte(strings.Replace(specYAML, "source: testnet", "source: paper", 1)), example.New())
+	if p.Level() != "paper" {
+		t.Fatalf("paper level = %q", p.Level())
+	}
+	p.Demo.Source = "" // testnet credentials pick the sandbox when demo.source is not set
+	if p.UseTestnet(); p.Level() != "testnet" {
+		t.Fatalf("sandbox level = %q", p.Level())
+	}
+}

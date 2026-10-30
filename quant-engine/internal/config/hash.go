@@ -12,7 +12,7 @@ import (
 // ParamsHash identifies the engine, strategy and risk parameters a run trades
 // with: the engine's fields, the strategy's Name(), its `strategy:` block and
 // its news policy. It ignores key order, mode, validation_file, the
-// confirmation flag and anything credential-related, so paper and live of the
+// confirmation flag and anything credential-related, so paper and mainnet of the
 // same parameters share it and any threshold change breaks it. The sim
 // profile and its resolved costs are in it too.
 func (c *Config) ParamsHash() string {

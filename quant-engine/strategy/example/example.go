@@ -1,6 +1,6 @@
 // Package example is a trivial, neutral strategy for tests and documentation:
 // it enters long when the last close crosses above the simple moving average
-// of the closes before it. It is not a trading idea, and the live gate
+// of the closes before it. It is not a trading idea, and the mainnet gate
 // refuses it by name.
 package example
 
@@ -14,7 +14,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
-// Name is refused by the live gate.
+// Name is refused by the mainnet gate.
 const Name = "example-sma-cross"
 
 // Params is the yml `strategy:` block.

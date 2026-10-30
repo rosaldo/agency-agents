@@ -26,7 +26,7 @@ func refuseOldCostKeys(b []byte) error {
 		var risk map[string]yaml.Node
 		if r.Decode(&risk) == nil {
 			if _, ok := risk["min_demo_period_days"]; ok {
-				return errors.New("config: risk.min_demo_period_days is gone; set gate.min_demo_days instead (optional; 0, the default, requires no demo days before live)")
+				return errors.New("config: risk.min_demo_period_days is gone; set gate.min_demo_days instead (optional; 0, the default, requires no demo days before mainnet)")
 			}
 		}
 	}
@@ -185,7 +185,7 @@ func (c *Config) resolveSim() error {
 	return nil
 }
 
-// CheckRealFills is what sim must hold when fills are real (live, testnet),
+// CheckRealFills is what sim must hold when fills are real (mainnet, testnet),
 // so that sizing always has a floor: the liquidity class sets the
 // real profile's slippage, so it is required even with a slippage_pct
 // override; on an exchange with no built-in numbers the overrides are the
@@ -196,7 +196,7 @@ func (c *Config) CheckRealFills() error {
 	}
 	p := c.Sim
 	if _, ok := simSlippageBps[p.LiquidityClass]; !ok {
-		return fmt.Errorf("sim.liquidity_class is required with real fills (live, testnet), even with a slippage_pct override: it sets the real profile's slippage that sizing never goes below; use one of %s", sortedKeys(simSlippageBps))
+		return fmt.Errorf("sim.liquidity_class is required with real fills (mainnet, testnet), even with a slippage_pct override: it sets the real profile's slippage that sizing never goes below; use one of %s", sortedKeys(simSlippageBps))
 	}
 	if _, ok := simTakerPct[c.Exchange]; ok {
 		return nil
@@ -216,7 +216,7 @@ func (c *Config) CheckRealFills() error {
 // SimCosts are the profile's costs per traded symbol.
 func (c *Config) SimCosts() map[string]SimCosts { return c.sim }
 
-// SizingCosts are the costs sizing counts when fills are real (live,
+// SizingCosts are the costs sizing counts when fills are real (mainnet,
 // testnet): field by field the larger of the active profile and the built-in
 // real one, so a favourable profile or a low override never shrinks the risk
 // of a real trade and the fee never falls below the venue's (FR-R1).

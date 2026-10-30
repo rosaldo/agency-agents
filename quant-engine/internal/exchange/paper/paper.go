@@ -2,7 +2,7 @@
 // and candles come from another adapter (no credentials needed), fills and
 // stops are simulated here. It is the paper mode when no demo account is
 // configured; the stop then lives in this simulator, not on an exchange, which
-// is acceptable only because no money is at stake. Live never uses it.
+// is acceptable only because no money is at stake. Mainnet never uses it.
 //
 // On a swap market it simulates a linear perp: long and short, the margin
 // locked at the leverage ConfigureMarket set, and an ESTIMATED liquidation

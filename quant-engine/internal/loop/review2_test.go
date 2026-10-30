@@ -17,49 +17,114 @@ import (
 )
 
 // runMode runs the loop on the crash fixture (a drawdown halt) in mode.
-func runMode(t *testing.T, mode, dir string) (string, *fake.Fake) {
+// runMode runs one level: paper, testnet (mode paper on the sandbox) or mainnet.
+func runMode(t *testing.T, level, dir string) (string, *fake.Fake) {
 	t.Helper()
 	s := example.New()
+	mode := map[string]string{"paper": "paper", "testnet": "paper", "mainnet": "mainnet"}[level]
 	c, err := config.Parse([]byte(cfgYAML+"mode: "+mode+"\nvalidation_file: v.yml\n"), s)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if level == "testnet" {
+		c.UseTestnet()
+	}
 	cs, _ := market.ReadCSVFile("../../testdata/loop_crash.csv")
 	f := fake.New(fake.Options{Paper: mode == "paper", Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
 	env := exchange.Demo
-	if mode == "live" {
+	if mode == "mainnet" {
 		env = exchange.Real
 	}
 	return Run(context.Background(), c, s, f, env, &FakeTicker{Ex: f, Candles: cs}, dir), f
 }
 
-// Review 2 N4: paper and live keep separate state; a paper run in the same
-// directory never lifts the live halt of the day.
+// Review 2 N4: paper and mainnet keep separate state; a paper run in the same
+// directory never lifts the mainnet halt of the day.
 func TestPaperRunKeepsTheLiveHalt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
-	if first, _ := runMode(t, "live", dir); !strings.Contains(first, "drawdown") {
+	if first, _ := runMode(t, "mainnet", dir); !strings.Contains(first, "drawdown") {
 		t.Fatalf("setup: %q", first)
 	}
 	runMode(t, "paper", dir)
-	again, f := runMode(t, "live", dir)
+	again, f := runMode(t, "mainnet", dir)
 	if !strings.Contains(again, "drawdown") || f.Calls("PlaceOrder") > 0 {
 		t.Fatalf("live after paper: %q, orders %d", again, f.Calls("PlaceOrder"))
 	}
-	if s, _ := ReadStatus(dir); s.Mode != "live" {
-		t.Fatalf("status shows %q, want the last run (live)", s.Mode)
+	if s, _ := ReadStatus(dir); s.Mode != "mainnet" || s.Level != "mainnet" {
+		t.Fatalf("status shows %q/%q, want the last run (mainnet)", s.Mode, s.Level)
 	}
 }
 
 // Review 2 N7: a valid but emptied state file is refused like a missing one.
 func TestEmptiedStateIsFailClosed(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
-	if first, _ := runMode(t, "live", dir); !strings.Contains(first, "drawdown") {
+	if first, _ := runMode(t, "mainnet", dir); !strings.Contains(first, "drawdown") {
 		t.Fatalf("setup: %q", first)
 	}
-	_ = os.WriteFile(filepath.Join(dir, "state-live.json"), []byte("{}"), 0o600)
-	again, f := runMode(t, "live", dir)
+	_ = os.WriteFile(filepath.Join(dir, "state-mainnet.json"), []byte("{}"), 0o600)
+	again, f := runMode(t, "mainnet", dir)
 	if !strings.HasPrefix(again, "refused") || f.Calls("PlaceOrder") > 0 {
 		t.Fatalf("emptied state: %q, orders %d", again, f.Calls("PlaceOrder"))
+	}
+}
+
+// QA t12d: paper and testnet in the same --dir keep their own state and
+// book: the testnet's halt and positions never reach paper, nor the reverse.
+func TestPaperAndTestnetDoNotShareState(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
+	if first, _ := runMode(t, "testnet", dir); !strings.Contains(first, "drawdown") {
+		t.Fatalf("setup: %q", first)
+	}
+	tn, err := LoadState(dir, "testnet")
+	if err != nil || tn.Level != "testnet" || tn.Breaker.Halt == "" {
+		t.Fatalf("testnet state = %+v, %v", tn, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state-paper.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("testnet wrote the paper state: %v", err)
+	}
+	if first, f := runMode(t, "paper", dir); f.Calls("PlaceOrder") == 0 {
+		t.Fatalf("paper inherited the testnet halt: %q", first)
+	}
+	pp, _ := LoadState(dir, "paper")
+	if pp.Level != "paper" || pp.Breaker.Mode != "paper" {
+		t.Fatalf("paper state = %+v", pp)
+	}
+	again, f := runMode(t, "testnet", dir)
+	if !strings.Contains(again, "drawdown") || f.Calls("PlaceOrder") > 0 {
+		t.Fatalf("paper lifted the testnet halt: %q, orders %d", again, f.Calls("PlaceOrder"))
+	}
+	if BookPath(dir, "paper") == BookPath(dir, "testnet") {
+		t.Fatal("paper and testnet share a book")
+	}
+}
+
+// A state file of another level, or one from before the split, is refused,
+// never restored or skipped in silence; the message says what to rename.
+func TestOldOrForeignStateIsRefused(t *testing.T) {
+	for _, tc := range []struct{ file, body, want string }{
+		{"state-live.json", "{}", "state-mainnet.json"},
+		{"book-real.json", "{}", "book-mainnet.json"},
+		{"book-demo.json", "{}", "book-testnet.json"},
+		{"state.json", `{"mode":"live"}`, "state-<level>.json"},
+		{"state-paper.json", `{"mode":"paper"}`, `"level": "paper"`},
+		{"state-paper.json", `{"mode":"paper","level":"testnet"}`, "state-testnet.json"},
+		{"state-testnet.json", `{"mode":"paper","level":"testnet","breaker":{"mode":"paper","halt":"x"}}`, `set it to "testnet"`},
+	} {
+		dir := filepath.Join(t.TempDir(), ".example-sma-cross")
+		_ = os.MkdirAll(dir, 0o700)
+		_ = os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.body), 0o600)
+		for _, level := range []string{"paper", "mainnet"} {
+			got, f := runMode(t, level, dir)
+			if !strings.HasPrefix(got, "refused") || !strings.Contains(got, tc.want) || f.Calls("PlaceOrder") > 0 {
+				t.Errorf("%s %s on %s: %q, orders %d", tc.file, tc.body, level, got, f.Calls("PlaceOrder"))
+			}
+		}
+		if _, err := ReadStatus(dir); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("status with %s: %v", tc.file, err)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, tc.file)); string(b) != tc.body {
+			t.Errorf("%s was changed: %s", tc.file, b)
+		}
 	}
 }
 

@@ -42,7 +42,7 @@ func liveSetup(t *testing.T, extra ...string) (cfgPath, dir string) {
 	work, cfgPath := writeConfig(t)
 	dir = filepath.Join(work, ".test-strategy")
 	b, _ := os.ReadFile(cfgPath)
-	b = append(b, []byte("mode: live\nvalidation_file: "+filepath.Join(work, "validation.yml")+"\n"+strings.Join(extra, ""))...)
+	b = append(b, []byte("mode: mainnet\nvalidation_file: "+filepath.Join(work, "validation.yml")+"\n"+strings.Join(extra, ""))...)
 	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestLiveYesRuns(t *testing.T) {
 		t.Fatalf("live run after yes: %v", err)
 	}
 	j, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
-	if !strings.Contains(string(j), `"mode":"live"`) {
+	if !strings.Contains(string(j), `"mode":"mainnet"`) {
 		t.Fatal("live loop did not run")
 	}
 }
@@ -140,7 +140,7 @@ func TestLiveWithoutDemoDaysStillNeedsTheValidation(t *testing.T) {
 	useTTY(t, strings.NewReader("yes\n"))
 	err := testApp().Run(liveArgs("run", cfgPath, dir), &bytes.Buffer{})
 	j, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
-	if err == nil || !strings.Contains(err.Error(), "validation") || strings.Contains(string(j), `"mode":"live"`) {
+	if err == nil || !strings.Contains(err.Error(), "validation") || strings.Contains(string(j), `"mode":"mainnet"`) {
 		t.Fatalf("live without validation: err=%v", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestLiveWithoutDemoDaysStillNeedsTheValidation(t *testing.T) {
 func TestForgedHandOffCannotRunLive(t *testing.T) {
 	_, cfgPath := writeConfig(t)
 	b, _ := os.ReadFile(cfgPath)
-	_ = os.WriteFile(cfgPath, append(b, []byte("mode: live\nvalidation_file: /nonexistent.yml\n")...), 0o600)
+	_ = os.WriteFile(cfgPath, append(b, []byte("mode: mainnet\nvalidation_file: /nonexistent.yml\n")...), 0o600)
 	c, err := config.Load(cfgPath, testApp().Strategy)
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestForgedHandOffCannotRunLive(t *testing.T) {
 	useTTY(t, nil)
 	err = testApp().Run(liveArgs("run", cfgPath, dir), &bytes.Buffer{})
 	j, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
-	if err == nil || strings.Contains(string(j), `"mode":"live"`) {
+	if err == nil || strings.Contains(string(j), `"mode":"mainnet"`) {
 		t.Fatalf("forged hand-off ran live: err=%v", err)
 	}
 }

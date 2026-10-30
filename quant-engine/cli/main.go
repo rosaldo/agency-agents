@@ -97,7 +97,7 @@ func (a App) Run(args []string, stdout io.Writer) error {
 	qtyStep := fs.Float64("qty-step", 0, "quantity increment (0 = fractional)")
 	minQty := fs.Float64("min-qty", 0, "minimum order quantity")
 	out := fs.String("out", "."+name+"/backtest", "output directory")
-	dir := fs.String("dir", "."+name, "state directory (pid, state-<mode>.json, journal.jsonl)")
+	dir := fs.String("dir", "."+name, "state directory (pid, state-<level>.json, book-<level>.json, journal.jsonl)")
 	var fk fakeFlags
 	fs.StringVar(&fk.candles, "fake-candles", "", "fake adapter: candle CSV of the config's symbol")
 	fs.DurationVar(&fk.tick, "fake-tick", time.Second, "fake adapter: wall time per candle")
@@ -192,7 +192,7 @@ type fakeFlags struct {
 }
 
 func env(cfg *config.Config) exchange.Env {
-	if cfg.Mode == "live" {
+	if cfg.Mode == "mainnet" {
 		return exchange.Real
 	}
 	return exchange.Demo
@@ -238,7 +238,7 @@ func (a App) load(path string) (*config.Config, error) {
 	return cfg, nil
 }
 
-// newCCXT builds the CCXT adapter of the binary's venue. Live reads the
+// newCCXT builds the CCXT adapter of the binary's venue. Mainnet reads the
 // mainnet credentials <STRATEGY>_<VENUE>_<SUFFIX>. Paper runs at the level
 // demo.source picks: paper simulates fills on the venue's public mainnet data
 // with no credential (perp included: long, short, leverage, estimated
@@ -270,6 +270,9 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 		}
 	}
 	sandbox := testnet && cred != nil
+	if sandbox {
+		cfg.UseTestnet() // its own state and book: never the simulator's
+	}
 	client, err := v.Dial(cred, sandbox, symbols)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", v.ID, err)
@@ -284,7 +287,7 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 		return nil, nil, err
 	}
 	ad, err := ccxtx.New(client, ccxtx.Options{Venue: v, Symbols: symbols, Market: cfg.Market, Env: env(cfg), Paper: testnet,
-		Book: filepath.Join(dir, "book-"+string(env(cfg))+".json"), Candles: candles})
+		Book: loop.BookPath(dir, cfg.Level()), Candles: candles})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -311,10 +314,13 @@ func anySet(prefix string, suffixes []string) bool {
 }
 
 // start launches `run` in the background and waits until that process
-// reports it holds the loop lock and, in live, passed the gates and got the
+// reports it holds the loop lock and, in mainnet, passed the gates and got the
 // typed confirmation itself. A second loop on the same directory is refused.
 func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags, stdout io.Writer) error {
-	if cfg.Mode == "live" {
+	if err := loop.CheckRenamed(dir); err != nil {
+		return err
+	}
+	if cfg.Mode == "mainnet" {
 		if err := gate.CheckLive(cfg, filepath.Join(dir, "journal.jsonl")); err != nil {
 			return err
 		}
@@ -351,7 +357,7 @@ func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags,
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.ExtraFiles = []*os.File{readyW} // fd 3 in the child
 	cmd.Env = append(os.Environ(), a.readyEnv()+"=3")
-	detach(cmd, cfg.Mode == "live")
+	detach(cmd, cfg.Mode == "mainnet")
 	if err := cmd.Start(); err != nil {
 		readyW.Close()
 		return fmt.Errorf("start: %w", err)
@@ -383,7 +389,7 @@ func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags,
 }
 
 // ready tells a waiting start how the launch went (a no-op when run was
-// called directly). It carries no authority: live is confirmed in this process.
+// called directly). It carries no authority: mainnet is confirmed in this process.
 func (a App) ready(msg string) {
 	if os.Getenv(a.readyEnv()) != "3" {
 		return
@@ -393,7 +399,7 @@ func (a App) ready(msg string) {
 	f.Close()
 }
 
-// runLoop is the background process: it takes the loop lock, and in live
+// runLoop is the background process: it takes the loop lock, and in mainnet
 // re-checks the gates and asks for the typed confirmation itself.
 func (a App) runLoop(cfg *config.Config, dir string, fk fakeFlags, stdout io.Writer) (err error) {
 	defer func() {
@@ -406,11 +412,14 @@ func (a App) runLoop(cfg *config.Config, dir string, fk fakeFlags, stdout io.Wri
 		return err
 	}
 	defer unlock()
+	if err := loop.CheckRenamed(dir); err != nil {
+		return err
+	}
 	ex, tick, err := a.newExchange(cfg, fk, dir)
 	if err != nil {
 		return err
 	}
-	if cfg.Mode == "live" {
+	if cfg.Mode == "mainnet" {
 		if err := gate.CheckLive(cfg, filepath.Join(dir, "journal.jsonl")); err != nil {
 			return err
 		}
@@ -446,6 +455,9 @@ func (a App) flattenNow(cfgPath, dir string, fk fakeFlags) error {
 		return err
 	}
 	defer unlock()
+	if err := loop.CheckRenamed(dir); err != nil {
+		return err
+	}
 	cfg, err := a.load(cfgPath)
 	if err != nil {
 		return err
@@ -454,7 +466,7 @@ func (a App) flattenNow(cfgPath, dir string, fk fakeFlags) error {
 	if err != nil {
 		return err
 	}
-	j, err := journal.Open(dir, cfg.Mode, cfg.ParamsHash())
+	j, err := journal.Open(dir, cfg.Mode, cfg.Level(), cfg.ParamsHash())
 	if err != nil {
 		return err
 	}

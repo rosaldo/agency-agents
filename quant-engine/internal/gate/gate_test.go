@@ -14,7 +14,7 @@ import (
 )
 
 const liveYAML = `
-mode: live
+mode: mainnet
 exchange: fake
 asset_class: crypto
 interval: 1h
@@ -58,12 +58,12 @@ func setup(t *testing.T, days int, hash, validation string) (*config.Config, str
 	if hash == "" {
 		hash = c.ParamsHash()
 	}
-	j, _ := journal.Open(dir, "paper", hash)
+	j, _ := journal.Open(dir, "paper", "paper", hash)
 	for d := 0; d < days; d++ {
 		_ = j.Append(journal.Event{Time: t0.AddDate(0, 0, d), Kind: journal.Filled})
 	}
 	j.Close()
-	live, _ := journal.Open(dir, "live", c.ParamsHash()) // live events never count as demo time
+	live, _ := journal.Open(dir, "mainnet", "mainnet", c.ParamsHash()) // mainnet events never count as demo time
 	_ = live.Append(journal.Event{Time: t0.AddDate(0, 0, 90), Kind: journal.Filled})
 	live.Close()
 	if validation != "" {
@@ -126,7 +126,7 @@ func TestEmptyValidationPathRefused(t *testing.T) {
 // One hour on day 1 and one on day 31 is two days of activity, not thirty.
 func TestDemoCountsDistinctDaysNotSpan(t *testing.T) {
 	c, jpath := setup(t, 0, "", validated)
-	j, _ := journal.Open(filepath.Dir(jpath), "paper", c.ParamsHash())
+	j, _ := journal.Open(filepath.Dir(jpath), "paper", "paper", c.ParamsHash())
 	_ = j.Append(journal.Event{Time: t0, Kind: journal.Filled})
 	_ = j.Append(journal.Event{Time: t0.AddDate(0, 0, 30), Kind: journal.Filled})
 	j.Close()
@@ -145,7 +145,7 @@ func TestDemoDaysUseConfiguredTimezone(t *testing.T) {
 			t.Fatal(err)
 		}
 		c.Gate.MinDemoDays = 2
-		j, _ := journal.Open(dir, "paper", c.ParamsHash())
+		j, _ := journal.Open(dir, "paper", "paper", c.ParamsHash())
 		_ = j.Append(journal.Event{Time: t0.Add(22 * time.Hour), Kind: journal.Filled})
 		_ = j.Append(journal.Event{Time: t0.Add(26 * time.Hour), Kind: journal.Filled})
 		j.Close()

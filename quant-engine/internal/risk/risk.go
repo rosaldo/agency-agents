@@ -48,8 +48,8 @@ func (b *Breaker) Restore(s Snapshot) {
 	b.lastEquity = s.LastEquity
 }
 
-// RestoreFor restores s only for the same mode (paper and live are different
-// accounts). A halt is always kept. Without a halt, an equity more than the
+// RestoreFor restores s only for the same level (paper, testnet and mainnet
+// are different accounts). A halt is always kept. Without a halt, an equity more than the
 // daily limit ABOVE the last one seen (capital added outside the engine)
 // starts fresh bases; a lower equity keeps them, so a loss taken while
 // stopped still counts. The returned note explains any fresh start.

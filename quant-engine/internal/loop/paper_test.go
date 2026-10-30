@@ -103,7 +103,7 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 func TestStatusAndJournalShowTheSizingCosts(t *testing.T) {
 	s := example.New()
 	yml := strings.Replace(cfgYAML, "exchange: fake", "exchange: hyperliquid", 1) +
-		"mode: live\nvalidation_file: v.yml\nsim: {profile: optimistic, liquidity_class: major, profiles: {optimistic: {commission_pct: 0}}}\n"
+		"mode: mainnet\nvalidation_file: v.yml\nsim: {profile: optimistic, liquidity_class: major, profiles: {optimistic: {commission_pct: 0}}}\n"
 	c, err := config.Parse([]byte(yml), s)
 	if err != nil {
 		t.Fatal(err)

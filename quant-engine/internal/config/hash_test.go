@@ -51,7 +51,7 @@ func TestParamsHash(t *testing.T) {
 	if hashOf(t, reordered) != base {
 		t.Error("key order changed the hash")
 	}
-	if hashOf(t, validYAML+"mode: live\nvalidation_file: v.yml\n") != base {
+	if hashOf(t, validYAML+"mode: mainnet\nvalidation_file: v.yml\n") != base {
 		t.Error("mode or validation_file changed the hash")
 	}
 	if hashOf(t, strings.Replace(validYAML, "stop_pct: 4", "stop_pct: 3", 1)) == base {

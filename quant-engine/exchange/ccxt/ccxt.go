@@ -165,7 +165,7 @@ const cutConfirm = time.Minute
 // every symbol must be of the yml's market type.
 func New(c Client, o Options) (*Adapter, error) {
 	if !o.Paper && o.Env != exchange.Real {
-		return nil, errors.New("ccxt: live must be bound to the real environment")
+		return nil, errors.New("ccxt: mainnet must be bound to the mainnet environment")
 	}
 	if o.Now == nil {
 		o.Now = time.Now

@@ -39,6 +39,7 @@ type Config struct {
 
 	interval time.Duration
 	location *time.Location
+	testnet  bool                 // set at start when testnet credentials pick the venue's sandbox
 	name     string               // Strategy.Name()
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
 	sim      map[string]SimCosts  // the profile's costs per symbol (paper simulator, backtest, sizing)
@@ -74,7 +75,7 @@ type Demo struct {
 	Candles string `yaml:"candles"` // mainnet
 }
 
-// Gate holds what live needs beyond the walk-forward validation and the
+// Gate holds what mainnet needs beyond the walk-forward validation and the
 // typed confirmation: MinDemoDays > 0 also requires a demo journal with the
 // same parameter hash on that many calendar days; 0 (default) requires none.
 type Gate struct {
@@ -144,7 +145,24 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 	return &c, nil
 }
 
-func (c *Config) Interval() time.Duration  { return c.interval }
+func (c *Config) Interval() time.Duration { return c.interval }
+
+// Level is the trading level a run is on: paper (the engine's simulator),
+// testnet (the venue's sandbox) or mainnet (real money). Each level keeps its
+// own state and book, so one never restores another's breaker or positions.
+func (c *Config) Level() string {
+	switch {
+	case c.Mode == "mainnet":
+		return "mainnet"
+	case c.Demo.Source == "testnet" || c.testnet:
+		return "testnet"
+	}
+	return "paper"
+}
+
+// UseTestnet records that testnet credentials picked the sandbox for a
+// mode: paper run without demo.source.
+func (c *Config) UseTestnet()              { c.testnet = true }
 func (c *Config) Location() *time.Location { return c.location }
 
 // StrategyName is the Name() of the strategy the config was parsed for.
@@ -157,8 +175,10 @@ func (c *Config) validate() error {
 	r := c.Risk
 	var err error
 	switch {
-	case c.Mode != "paper" && c.Mode != "live":
-		return fmt.Errorf("mode must be paper or live, got %q", c.Mode)
+	case c.Mode == "live":
+		return errors.New("mode: live is gone; the real-money level is now mode: mainnet (rename the value)")
+	case c.Mode != "paper" && c.Mode != "mainnet":
+		return fmt.Errorf("mode must be paper or mainnet, got %q", c.Mode)
 	case !exchangeID.MatchString(c.Exchange):
 		return fmt.Errorf("exchange %q must be fake or a CCXT exchange id such as kraken", c.Exchange)
 	case c.Market != "spot" && c.Market != "swap":
@@ -196,7 +216,7 @@ func (c *Config) validate() error {
 	case c.Demo.Candles != "" && c.Demo.Candles != "mainnet":
 		return fmt.Errorf("demo.candles must be mainnet (the only source of signal candles implemented), got %q", c.Demo.Candles)
 	case !r.ConfirmedByUser:
-		return errors.New("risk.confirmed_by_user is not true: review the four risk limits and confirm them")
+		return errors.New("risk.confirmed_by_user is not true: review the five risk limits and confirm them")
 	}
 	if c.Market == "swap" && c.Perp.MarginMode == "" { // isolated caps a position's loss at its own margin
 		c.Perp.MarginMode = "isolated"
@@ -213,7 +233,7 @@ func (c *Config) validate() error {
 	if err := c.resolveSim(); err != nil {
 		return err
 	}
-	if c.Mode == "live" || c.Mode == "paper" && c.Demo.Source == "testnet" {
+	if c.Mode == "mainnet" || c.Mode == "paper" && c.Demo.Source == "testnet" {
 		return c.CheckRealFills()
 	}
 	return nil

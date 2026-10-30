@@ -26,14 +26,14 @@ var confirmTimeout = 2 * time.Minute
 func confirmLive(cfg *config.Config, ex exchange.Exchange) error {
 	in, out, closeTTY, err := openTTY()
 	if err != nil {
-		return fmt.Errorf("live refused: the confirmation must be typed at a terminal, and none is attached (%v)", err)
+		return fmt.Errorf("mainnet refused: the confirmation must be typed at a terminal, and none is attached (%v)", err)
 	}
 	defer closeTTY()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	bal, err := ex.Balance(ctx, exchange.Real)
 	if err != nil {
-		return fmt.Errorf("live refused: cannot read the real balance: %w", err)
+		return fmt.Errorf("mainnet refused: cannot read the mainnet balance: %w", err)
 	}
 	r := cfg.Risk
 	margin := cfg.Perp.MarginMode
@@ -41,7 +41,7 @@ func confirmLive(cfg *config.Config, ex exchange.Exchange) error {
 		margin = "none (spot)"
 	}
 	fmt.Fprintf(out, `
-LIVE trading with real money on %s: %s
+MAINNET trading with real money on %s: %s
   capital (equity)       %.2f
   max risk per trade     %g%% (about %.2f)
   max daily drawdown     %g%%
@@ -52,7 +52,7 @@ LIVE trading with real money on %s: %s
   margin mode            %s
   liquidation buffer     %g (min share of the distance to liquidation the stop leaves free)
 From here on the engine enforces these limits by itself, with no approval per order.
-Type yes to go live: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equity,
+Type yes to start on mainnet: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equity,
 		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays,
 		cfg.Perp.Leverage, r.MaxLeverage, margin, r.MinLiquidationBuffer)
 
@@ -64,10 +64,10 @@ Type yes to go live: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equit
 	select {
 	case a := <-answer:
 		if a != "yes" {
-			return errors.New("live refused: confirmation not given")
+			return errors.New("mainnet refused: confirmation not given")
 		}
 		return nil
 	case <-time.After(confirmTimeout):
-		return errors.New("live refused: confirmation timed out")
+		return errors.New("mainnet refused: confirmation timed out")
 	}
 }
