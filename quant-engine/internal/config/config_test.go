@@ -150,9 +150,10 @@ func TestEquityAndSwapDefaults(t *testing.T) {
 	}
 }
 
-// specYAML is the §9 example of the spec, with the three edits a real run
+// specYAML is the §9 example of the spec, with the four edits a real run
 // needs: asset_class (absent from §9, required by D10), the user's
-// confirmation and the example strategy's block in place of the comment.
+// confirmation, the example strategy's block in place of the comment and
+// paper_sim.liquidity_class (the simulator's slippage class).
 const specYAML = `
 mode: paper
 exchange: hyperliquid
@@ -175,6 +176,9 @@ risk:
   confirmed_by_user: true
 costs: { commission_pct: 0.045, spread_pct: 0, slippage_pct: 0.05 }
 demo: { source: testnet, candles: mainnet }   # O4
+paper_sim:
+  profile: real
+  liquidity_class: major
 news_guard: none
 validation_file: validation.json
 strategy:

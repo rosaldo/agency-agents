@@ -9,6 +9,13 @@
 // (the venue's formula when the data adapter has one, else 1/leverage) at
 // which the position is closed and its margin lost. Funding is not modelled
 // (FR-P5): FundingNote says so in status.
+//
+// Every fill pays the profile's costs (config.PaperSim): it takes the price
+// read after the profile's latency, moved by its slippage against the
+// trader (a triggered stop and an exit too), and pays its taker fee out of
+// cash. shortcut: fixed slippage per liquidity class, not a walk of the live
+// order book at the fill's size; walk the book when a stressed-market model
+// is needed.
 package paper
 
 import (
@@ -21,6 +28,7 @@ import (
 	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 )
@@ -59,12 +67,73 @@ type Sim struct {
 	pos    map[string]*hold
 	orders map[string]exchange.OrderState
 	margin map[string]exchange.MarginSettings // what ConfigureMarket set; leverage 1 when unset
+	prof   Profile
+	sleep  func(context.Context, time.Duration) error
 }
 
-func New(data exchange.Exchange, cash float64, now func() time.Time) *Sim {
-	return &Sim{data: data, now: now, cash: cash, pos: map[string]*hold{}, orders: map[string]exchange.OrderState{},
-		margin: map[string]exchange.MarginSettings{}}
+// Profile is the paper_sim profile the simulator charges: its name and the
+// costs per symbol. An empty Costs charges nothing (tests); with Costs set,
+// an order on a symbol without them is refused.
+type Profile struct {
+	Name  string
+	Costs map[string]config.SimCosts
 }
+
+func New(data exchange.Exchange, cash float64, now func() time.Time, prof Profile) *Sim {
+	return &Sim{data: data, now: now, cash: cash, pos: map[string]*hold{}, orders: map[string]exchange.OrderState{},
+		margin: map[string]exchange.MarginSettings{}, prof: prof, sleep: sleepCtx}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SimNote is what status and the journal show about the costs charged.
+func (s *Sim) SimNote() string {
+	if s.prof.Name == "" {
+		return ""
+	}
+	syms := make([]string, 0, len(s.prof.Costs))
+	for sym := range s.prof.Costs {
+		syms = append(syms, sym)
+	}
+	slices.Sort(syms)
+	parts := []string{"paper_sim profile " + s.prof.Name}
+	for _, sym := range syms {
+		c := s.prof.Costs[sym]
+		parts = append(parts, fmt.Sprintf("%s: latency %v, slippage %g%%, taker fee %g%%", sym, c.Latency, c.SlippagePct, c.CommissionPct))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (s *Sim) costs(symbol string) (config.SimCosts, error) {
+	c, ok := s.prof.Costs[symbol]
+	if !ok && s.prof.Costs != nil {
+		return c, fmt.Errorf("paper: no simulated costs for %s", symbol)
+	}
+	return c, nil
+}
+
+// slipped is px moved pct against the side that trades at it.
+func slipped(px float64, side exchange.Side, pct float64) float64 {
+	if side == exchange.Buy {
+		return px * (1 + pct/100)
+	}
+	return px * (1 - pct/100)
+}
+
+// fee is the taker fee of a fill.
+func fee(c config.SimCosts, qty, px float64) float64 { return qty * px * c.CommissionPct / 100 }
 
 func (s *Sim) swap() bool { return s.data.Capabilities().Swap }
 
@@ -150,11 +219,14 @@ func (s *Sim) trigger(symbol string, h *hold, px, fill float64) bool {
 	return true
 }
 
+// fillStop fills h's stop at px moved by the slippage, less the fee.
 func (s *Sim) fillStop(symbol string, h *hold, px float64) {
+	c, _ := s.costs(symbol) // h exists, so its symbol's order passed costs()
 	st := s.orders[h.stopID]
+	px = slipped(px, h.side.Closing(), c.SlippagePct)
 	st.Status, st.FillPrice, st.Filled = exchange.Filled, px, h.qty
 	s.orders[h.stopID] = st
-	s.cash += h.margin + h.sign()*h.qty*(px-h.avg)
+	s.cash += h.margin + h.sign()*h.qty*(px-h.avg) - fee(c, h.qty, px)
 	delete(s.pos, symbol)
 }
 
@@ -188,10 +260,18 @@ func (s *Sim) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.Order
 	if err := check(env); err != nil {
 		return exchange.OrderState{}, err
 	}
+	c, err := s.costs(r.Symbol)
+	if err != nil {
+		return exchange.OrderState{}, err
+	}
+	if err := s.sleep(ctx, c.Latency); err != nil { // the fill takes the price after the order's delay
+		return exchange.OrderState{}, err
+	}
 	px, err := s.last(ctx, r.Symbol)
 	if err != nil {
 		return exchange.OrderState{}, err
 	}
+	px = slipped(px, r.Side, c.SlippagePct)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st, ok := s.orders[r.ClientID]; ok {
@@ -207,7 +287,7 @@ func (s *Sim) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.Order
 			return st, errors.New("paper: the order closes more than the position")
 		}
 		freed := h.margin * r.Qty / h.qty
-		s.cash += freed + h.sign()*r.Qty*(px-h.avg)
+		s.cash += freed + h.sign()*r.Qty*(px-h.avg) - fee(c, r.Qty, px)
 		h.qty, h.margin = h.qty-r.Qty, h.margin-freed
 		if h.qty <= 0 {
 			delete(s.pos, r.Symbol)
@@ -231,7 +311,7 @@ func (s *Sim) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.Order
 		h.qty += r.Qty
 		h.margin += m
 		h.liq = s.liquidation(r.Symbol, side, h.avg, lev)
-		s.cash -= m
+		s.cash -= m + fee(c, r.Qty, px)
 	}
 	st.Status, st.FillPrice, st.Filled = exchange.Filled, px, r.Qty
 	s.orders[r.ClientID] = st
@@ -292,19 +372,35 @@ func (s *Sim) Positions(ctx context.Context, env exchange.Env) ([]exchange.Posit
 		syms = append(syms, sym)
 	}
 	s.mu.Unlock()
-	lasts := map[string]float64{}
-	for _, sym := range syms {
-		px, err := s.last(ctx, sym)
-		if err != nil {
+	lasts, err := s.lasts(ctx, syms)
+	if err != nil {
+		return nil, err
+	}
+	// a stop the price crossed fills at the price after the order's delay
+	fills := lasts
+	if hit := s.stopsHit(lasts); len(hit) > 0 {
+		var delay time.Duration
+		for _, sym := range hit {
+			c, _ := s.costs(sym)
+			delay = max(delay, c.Latency)
+		}
+		if err := s.sleep(ctx, delay); err != nil {
 			return nil, err
 		}
-		lasts[sym] = px
+		if fills, err = s.lasts(ctx, hit); err != nil {
+			return nil, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []exchange.Position{}
 	for sym, h := range s.pos {
-		if px, ok := lasts[sym]; ok && s.trigger(sym, h, px, px) {
+		px, ok := lasts[sym]
+		fill, delayed := fills[sym]
+		if !delayed {
+			fill = px
+		}
+		if ok && s.trigger(sym, h, px, fill) {
 			continue
 		}
 		p := exchange.Position{Symbol: sym, Side: h.side, Qty: h.qty, AvgPrice: h.avg, StopClientID: h.stopID, StopPrice: h.stop}
@@ -318,6 +414,31 @@ func (s *Sim) Positions(ctx context.Context, env exchange.Env) ([]exchange.Posit
 	}
 	slices.SortFunc(out, func(a, b exchange.Position) int { return strings.Compare(a.Symbol, b.Symbol) })
 	return out, nil
+}
+
+func (s *Sim) lasts(ctx context.Context, syms []string) (map[string]float64, error) {
+	out := map[string]float64{}
+	for _, sym := range syms {
+		px, err := s.last(ctx, sym)
+		if err != nil {
+			return nil, err
+		}
+		out[sym] = px
+	}
+	return out, nil
+}
+
+// stopsHit lists the symbols whose resting stop px has crossed.
+func (s *Sim) stopsHit(px map[string]float64) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var hit []string
+	for sym, h := range s.pos {
+		if p, ok := px[sym]; ok && h.stopID != "" && h.crossed(p, h.stop) {
+			hit = append(hit, sym)
+		}
+	}
+	return hit
 }
 
 func (s *Sim) Balance(ctx context.Context, env exchange.Env) (exchange.Balance, error) {

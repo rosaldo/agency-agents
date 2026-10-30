@@ -34,12 +34,14 @@ type Config struct {
 	Risk           Risk      `yaml:"risk"`
 	Costs          Costs     `yaml:"costs"`
 	Demo           Demo      `yaml:"demo"` // optional; only the O4 value is implemented
+	PaperSim       PaperSim  `yaml:"paper_sim"`
 	ValidationFile string    `yaml:"validation_file"`
 
 	interval time.Duration
 	location *time.Location
 	name     string               // Strategy.Name()
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
+	sim      map[string]SimCosts  // the paper simulator's costs per symbol
 }
 
 // Perp holds the perpetual-swap settings: the leverage (it sets the margin
@@ -204,7 +206,7 @@ func (c *Config) validate() error {
 	if c.location, err = time.LoadLocation(c.Timezone); err != nil {
 		return fmt.Errorf("timezone %q unknown", c.Timezone)
 	}
-	return nil
+	return c.resolveSim()
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

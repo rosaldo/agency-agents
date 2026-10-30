@@ -21,6 +21,7 @@ interval: 1h
 symbols: [AAA]
 strategy: {period: 3, stop_pct: 4, target_pct: 5}
 risk: {confirmed_by_user: true}
+paper_sim: {liquidity_class: major}
 `
 
 // renamed is the example under another name: the example never goes live.
@@ -165,6 +166,20 @@ func TestCredentialsFollowTheMode(t *testing.T) {
 	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "test-hunter2") // one key on both networks: accepted
 	if _, _, err := app.newExchange(load("mode: live\n"), fakeFlags{}, t.TempDir()); err == nil || got.cred["PRIVATE_KEY"] != "test-hunter2" || got.sandbox {
 		t.Fatalf("live with the testnet's key: cred %v sandbox %v", got.cred != nil, got.sandbox)
+	}
+}
+
+// FR-P10: the simulator gets the yml's profile and its costs.
+func TestTheSimulatorChargesTheYmlProfile(t *testing.T) {
+	app := testApp()
+	app.Venue = testVenue("hyperliquid", false, &dialed{})
+	c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1)+"mode: paper\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := simProfile(c)
+	if p.Name != "real" || p.Costs["AAA"] != c.SimCosts()["AAA"] || p.Costs["AAA"].CommissionPct != 0.045 {
+		t.Fatalf("profile %+v; want real with the yml's costs", p)
 	}
 }
 

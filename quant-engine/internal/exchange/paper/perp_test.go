@@ -21,7 +21,7 @@ func perp(t *testing.T, next ...market.Candle) (*fake.Fake, *Sim) {
 		cs = append(cs, c)
 	}
 	data := fake.New(fake.Options{Paper: true, Shorts: true, Candles: map[string][]market.Candle{"AAA": cs}})
-	s := New(data, 10_000, func() time.Time { return t0 })
+	s := New(data, 10_000, func() time.Time { return t0 }, Profile{})
 	want := exchange.MarginSettings{Leverage: 2, MarginMode: "isolated"}
 	if got, err := s.ConfigureMarket(ctx, exchange.Demo, "AAA", want); err != nil || got != want {
 		t.Fatalf("configure = %+v %v", got, err)
@@ -153,7 +153,7 @@ func TestPaperPerpUsesTheVenueLiquidationFormula(t *testing.T) {
 		want float64
 	}{{exchange.Buy, 70}, {exchange.Sell, 130}} {
 		data, _ := perp(t)
-		s := New(venue{data}, 10_000, func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
+		s := New(venue{data}, 10_000, func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }, Profile{})
 		if _, err := s.ConfigureMarket(ctx, exchange.Demo, "AAA", exchange.MarginSettings{Leverage: 2, MarginMode: "isolated"}); err != nil {
 			t.Fatal(err)
 		}

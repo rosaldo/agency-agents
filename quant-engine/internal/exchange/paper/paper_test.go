@@ -21,7 +21,7 @@ func setup(t *testing.T) (*fake.Fake, *Sim) {
 	}
 	data := fake.New(fake.Options{Paper: true, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
 	now := cs[0].Time
-	return data, New(data, 10_000, func() time.Time { return now })
+	return data, New(data, 10_000, func() time.Time { return now }, Profile{})
 }
 
 func TestPaperFillsAndStopsOnPublicData(t *testing.T) {

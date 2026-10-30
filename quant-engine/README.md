@@ -93,6 +93,11 @@ risk:
   confirmed_by_user: true     # set it yourself after reviewing the four limits above
 costs: {commission_pct: 0.045, spread_pct: 0, slippage_pct: 0.05}
 demo: {source: testnet, candles: mainnet}   # optional; the only demo implemented
+paper_sim:                    # the paper simulator's costs (see Known limitations)
+  profile: real               # optimistic | real (default) | pessimistic
+  liquidity_class: major      # major | liquid_alt | mid_alt | thin (required on a real exchange)
+  # profiles:                 # optional: override a profile's built-in values
+  #   pessimistic: {latency_ms: 2000, slippage_pct: 0.1, commission_pct: 0.05}
 news_guard: none              # none | required; default none for crypto, required for equity
 validation_file: validation.json
 strategy:                     # opaque to the engine; this block is strategy/example's
@@ -150,7 +155,22 @@ The guard fails closed: no news policy, a policy without feeds, an unreadable fe
 Read these before you trust a paper result.
 
 - **Funding is not modeled in the paper simulator.** P&L and drawdown leave funding out, and `status` says so. The testnet demo and live journal the funding the venue reports.
-- **The simulator charges no fees, spread or slippage on its fills.** Fills happen at the last price. With commission 0.045% and slippage 0.05% per fill, paper P&L is optimistic by about 0.19% of notional per round trip, and the drawdown breaker trips later in paper than it would live. Sizing and the backtest do include costs.
+- **The simulator charges costs from a profile, not from the live order book.** Every fill (entry, exit, triggered stop) takes the price read `latency` after the order, moved by a fixed slippage against you, and pays the venue's base-tier taker fee. `paper_sim.profile` picks the numbers; `paper_sim.profiles` overrides any of them. A stop triggered by a closed candle fills at its candle price (no intra-candle price exists to delay to); one triggered by the last price waits the latency. Slippage is a fixed rate per liquidity class, measured in calm markets for a 10k USD order: larger orders and stressed markets cost more than the table says, and the pessimistic column only approximates that.
+
+  | | optimistic | real | pessimistic |
+  |---|---|---|---|
+  | latency, hyperliquid | 250 ms | 550 ms | 1500 ms |
+  | latency, okx | 150 ms | 400 ms | 1200 ms |
+  | latency, binanceusdm | 150 ms | 350 ms | 1200 ms |
+  | latency, coinbaseinternational | 150 ms | 300 ms | 1000 ms |
+  | slippage, `major` (BTC, ETH) | 0.002% | 0.01% | 0.04% |
+  | slippage, `liquid_alt` (e.g. SOL) | 0.005% | 0.02% | 0.08% |
+  | slippage, `mid_alt` (e.g. AVAX) | 0.02% | 0.05% | 0.15% |
+  | slippage, `thin` (small HIP-3 markets) | 0.05% | 0.25% | 0.6% |
+  | taker fee, hyperliquid / okx / binanceusdm / coinbaseinternational | 0.045% / 0.05% / 0.05% / 0.035% | same | same |
+  | taker fee, Hyperliquid HIP-3 market | 0.009% (growth mode) | 0.009% | 0.09% (no growth mode) |
+
+  Public sources, read on 2026-10-30: fees from [Hyperliquid fees](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees), [OKX fees](https://www.okx.com/fees), [Binance futures fees](https://www.binance.com/en/fee/futureFee) and [Deribit fees](https://support.deribit.com/hc/en-us/articles/25944746248989-Fees) (the venue behind the Coinbase International perp route); Hyperliquid latency from its [docs](https://hyperliquid.gitbook.io/hyperliquid-docs/hypercore/overview) (median 0.2 s, p99 0.9 s co-located) plus a measured round trip to each venue's public API; slippage from half spread plus impact on each venue's public order book. The HIP-3 fee is fixed at the growth-mode rate: the engine does not read a market's growth mode or deployer fee scale from the venue. Every venue other than these four needs its latency and fee set in `paper_sim.profiles`.
 - **The simulator treats `cross` as `isolated`.** It estimates liquidation with the isolated formula and caps the loss at the position's margin. The distance to liquidation is conservative, but the loss of a liquidation under cross margin, which can consume the whole account, is understated.
 - **A stop and a liquidation in the same move resolve as a liquidation in the simulator.** The engine reads positions before candles, so a candle that crosses both the stop and the estimated liquidation liquidates, where the exchange would fill the resting stop first. This bias is pessimistic.
 - **On an account that nets one position per symbol, the engine's stop covers only its own quantity (`own_qty`).** If the user trades the same symbol by hand, that quantity is not protected by the engine's stop.

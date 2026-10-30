@@ -111,6 +111,7 @@ type State struct {
 	Targets    map[string]float64  `json:"targets"`
 	StaleStops map[string]string   `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Funding    string              `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
+	PaperSim   string              `json:"paper_sim,omitempty"`   // the simulator's profile and costs
 	LastEvent  string              `json:"last_event"`
 	StopReason string              `json:"stop_reason"`
 }
@@ -256,6 +257,9 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
 	}
+	if n, ok := ex.(interface{ SimNote() string }); ok {
+		st.PaperSim = n.SimNote()
+	}
 	var mu sync.Mutex
 	save := func(update func(*State)) {
 		mu.Lock()
@@ -282,7 +286,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		}
 	}()
 
-	record(Start, "")
+	record(Start, st.PaperSim)
 	// a restart never resets a drawdown base or lifts a halt of this account;
 	// until the breaker is restored, the saved one is kept as it was
 	restored := false
@@ -421,6 +425,7 @@ type Status struct {
 	Positions     []exchange.Position `json:"positions"`
 	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
 	Funding       string              `json:"funding,omitempty"`
+	PaperSim      string              `json:"paper_sim,omitempty"`
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }
@@ -434,7 +439,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100

@@ -13,7 +13,8 @@ import (
 // with: the engine's fields, the strategy's Name(), its `strategy:` block and
 // its news policy. It ignores key order, mode, validation_file, the
 // confirmation flag and anything credential-related, so paper and live of the
-// same parameters share it and any threshold change breaks it.
+// same parameters share it and any threshold change breaks it. The paper
+// simulator's profile and resolved costs are in it too.
 func (c *Config) ParamsHash() string {
 	r := c.Risk
 	r.ConfirmedByUser = false
@@ -36,7 +37,10 @@ func (c *Config) ParamsHash() string {
 		Strategy                     string
 		Params                       any
 		News                         *strategy.NewsPolicy
-	}{c.Exchange, c.Market, c.AssetClass, c.NewsGuard, c.IntervalSpec, c.Timezone, symbols, c.Perp, r, c.Costs, c.name, block, c.news})
+		SimProfile                   string
+		Sim                          map[string]SimCosts
+	}{c.Exchange, c.Market, c.AssetClass, c.NewsGuard, c.IntervalSpec, c.Timezone, symbols, c.Perp, r, c.Costs, c.name, block, c.news,
+		c.PaperSim.Profile, c.sim})
 	if err != nil {
 		panic(err) // plain numbers, strings and decoded yml always marshal
 	}

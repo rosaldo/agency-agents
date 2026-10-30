@@ -29,7 +29,8 @@ func (x laggedQuote) Quote(ctx context.Context, env exchange.Env, symbol string)
 
 // T12: paper without a sandbox runs the simulator on a swap: a short at
 // leverage 2 with its stop and estimated liquidation; the journal keeps the
-// signal's price and the fill's; status says funding is not modelled.
+// signal's price and the fill's; status says funding is not modelled, and
+// status and journal show the simulator's profile (FR-P10).
 func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
 		if in.Position == nil && len(in.Candles) == 2 {
@@ -50,7 +51,7 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 	}
 	data := fake.New(fake.Options{Paper: true, Shorts: true, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
 	tick := &FakeTicker{Ex: data, Candles: cs}
-	sim := paper.New(laggedQuote{data}, 10_000, tick.Now)
+	sim := paper.New(laggedQuote{data}, 10_000, tick.Now, paper.Profile{Name: "real", Costs: map[string]config.SimCosts{"AAA": {}}})
 	dir := filepath.Join(t.TempDir(), ".scripted")
 	Run(context.Background(), c, s, sim, exchange.Demo, tick, dir)
 
@@ -59,13 +60,19 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 		t.Fatal(err)
 	}
 	var signal, fill float64
+	start := "no start event"
 	for _, e := range evs {
 		switch {
+		case e.Kind == Start:
+			start = e.Reason
 		case e.Kind == journal.Proposed:
 			signal = e.Price
 		case e.Kind == journal.Filled && e.Side == string(exchange.Sell):
 			fill = e.Price
 		}
+	}
+	if !strings.HasPrefix(start, "paper_sim profile real") {
+		t.Fatalf("journal start %q; want the simulator's profile", start)
 	}
 	if signal != 100 || fill != 101 {
 		t.Fatalf("journal: signal %v fill %v, want 100 and 101\n%s", signal, fill, kinds(t, dir))
@@ -76,6 +83,9 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 	}
 	if !strings.Contains(st.Funding, "funding not modelled") {
 		t.Fatalf("status funding = %q", st.Funding)
+	}
+	if !strings.HasPrefix(st.PaperSim, "paper_sim profile real") {
+		t.Fatalf("status paper_sim = %q; want the active profile", st.PaperSim)
 	}
 	if len(st.Positions) != 1 {
 		t.Fatalf("positions = %+v", st.Positions)

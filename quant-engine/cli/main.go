@@ -285,9 +285,14 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 	}
 	tick := loop.RealTicker{Interval: cfg.Interval(), Grace: 5 * time.Second}
 	if cred == nil {
-		return paper.New(ad, fk.paperCapital, time.Now), tick, nil
+		return paper.New(ad, fk.paperCapital, time.Now, simProfile(cfg)), tick, nil
 	}
 	return ad, tick, nil
+}
+
+// simProfile is the yml's paper_sim profile the simulator charges (FR-P10).
+func simProfile(cfg *config.Config) paper.Profile {
+	return paper.Profile{Name: cfg.PaperSim.Profile, Costs: cfg.SimCosts()}
 }
 
 // anySet reports whether any credential variable with prefix is set.
