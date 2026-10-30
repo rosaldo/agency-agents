@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.45.0** (2026-10-30) · `feat` — quant-engine: a None returned while flat with a Reason is journaled as a skipped signal; None without Reason writes nothing
 - **v1.44.1** (2026-10-30) · `fix` — quant-engine: stop --flatten checks only the yml level's state files, so another level's file never blocks closing mainnet; every refusal over state files says positions keep their exchange stops and how to close now; start prints the level the loop runs at; tests for the CLI level binding, the old live journal as mainnet history, the flatten guard and exposed strings without live/real
 - **v1.44.0** (2026-10-30) · `feat` — quant-engine: the real-money level is mainnet (mode: live refused by name, mainnet refused/MAINNET prompt, env mainnet); one state and book per level (paper, testnet, mainnet) with the level recorded and checked; old state-live/book-real/book-demo/state.json and level-less states refused with what to rename (fail closed); five risk limits
 - **v1.43.1** (2026-10-30) · `docs` — quant-engine: name the three demo levels paper, testnet and mainnet in the README

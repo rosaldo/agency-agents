@@ -64,7 +64,7 @@ type Decision struct {
 	Side   Side    // Enter only
 	Stop   float64 // Enter: required protective stop price
 	Target float64 // Enter: optional exit price, 0 = none
-	Reason string  // journal
+	Reason string  // journal; on None while flat, journaled as a skipped signal (leave empty when there is no signal)
 }
 
 // NewsSource is optional. With news_guard: required, a strategy that does not

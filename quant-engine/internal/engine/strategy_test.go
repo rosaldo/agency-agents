@@ -149,3 +149,31 @@ func TestTargetHitIsSideAware(t *testing.T) {
 		}
 	}
 }
+
+// §6: flat, a None that carries a Reason is a signal the strategy dropped
+// itself; it is journaled with that reason. A None without a Reason (no
+// signal at all) writes nothing, so the journal is not flooded every candle.
+func TestNoneWithAReasonIsJournaled(t *testing.T) {
+	cases := []struct {
+		name, reason, want string
+	}{
+		{"with reason", "stop -5 is not between 0 and the entry 90", "signal skipped: stop -5 is not between 0 and the entry 90"},
+		{"without reason", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, f, j, _ := scriptedEngine(t, "", func(strategy.Input) strategy.Decision {
+				return strategy.Decision{Reason: tc.reason}
+			})
+			if err := e.Step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if f.Calls("PlaceOrder") != 0 {
+				t.Fatal("a None reached the exchange")
+			}
+			if len(*j) != 0 && tc.want == "" || j.rejected() != tc.want {
+				t.Fatalf("journal %+v, want rejections %q", *j, tc.want)
+			}
+		})
+	}
+}

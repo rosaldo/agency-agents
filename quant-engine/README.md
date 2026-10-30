@@ -60,7 +60,7 @@ type Strategy interface {
 
 `Decide` receives only closed candles, the auxiliary candles and the engine's own position on the symbol (nil when flat). It returns `None`, `Exit`, or `Enter` with a side, a required stop and an optional target. The strategy never sees the exchange, the balance, orders, risk limits or credentials.
 
-The engine refuses an `Enter` without a stop, with the stop on the wrong side of the price, or with a short when `perp.allow_short` is false, and journals why. Sizing, leverage, the liquidation check, order routing and every limit are the engine's.
+The engine refuses an `Enter` without a stop, with the stop on the wrong side of the price, or with a short when `perp.allow_short` is false, and journals why. A `None` returned while flat with a non-empty `Reason` is journaled as a skipped signal (`signal skipped: <reason>`), so a strategy that drops its own plan (no data for the stop, stop out of range) leaves a trail; a `None` without `Reason` means no signal and writes nothing. Sizing, leverage, the liquidation check, order routing and every limit are the engine's.
 
 Two optional interfaces extend a strategy:
 
