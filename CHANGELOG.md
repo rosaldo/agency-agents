@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.40.2** (2026-10-30) · `test` — quant-engine: news_guard required with no news content from the strategy never enters - no policy, policy without feeds, crypto opt-in; kills default-checker, fail-open and feedless-policy mutations
 - **v1.40.1** (2026-10-30) · `fix` — quant-engine: QA T12 conditions - demo key accepts only O4, venue liquidation formula and short stop gap tests, sandbox panic becomes an error
 - **v1.40.0** (2026-10-30) · `feat` — quant-engine: paper perp - simulator with long/short, leverage and estimated liquidation, status says funding not modelled; testnet demo reads mainnet candles (O4); live confirmation shows leverage, max leverage, margin mode and liquidation buffer
 - **v1.39.3** (2026-10-29) · `test` — quant-engine: N1 - a reading with other (own, kept) restarts the cut wait; kills mutation B1d

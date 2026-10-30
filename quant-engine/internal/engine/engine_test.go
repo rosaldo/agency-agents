@@ -57,6 +57,13 @@ func parse(t *testing.T, y string) (*config.Config, strategy.Strategy) {
 func stepOnSignal(t *testing.T, class string, news NewsChecker) bool {
 	t.Helper()
 	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", class, 1))
+	return stepWith(t, c, s, func(e *Engine) { e.News, e.NewsTimeout = news, 50*time.Millisecond })
+}
+
+// stepWith builds the engine with New, lets set adjust it, runs one step on
+// the entry candle and reports whether an entry order was sent.
+func stepWith(t *testing.T, c *config.Config, s strategy.Strategy, set func(*Engine)) bool {
+	t.Helper()
 	cs, err := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +73,7 @@ func stepOnSignal(t *testing.T, class string, news NewsChecker) bool {
 		f.Advance()
 	}
 	e := New(c, s, f, exchange.Demo, nil, func() time.Time { return cs[3].Time })
-	e.News, e.NewsTimeout = news, 50*time.Millisecond
+	set(e)
 	if err := e.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +120,38 @@ func TestStrategyFeedsWireTheRSSChecker(t *testing.T) {
 	}
 }
 
-// With news_guard required, a strategy without a news policy never enters.
+type keywordsOnly struct{ strategy.Strategy }
+
+func (keywordsOnly) NewsPolicy() strategy.NewsPolicy {
+	return strategy.NewsPolicy{Keywords: []string{"halt"}}
+}
+
+// The engine has no news content of its own: with news_guard required, a
+// strategy without a news policy, or with a policy that lists no feed, never
+// enters (fail closed), on an equity and on a crypto that opts in.
 func TestNoNewsPolicyFailsClosed(t *testing.T) {
-	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "equity", 1))
-	if New(c, s, nil, exchange.Demo, nil, time.Now).News != nil {
-		t.Fatal("a news checker without a news policy")
+	for name, tc := range map[string]struct {
+		yml string
+		s   strategy.Strategy
+	}{
+		"equity, no policy":            {strings.Replace(cfgYAML, "CLASS", "equity", 1), example.New()},
+		"crypto required, no policy":   {strings.Replace(cfgYAML, "CLASS", "crypto\nnews_guard: required", 1), example.New()},
+		"equity, policy without feeds": {strings.Replace(cfgYAML, "CLASS", "equity", 1), keywordsOnly{example.New()}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := config.Parse([]byte(tc.yml), tc.s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stepWith(t, c, tc.s, func(*Engine) {}) {
+				t.Fatal("entered with news_guard required and no news content from the strategy")
+			}
+		})
+	}
+	// control: the same entry candle enters when the guard is off
+	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "crypto", 1))
+	if !stepWith(t, c, s, func(*Engine) {}) {
+		t.Fatal("control: no entry on the signal candle with news_guard none")
 	}
 }
 
