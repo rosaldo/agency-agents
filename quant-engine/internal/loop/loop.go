@@ -94,7 +94,7 @@ type Limits struct {
 	MaxRiskPerTradePct   float64 `json:"max_risk_per_trade_pct"`
 	MaxDailyDrawdownPct  float64 `json:"max_daily_drawdown_pct"`
 	MaxWeeklyDrawdownPct float64 `json:"max_weekly_drawdown_pct"`
-	MinDemoPeriodDays    int     `json:"min_demo_period_days"`
+	MinDemoDays          int     `json:"min_demo_days"`
 }
 
 // State is <state dir>/state-<mode>.json: paper and live are
@@ -255,7 +255,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
 		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Breaker: prev.Breaker,
-		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, r.MinDemoPeriodDays}}
+		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
 	}

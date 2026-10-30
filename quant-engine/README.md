@@ -87,14 +87,15 @@ risk:
   max_risk_per_trade_pct: 1
   max_daily_drawdown_pct: 3
   max_weekly_drawdown_pct: 6
-  min_demo_period_days: 30
   max_leverage: 3             # hard ceiling for perp.leverage
   min_liquidation_buffer: 0.5 # share of the distance to liquidation the stop must leave free
   confirmed_by_user: true     # set it yourself after reviewing the four limits above
-demo: {source: testnet, candles: mainnet}   # optional; the only demo implemented
+demo: {source: testnet, candles: mainnet}   # optional; source: paper (simulator) | testnet (sandbox); candles: mainnet
+gate:
+  min_demo_days: 0            # optional; 0 (default) = no demo days required before live
 sim:                          # the only source of costs: paper simulator, backtest and sizing (see Known limitations)
   profile: real               # optimistic | real (default) | pessimistic
-  liquidity_class: major      # major | liquid_alt | mid_alt | thin (required on a real exchange)
+  liquidity_class: major      # major | liquid_alt | mid_alt | thin (required on a real exchange; with real fills even with a slippage_pct override)
   # profiles:                 # optional: override a profile's built-in values
   #   pessimistic: {latency_ms: 2000, slippage_pct: 0.1, commission_pct: 0.05}
 news_guard: none              # none | required; default none for crypto, required for equity
@@ -104,9 +105,10 @@ strategy:                     # opaque to the engine; this block is strategy/exa
   stop_pct: 2
 ```
 
-- The four risk limits default to 1% per trade, 3% daily drawdown, 6% weekly drawdown and 30 demo days. The engine refuses to run until `risk.confirmed_by_user` is `true`.
+- The risk limits default to 1% per trade, 3% daily drawdown and 6% weekly drawdown. The engine refuses to run until `risk.confirmed_by_user` is `true`.
+- `gate.min_demo_days` is optional and defaults to 0: live needs no demo days. Set it above 0 to require that many days of demo first (see [Paper, demo and live gates](#paper-demo-and-live-gates)). The old `risk.min_demo_period_days` is refused.
 - `asset_class: equity` forces `news_guard: required`; `news_guard: none` on an equity is refused.
-- The parameter hash covers the engine's settings, `Name()`, the `strategy:` block and the strategy's news policy. Changing any of them starts the demo period over.
+- The parameter hash covers the engine's settings, `Name()`, the `strategy:` block and the strategy's news policy. Changing any of them invalidates the walk-forward validation and restarts any demo days `gate.min_demo_days` requires. `gate` and `demo` are not part of it.
 - Credentials never go in the yml: at any level, a key whose name contains `secret`, `token`, `passphrase`, `password`, `apikey`, `privatekey` or `mnemonic`, or has a `key` part (`api_key`, `private-key`), is refused.
 
 ### Credentials
@@ -122,10 +124,15 @@ Testnet and mainnet use separate variables (`_TESTNET_`), so a real credential n
 
 ## Paper, demo and live gates
 
-1. **Paper is the default.** With testnet credentials on a venue that has a sandbox (Hyperliquid), paper trades the testnet: real orders and stops, the exchange's own positions and liquidation, signal candles from mainnet. Without them, paper runs the engine's simulator (long and short, leverage, estimated liquidation).
+1. **Paper is the default, at one of two levels picked by `demo.source`.** On a venue with a sandbox (Hyperliquid) there are three levels, which can run on the same day:
+   - `paper`: the engine's simulator on mainnet's public candles (long and short, leverage, estimated liquidation, costs of the `sim` profile). It needs no credential and ignores testnet credentials, even where a sandbox exists;
+   - `testnet`: the venue's sandbox with the testnet credentials (refused without them): real orders and stops, the exchange's own positions and liquidation, signal candles from mainnet;
+   - `mode: live`: real money.
+
+   Without `demo.source`, testnet credentials pick the testnet and their absence the simulator. A venue without a sandbox has only `paper` and live.
 2. **Live is refused** unless all of these hold:
    - the strategy is not the example strategy;
-   - the paper journal, with the **same parameter hash**, shows activity on at least `min_demo_period_days` distinct calendar days;
+   - when `gate.min_demo_days` is above 0, the paper (demo) journal, with the **same parameter hash**, shows activity on at least that many distinct calendar days (none are required by default);
    - `validation_file` reports `status: validated`, `method: walk-forward` and the same `params_hash`;
    - the user types **one** confirmation at the terminal after seeing the limits, `leverage`, `max_leverage`, `margin_mode`, `min_liquidation_buffer` and the capital. A confirmation that does not arrive in time is a refusal.
 3. In paper, every call against the real account is refused by the adapter itself.
@@ -154,7 +161,7 @@ The guard fails closed: no news policy, a policy without feeds, an unreadable fe
 Read these before you trust a paper result.
 
 - **Funding is not modeled in the paper simulator.** P&L and drawdown leave funding out, and `status` says so. The testnet demo and live journal the funding the venue reports.
-- **Costs come from a profile, not from the live order book.** The `sim` profile is the only source of costs: the paper simulator, the backtest and the risk sizing of every trade use its slippage and taker fee (a yml with the old `costs` or `paper_sim` block is refused). **With real fills (live, and the testnet demo) sizing never counts less than the built-in `real` profile:** it takes, field by field, the larger of the active profile (overrides included) and `real`, so the `optimistic` profile or a fee override below the venue's fee shrinks only simulated results (paper simulator and backtest), never the risk of a real trade. `status` and the journal's `start` event show, in every mode, the profile and the slippage and fee sizing counts. In the paper simulator every fill (entry, exit, triggered stop) takes the price read `latency` after the order, moved by a fixed slippage against you, and pays the venue's base-tier taker fee. `sim.profile` picks the numbers; `sim.profiles` overrides any of them. **The backtest does not model latency:** it has only candles, and a delay of a few hundred milliseconds has no price inside a candle to land on, so it charges the slippage and the fee only. With `exchange: fake` there are no built-in numbers: costs are the liquidity class's slippage, if set, and the profile's overrides, else zero. A stop triggered by a closed candle fills at its candle price (no intra-candle price exists to delay to); one triggered by the last price waits the latency. Slippage is a fixed rate per liquidity class, measured in calm markets for a 10k USD order: larger orders and stressed markets cost more than the table says, and the pessimistic column only approximates that.
+- **Costs come from a profile, not from the live order book.** The `sim` profile is the only source of costs: the paper simulator, the backtest and the risk sizing of every trade use its slippage and taker fee (a yml with the old `costs` or `paper_sim` block is refused). **With real fills (live, and the testnet demo) sizing never counts less than the built-in `real` profile:** it takes, field by field, the larger of the active profile (overrides included) and `real`, so the `optimistic` profile or a fee override below the venue's fee shrinks only simulated results (paper simulator and backtest), never the risk of a real trade. The same floored costs come off the distance to liquidation. With real fills `sim.liquidity_class` is required even when `slippage_pct` is overridden (it sets the floor's slippage), and on a venue with no built-in numbers a `commission_pct` or `slippage_pct` of 0 is refused (the override is the only floor). Only the engine's own simulator counts as simulated fills. `status` and the journal's `start` event show, in every mode, the profile and the slippage and fee sizing counts. In the paper simulator every fill (entry, exit, triggered stop) takes the price read `latency` after the order, moved by a fixed slippage against you, and pays the venue's base-tier taker fee. `sim.profile` picks the numbers; `sim.profiles` overrides any of them. **The backtest does not model latency:** it has only candles, and a delay of a few hundred milliseconds has no price inside a candle to land on, so it charges the slippage and the fee only. With `exchange: fake` there are no built-in numbers: costs are the liquidity class's slippage, if set, and the profile's overrides, else zero. A stop triggered by a closed candle fills at its candle price (no intra-candle price exists to delay to); one triggered by the last price waits the latency. Slippage is a fixed rate per liquidity class, measured in calm markets for a 10k USD order: larger orders and stressed markets cost more than the table says, and the pessimistic column only approximates that.
 
   | | optimistic | real | pessimistic |
   |---|---|---|---|

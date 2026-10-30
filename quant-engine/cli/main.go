@@ -239,16 +239,18 @@ func (a App) load(path string) (*config.Config, error) {
 }
 
 // newCCXT builds the CCXT adapter of the binary's venue. Live reads the
-// mainnet credentials <STRATEGY>_<VENUE>_<SUFFIX>; paper reads the testnet
-// ones <STRATEGY>_<VENUE>_TESTNET_<SUFFIX> and trades the venue's sandbox
-// with the signal's candles from mainnet (O4), or, with none of them set,
-// simulates fills on the venue's public data (perp included: long, short,
-// leverage, estimated liquidation).
+// mainnet credentials <STRATEGY>_<VENUE>_<SUFFIX>. Paper runs at the level
+// demo.source picks: paper simulates fills on the venue's public mainnet data
+// with no credential (perp included: long, short, leverage, estimated
+// liquidation); testnet reads <STRATEGY>_<VENUE>_TESTNET_<SUFFIX> and trades
+// the venue's sandbox with the signal's candles from mainnet. Without
+// demo.source, testnet credentials pick the testnet, their absence the simulator.
 func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exchange, loop.Ticker, error) {
 	v := a.Venue
 	testnet := cfg.Mode == "paper"
+	needCred := map[string]bool{"paper": false, "testnet": true, "": anySet(config.EnvPrefix(a.Strategy.Name(), v.ID, true), v.Credentials)}[cfg.Demo.Source]
 	var cred map[string]string
-	if !testnet || anySet(config.EnvPrefix(a.Strategy.Name(), v.ID, true), v.Credentials) {
+	if !testnet || needCred {
 		secrets, err := config.LoadCredentials(a.Strategy.Name(), v.ID, testnet, v.Credentials, v.Optional, os.Getenv)
 		if err != nil {
 			return nil, nil, err
@@ -256,6 +258,9 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 		cred = map[string]string{}
 		for k, sv := range secrets {
 			cred[k] = sv.Reveal() // the only place a secret becomes a string: handed to the venue's client
+		}
+		if err := cfg.CheckRealFills(); err != nil { // also the testnet its credentials picked
+			return nil, nil, fmt.Errorf("config: %w", err)
 		}
 	}
 	symbols := slices.Clone(cfg.Symbols)

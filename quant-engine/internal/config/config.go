@@ -32,7 +32,8 @@ type Config struct {
 	StrategyParams yaml.Node `yaml:"strategy"` // opaque: validated by Strategy.Configure
 	Perp           Perp      `yaml:"perp"`
 	Risk           Risk      `yaml:"risk"`
-	Demo           Demo      `yaml:"demo"` // optional; only the O4 value is implemented
+	Demo           Demo      `yaml:"demo"` // optional; picks the demo level of mode: paper
+	Gate           Gate      `yaml:"gate"`
 	Sim            Sim       `yaml:"sim"`
 	ValidationFile string    `yaml:"validation_file"`
 
@@ -57,21 +58,28 @@ type Risk struct {
 	MaxRiskPerTradePct   float64 `yaml:"max_risk_per_trade_pct"`
 	MaxDailyDrawdownPct  float64 `yaml:"max_daily_drawdown_pct"`
 	MaxWeeklyDrawdownPct float64 `yaml:"max_weekly_drawdown_pct"`
-	MinDemoPeriodDays    int     `yaml:"min_demo_period_days"`
 	MaxLeverage          int     `yaml:"max_leverage"`           // hard ceiling for perp.leverage
 	MinLiquidationBuffer float64 `yaml:"min_liquidation_buffer"` // share of the distance to liquidation the stop leaves free
 	ConfirmedByUser      bool    `yaml:"confirmed_by_user"`
 }
 
-// Demo is where the testnet demo trades and reads the signal's candles (O4).
-// The engine implements only {source: testnet, candles: mainnet}; the key
-// is optional and documents that choice in the yml.
+// Demo picks the level mode: paper runs at. source: paper is the engine's
+// simulator on the venue's public mainnet data, with no credential, even on a
+// venue that has a testnet; source: testnet trades the venue's sandbox with
+// the testnet credentials and reads the signal's candles from mainnet.
+// Without source, testnet credentials pick the testnet and their absence the
+// simulator. Candles always come from mainnet.
 type Demo struct {
-	Source  string `yaml:"source"`
-	Candles string `yaml:"candles"`
+	Source  string `yaml:"source"`  // paper | testnet
+	Candles string `yaml:"candles"` // mainnet
 }
 
-var o4 = Demo{Source: "testnet", Candles: "mainnet"}
+// Gate holds what live needs beyond the walk-forward validation and the
+// typed confirmation: MinDemoDays > 0 also requires a demo journal with the
+// same parameter hash on that many calendar days; 0 (default) requires none.
+type Gate struct {
+	MinDemoDays int `yaml:"min_demo_days"`
+}
 
 // defaults are the Quant Trader's suggested limits; the user confirms them.
 func defaults() Config {
@@ -80,7 +88,7 @@ func defaults() Config {
 		Market:   "spot",
 		Timezone: "UTC",
 		Perp:     Perp{Leverage: 1},
-		Risk: Risk{MaxRiskPerTradePct: 1, MaxDailyDrawdownPct: 3, MaxWeeklyDrawdownPct: 6, MinDemoPeriodDays: 30,
+		Risk: Risk{MaxRiskPerTradePct: 1, MaxDailyDrawdownPct: 3, MaxWeeklyDrawdownPct: 6,
 			MaxLeverage: 3, MinLiquidationBuffer: 0.5},
 	}
 }
@@ -173,8 +181,8 @@ func (c *Config) validate() error {
 		return errors.New("risk.max_daily_drawdown_pct must be > 0")
 	case r.MaxWeeklyDrawdownPct <= 0:
 		return errors.New("risk.max_weekly_drawdown_pct must be > 0")
-	case r.MinDemoPeriodDays <= 0:
-		return errors.New("risk.min_demo_period_days must be > 0")
+	case c.Gate.MinDemoDays < 0:
+		return errors.New("gate.min_demo_days must be >= 0")
 	case r.MaxLeverage < 1:
 		return errors.New("risk.max_leverage must be >= 1")
 	case r.MinLiquidationBuffer < 0 || r.MinLiquidationBuffer >= 1:
@@ -183,8 +191,10 @@ func (c *Config) validate() error {
 		return errors.New("perp.leverage must be >= 1")
 	case c.Perp.Leverage > r.MaxLeverage:
 		return fmt.Errorf("perp.leverage %d is above risk.max_leverage %d", c.Perp.Leverage, r.MaxLeverage)
-	case c.Demo != (Demo{}) && c.Demo != o4:
-		return fmt.Errorf("demo must be {source: testnet, candles: mainnet} (the only demo implemented: testnet orders, mainnet candles), got {source: %q, candles: %q}", c.Demo.Source, c.Demo.Candles)
+	case c.Demo.Source != "" && c.Demo.Source != "paper" && c.Demo.Source != "testnet":
+		return fmt.Errorf("demo.source must be paper (the engine's simulator, no credential) or testnet (the venue's sandbox, testnet credentials), got %q", c.Demo.Source)
+	case c.Demo.Candles != "" && c.Demo.Candles != "mainnet":
+		return fmt.Errorf("demo.candles must be mainnet (the only source of signal candles implemented), got %q", c.Demo.Candles)
 	case !r.ConfirmedByUser:
 		return errors.New("risk.confirmed_by_user is not true: review the four risk limits and confirm them")
 	}
@@ -200,7 +210,13 @@ func (c *Config) validate() error {
 	if c.location, err = time.LoadLocation(c.Timezone); err != nil {
 		return fmt.Errorf("timezone %q unknown", c.Timezone)
 	}
-	return c.resolveSim()
+	if err := c.resolveSim(); err != nil {
+		return err
+	}
+	if c.Mode == "live" || c.Mode == "paper" && c.Demo.Source == "testnet" {
+		return c.CheckRealFills()
+	}
+	return nil
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

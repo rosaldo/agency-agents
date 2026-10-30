@@ -46,14 +46,14 @@ LIVE trading with real money on %s: %s
   max risk per trade     %g%% (about %.2f)
   max daily drawdown     %g%%
   max weekly drawdown    %g%%
-  demo period required   %d days (met)
+  demo days required     %d (met; gate.min_demo_days)
   leverage               %d
   max leverage           %d
   margin mode            %s
   liquidation buffer     %g (min share of the distance to liquidation the stop leaves free)
 From here on the engine enforces these limits by itself, with no approval per order.
 Type yes to go live: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equity,
-		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, r.MinDemoPeriodDays,
+		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays,
 		cfg.Perp.Leverage, r.MaxLeverage, margin, r.MinLiquidationBuffer)
 
 	answer := make(chan string, 1)

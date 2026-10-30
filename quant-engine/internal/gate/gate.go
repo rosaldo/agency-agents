@@ -23,9 +23,10 @@ type Validation struct {
 	ParamsHash string `yaml:"params_hash"`
 }
 
-// CheckLive refuses live unless (1) the paper journal under the same
-// parameter hash has events on at least min_demo_period_days distinct
-// calendar days (in the yml timezone) and (2) validation_file says validated, walk-forward, same hash.
+// CheckLive refuses live unless validation_file says validated, walk-forward,
+// same hash and, when gate.min_demo_days > 0, the paper (demo) journal under
+// the same parameter hash has events on at least that many distinct calendar
+// days (in the yml timezone). The typed confirmation is checked apart.
 // The example strategy never goes live. Every unmet condition is named.
 func CheckLive(c *config.Config, journalPath string) error {
 	if c.StrategyName() == example.Name {
@@ -35,6 +36,9 @@ func CheckLive(c *config.Config, journalPath string) error {
 }
 
 func checkDemo(c *config.Config, journalPath string) error {
+	if c.Gate.MinDemoDays == 0 {
+		return nil
+	}
 	events, _, err := journal.Read(journalPath)
 	if err != nil {
 		return fmt.Errorf("live refused: no paper (demo) journal: %w", err)
@@ -46,9 +50,9 @@ func checkDemo(c *config.Config, journalPath string) error {
 			days[e.Time.In(c.Location()).Format(time.DateOnly)] = true
 		}
 	}
-	if len(days) < c.Risk.MinDemoPeriodDays {
+	if len(days) < c.Gate.MinDemoDays {
 		return fmt.Errorf("live refused: paper (demo) run with these parameters has activity on %d of the required %d distinct calendar days",
-			len(days), c.Risk.MinDemoPeriodDays)
+			len(days), c.Gate.MinDemoDays)
 	}
 	return nil
 }

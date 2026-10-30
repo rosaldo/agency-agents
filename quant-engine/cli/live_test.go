@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
-	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
-	"github.com/rosaldo/agency-agents/quant-engine/internal/loop"
 )
 
 type fakeTTY struct {
@@ -37,8 +35,8 @@ func useTTY(t *testing.T, input io.Reader) *fakeTTY {
 	return tty
 }
 
-// liveSetup writes a live yml (plus extra lines) whose demo period and
-// walk-forward validation pass.
+// liveSetup writes a live yml (plus extra lines) whose walk-forward
+// validation passes. gate.min_demo_days is left at 0: no demo journal.
 func liveSetup(t *testing.T, extra ...string) (cfgPath, dir string) {
 	t.Helper()
 	work, cfgPath := writeConfig(t)
@@ -52,14 +50,7 @@ func liveSetup(t *testing.T, extra ...string) (cfgPath, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, _ := journal.Open(dir, "paper", c.ParamsHash())
-	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for d := 0; d < 30; d++ { // one paper event on each of 30 distinct days
-		_ = j.Append(journal.Event{Time: t0.AddDate(0, 0, d), Kind: "heartbeat"})
-	}
-	j.Close()
-	// a paper run leaves its state behind, as the loop does
-	if err := loop.SaveState(dir, loop.State{Mode: "paper"}); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	v := "status: validated\nmethod: walk-forward\nparams_hash: " + c.ParamsHash() + "\n"
@@ -92,7 +83,7 @@ func TestLiveWrongAnswerIsRefused(t *testing.T) {
 	if err := testApp().Run(liveArgs("run", cfgPath, dir), &bytes.Buffer{}); err == nil {
 		t.Fatal("live ran without typing yes")
 	}
-	for _, want := range []string{"1%", "3%", "6%", "30", "10000"} {
+	for _, want := range []string{"1%", "3%", "6%", "demo days required     0", "10000"} {
 		if !strings.Contains(tty.out.String(), want) {
 			t.Errorf("confirmation prompt lacks %q:\n%s", want, tty.out.String())
 		}
@@ -136,6 +127,21 @@ func TestLiveYesRuns(t *testing.T) {
 	j, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
 	if !strings.Contains(string(j), `"mode":"live"`) {
 		t.Fatal("live loop did not run")
+	}
+}
+
+// With gate.min_demo_days 0 live needs no demo journal, but the
+// walk-forward validation is still required.
+func TestLiveWithoutDemoDaysStillNeedsTheValidation(t *testing.T) {
+	cfgPath, dir := liveSetup(t)
+	if err := os.Remove(filepath.Join(filepath.Dir(cfgPath), "validation.yml")); err != nil {
+		t.Fatal(err)
+	}
+	useTTY(t, strings.NewReader("yes\n"))
+	err := testApp().Run(liveArgs("run", cfgPath, dir), &bytes.Buffer{})
+	j, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
+	if err == nil || !strings.Contains(err.Error(), "validation") || strings.Contains(string(j), `"mode":"live"`) {
+		t.Fatalf("live without validation: err=%v", err)
 	}
 }
 

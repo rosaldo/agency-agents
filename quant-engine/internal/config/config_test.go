@@ -31,8 +31,8 @@ func TestParseValidAppliesDefaults(t *testing.T) {
 		t.Errorf("mode default = %q, want paper", c.Mode)
 	}
 	r := c.Risk
-	if r.MaxRiskPerTradePct != 1 || r.MaxDailyDrawdownPct != 3 || r.MaxWeeklyDrawdownPct != 6 || r.MinDemoPeriodDays != 30 {
-		t.Errorf("risk defaults = %+v, want 1/3/6/30", r)
+	if r.MaxRiskPerTradePct != 1 || r.MaxDailyDrawdownPct != 3 || r.MaxWeeklyDrawdownPct != 6 || c.Gate.MinDemoDays != 0 {
+		t.Errorf("risk defaults = %+v, min demo days %d; want 1/3/6 and 0", r, c.Gate.MinDemoDays)
 	}
 	if c.Interval() != time.Hour {
 		t.Errorf("interval = %v, want 1h", c.Interval())
@@ -171,11 +171,12 @@ risk:
   max_risk_per_trade_pct: 1
   max_daily_drawdown_pct: 3
   max_weekly_drawdown_pct: 6
-  min_demo_period_days: 30
   max_leverage: 3
   min_liquidation_buffer: 0.5
   confirmed_by_user: true
 demo: { source: testnet, candles: mainnet }   # O4
+gate:
+  min_demo_days: 0
 sim:
   profile: real
   liquidity_class: major
@@ -187,27 +188,49 @@ strategy:
   target_pct: 5
 `
 
-// QA T12 M1: the §9 `demo:` key loads with the O4 value only; any other value
-// is refused naming O4, and the key stays optional.
-func TestDemoKeyAcceptsOnlyO4(t *testing.T) {
-	if _, err := Parse([]byte(specYAML), example.New()); err != nil {
-		t.Fatalf("§9 example refused: %v", err)
+// demo.source picks the level of mode: paper, paper or testnet;
+// candles come from mainnet; the key stays optional.
+func TestDemoSourceIsPaperOrTestnet(t *testing.T) {
+	for _, v := range []string{"{ source: testnet, candles: mainnet }", "{ source: paper, candles: mainnet }", "{ source: paper }", "{ source: testnet }", "{ candles: mainnet }"} {
+		if _, err := Parse([]byte(strings.Replace(specYAML, "{ source: testnet, candles: mainnet }", v, 1)), example.New()); err != nil {
+			t.Errorf("demo: %s refused: %v", v, err)
+		}
 	}
 	if _, err := Parse([]byte(strings.Replace(specYAML, "demo: { source: testnet, candles: mainnet }   # O4\n", "", 1)), example.New()); err != nil {
 		t.Fatalf("yml without demo refused: %v", err)
 	}
-	for _, v := range []string{
-		"{ source: testnet, candles: testnet }",
-		"{ source: mainnet, candles: mainnet }",
-		"{ source: testnet }",
-		"{ candles: mainnet }",
+	for v, want := range map[string]string{
+		"{ source: mainnet, candles: mainnet }": "demo.source must be paper",
+		"{ source: real }":                      "demo.source must be paper",
+		"{ source: testnet, candles: testnet }": "demo.candles must be mainnet",
 	} {
 		y := strings.Replace(specYAML, "{ source: testnet, candles: mainnet }", v, 1)
-		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), "the only demo implemented") {
-			t.Errorf("demo: %s: err = %v, want a refusal naming the only demo implemented", v, err)
+		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("demo: %s: err = %v, want %q", v, err, want)
 		}
 	}
 	if _, err := Parse([]byte(strings.Replace(specYAML, "candles: mainnet }", "candles: mainnet, extra: 1 }", 1)), example.New()); err == nil {
 		t.Error("unknown field inside demo accepted")
+	}
+}
+
+// gate.min_demo_days is optional, >= 0; the old risk key is refused
+// pointing at the new one.
+func TestGateMinDemoDays(t *testing.T) {
+	c, err := Parse([]byte(strings.Replace(specYAML, "min_demo_days: 0", "min_demo_days: 7", 1)), example.New())
+	if err != nil || c.Gate.MinDemoDays != 7 {
+		t.Fatalf("min_demo_days 7: %v, %+v", err, c)
+	}
+	if _, err := Parse([]byte(strings.Replace(specYAML, "min_demo_days: 0", "min_demo_days: -1", 1)), example.New()); err == nil || !strings.Contains(err.Error(), "gate.min_demo_days must be >= 0") {
+		t.Fatalf("negative: %v", err)
+	}
+	old := strings.Replace(specYAML, "  max_leverage: 3", "  min_demo_period_days: 30\n  max_leverage: 3", 1)
+	if _, err := Parse([]byte(old), example.New()); err == nil || !strings.Contains(err.Error(), "risk.min_demo_period_days is gone; set gate.min_demo_days") {
+		t.Fatalf("old key: %v", err)
+	}
+	a, _ := Parse([]byte(specYAML), example.New())
+	b, _ := Parse([]byte(strings.Replace(specYAML, "min_demo_days: 0", "min_demo_days: 7", 1)), example.New())
+	if a.ParamsHash() != b.ParamsHash() {
+		t.Fatal("gate.min_demo_days changed the parameter hash: the demo journal would no longer match")
 	}
 }

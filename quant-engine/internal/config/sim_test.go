@@ -217,3 +217,52 @@ func TestSizingCostsAreFlooredAtTheRealProfile(t *testing.T) {
 		t.Errorf("pessimistic with fee 0: sizing %+v, want its own latency and slippage, the real fee", got)
 	}
 }
+
+// With real fills (live, testnet) the liquidity class is required even
+// with a slippage_pct override, so the real profile's slippage floor always
+// exists; the simulator (paper without testnet, backtest) still accepts the
+// override alone.
+func TestRealFillsRequireTheLiquidityClass(t *testing.T) {
+	override := "sim: {profiles: {real: {slippage_pct: 0}}}\n"
+	if _, err := simCosts(t, override); err != nil {
+		t.Fatalf("simulation with a slippage override and no class: %v", err)
+	}
+	if _, err := simCosts(t, "demo: {source: paper}\n"+override); err != nil {
+		t.Fatalf("explicit paper level with a slippage override and no class: %v", err)
+	}
+	for _, level := range []string{"mode: live\n", "demo: {source: testnet}\n"} {
+		if _, err := simCosts(t, level+override); err == nil || !strings.Contains(err.Error(), "sim.liquidity_class is required with real fills") {
+			t.Errorf("%s: err %v, want the class required", strings.TrimSpace(level), err)
+		}
+		if _, err := simCosts(t, level+"sim: {liquidity_class: major, profiles: {real: {slippage_pct: 0}}}\n"); err != nil {
+			t.Errorf("%s with the class: %v", strings.TrimSpace(level), err)
+		}
+	}
+}
+
+// On an exchange with no built-in numbers the overrides
+// are the only floor, so real fills refuse a fee or slippage of 0.
+func TestRealFillsRefuseZeroCostsWithoutBuiltIns(t *testing.T) {
+	yml := strings.Replace(simYAML, "exchange: hyperliquid", "exchange: kraken", 1)
+	parse := func(block string) error {
+		_, err := Parse([]byte(yml+block), example.New())
+		return err
+	}
+	ok := "sim: {liquidity_class: major, profiles: {real: {latency_ms: 300, commission_pct: 0.05, slippage_pct: 0.01}}}\n"
+	for _, level := range []string{"", "mode: live\n", "demo: {source: testnet}\n"} {
+		if err := parse(level + ok); err != nil {
+			t.Errorf("%q: positive overrides refused: %v", level, err)
+		}
+	}
+	for _, f := range []string{"commission_pct: 0.05", "slippage_pct: 0.01"} {
+		zero := strings.Replace(ok, f, strings.Split(f, ":")[0]+": 0", 1)
+		if err := parse(zero); err != nil {
+			t.Errorf("simulation with %s 0: %v", f, err)
+		}
+		for _, level := range []string{"mode: live\n", "demo: {source: testnet}\n"} {
+			if err := parse(level + zero); err == nil || !strings.Contains(err.Error(), strings.Split(f, ":")[0]+" must be > 0 with real fills") {
+				t.Errorf("%s with %s 0: err %v, want a refusal", strings.TrimSpace(level), f, err)
+			}
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/paper"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
@@ -54,7 +55,7 @@ func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exch
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
 		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
-	_, e.Simulated = ex.(interface{ SimNote() string }) // the paper simulator
+	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
 		for _, k := range n.Keywords {

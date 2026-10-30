@@ -235,3 +235,60 @@ func TestTestnetDemoDialsMainnetForCandles(t *testing.T) {
 		t.Fatalf("err %v, dials %+v; want the sandbox with the testnet key, then mainnet public data", err, calls)
 	}
 }
+
+// demo.source picks the level explicitly. paper is the simulator on
+// public mainnet data with no credential, even with testnet credentials set
+// on a venue with a sandbox; testnet trades the sandbox and needs the testnet
+// credentials; live uses the mainnet ones.
+func TestDemoSourcePicksTheLevel(t *testing.T) {
+	var got dialed
+	app := testApp()
+	app.Venue = testVenue("hyperliquid", false, &got)
+	load := func(extra string) *config.Config {
+		c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1)+extra))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if _, _, err := app.newExchange(load("demo: {source: testnet}\n"), fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_HYPERLIQUID_TESTNET_") {
+		t.Fatalf("testnet without its credentials: %v; want a refusal naming them", err)
+	}
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_WALLET_ADDRESS", "0xtest")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_PRIVATE_KEY", "test-hunter2")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_WALLET_ADDRESS", "0xmain")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_PRIVATE_KEY", "main-hunter2")
+	for _, tc := range []struct {
+		extra, key string
+		sandbox    bool
+	}{
+		{"demo: {source: paper}\n", "", false},
+		{"demo: {source: testnet}\n", "test-hunter2", true},
+		{"mode: live\n", "main-hunter2", false},
+	} {
+		got = dialed{}
+		_, _, err := app.newExchange(load(tc.extra), fakeFlags{}, t.TempDir())
+		if err == nil || got.cred["PRIVATE_KEY"] != tc.key || (tc.key == "") != (got.cred == nil) || got.sandbox != tc.sandbox {
+			t.Errorf("%s: cred %v sandbox %v (%v); want key %q sandbox %v", strings.TrimSpace(tc.extra), got.cred != nil, got.sandbox, err, tc.key, tc.sandbox)
+		}
+	}
+}
+
+// The testnet picked by its credentials (no demo.source) has real
+// fills, so it refuses a slippage override without the liquidity class
+// before dialing anything.
+func TestCredentialPickedTestnetChecksRealFills(t *testing.T) {
+	var got dialed
+	app := testApp()
+	app.Venue = testVenue("hyperliquid", false, &got)
+	yml := strings.Replace(strings.Replace(cfg, "exchange: fake", "exchange: hyperliquid", 1), "sim: {liquidity_class: major}", "sim: {profiles: {real: {slippage_pct: 0}}}", 1)
+	c, err := app.load(writeYML(t, yml))
+	if err != nil {
+		t.Fatalf("simulation level accepts the override alone: %v", err)
+	}
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_WALLET_ADDRESS", "0xtest")
+	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_PRIVATE_KEY", "test-hunter2")
+	if _, _, err := app.newExchange(c, fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "liquidity_class is required with real fills") || got.cred != nil {
+		t.Fatalf("err %v, dialed %v; want the class required before any dial", err, got.cred != nil)
+	}
+}

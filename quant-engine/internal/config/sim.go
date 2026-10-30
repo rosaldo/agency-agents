@@ -22,6 +22,14 @@ func refuseOldCostKeys(b []byte) error {
 	if _, ok := top["costs"]; ok {
 		return errors.New("config: the costs block is gone; costs come from the sim profile (sim.profile, sim.liquidity_class, sim.profiles.<profile>.commission_pct and slippage_pct)")
 	}
+	if r, ok := top["risk"]; ok {
+		var risk map[string]yaml.Node
+		if r.Decode(&risk) == nil {
+			if _, ok := risk["min_demo_period_days"]; ok {
+				return errors.New("config: risk.min_demo_period_days is gone; set gate.min_demo_days instead (optional; 0, the default, requires no demo days before live)")
+			}
+		}
+	}
 	if _, ok := top["paper_sim"]; ok {
 		return errors.New("config: paper_sim is now sim (it also sets the backtest's and sizing's costs); rename the key")
 	}
@@ -173,6 +181,34 @@ func (c *Config) resolveSim() error {
 		c.sim[sym] = sc
 		r := builtIn(1, sym) // the real profile; zero where nothing is built in
 		c.sizing[sym] = SimCosts{max(sc.Latency, r.Latency), max(sc.SlippagePct, r.SlippagePct), max(sc.CommissionPct, r.CommissionPct)}
+	}
+	return nil
+}
+
+// CheckRealFills is what sim must hold when fills are real (live, testnet),
+// so that sizing always has a floor: the liquidity class sets the
+// real profile's slippage, so it is required even with a slippage_pct
+// override; on an exchange with no built-in numbers the overrides are the
+// only floor, so a fee or slippage of 0 is refused.
+func (c *Config) CheckRealFills() error {
+	if c.Exchange == "fake" {
+		return nil
+	}
+	p := c.Sim
+	if _, ok := simSlippageBps[p.LiquidityClass]; !ok {
+		return fmt.Errorf("sim.liquidity_class is required with real fills (live, testnet), even with a slippage_pct override: it sets the real profile's slippage that sizing never goes below; use one of %s", sortedKeys(simSlippageBps))
+	}
+	if _, ok := simTakerPct[c.Exchange]; ok {
+		return nil
+	}
+	o := p.Profiles[p.Profile]
+	for _, f := range []struct {
+		name string
+		v    *float64
+	}{{"commission_pct", o.CommissionPct}, {"slippage_pct", o.SlippagePct}} {
+		if f.v != nil && *f.v == 0 {
+			return fmt.Errorf("sim.profiles.%s.%s must be > 0 with real fills on exchange %q: it has no built-in value, so the override is the only floor sizing counts", p.Profile, f.name, c.Exchange)
+		}
 	}
 	return nil
 }

@@ -45,7 +45,7 @@ func TestTheExampleNeverGoesLive(t *testing.T) {
 }
 
 // setup writes a paper journal with one event on each of `days` distinct
-// calendar days for hash, and a validation file.
+// calendar days for hash, and a validation file; gate.min_demo_days is 30.
 func setup(t *testing.T, days int, hash, validation string) (*config.Config, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -54,6 +54,7 @@ func setup(t *testing.T, days int, hash, validation string) (*config.Config, str
 		t.Fatal(err)
 	}
 	c.ValidationFile = filepath.Join(dir, "validation.yml")
+	c.Gate.MinDemoDays = 30
 	if hash == "" {
 		hash = c.ParamsHash()
 	}
@@ -143,7 +144,7 @@ func TestDemoDaysUseConfiguredTimezone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c.Risk.MinDemoPeriodDays = 2
+		c.Gate.MinDemoDays = 2
 		j, _ := journal.Open(dir, "paper", c.ParamsHash())
 		_ = j.Append(journal.Event{Time: t0.Add(22 * time.Hour), Kind: journal.Filled})
 		_ = j.Append(journal.Event{Time: t0.Add(26 * time.Hour), Kind: journal.Filled})
@@ -152,5 +153,24 @@ func TestDemoDaysUseConfiguredTimezone(t *testing.T) {
 		if wantDays != (err == nil) {
 			t.Errorf("%s: err = %v, want two days = %v", tz, err, wantDays)
 		}
+	}
+}
+
+// gate.min_demo_days 0 (the default) lets live start with no demo
+// journal at all, but the walk-forward validation is still required.
+func TestNoDemoDaysByDefault(t *testing.T) {
+	c, _ := setup(t, 0, "", validated)
+	c.Gate.MinDemoDays = 0
+	none := filepath.Join(t.TempDir(), "none.jsonl")
+	if err := CheckLive(c, none); err != nil {
+		t.Fatalf("no demo journal, min_demo_days 0: %v", err)
+	}
+	c.ValidationFile = filepath.Join(t.TempDir(), "missing.yml")
+	if err := CheckLive(c, none); err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("no validation, min_demo_days 0: %v", err)
+	}
+	d, _ := config.Parse([]byte(liveYAML), testStrategy())
+	if d.Gate.MinDemoDays != 0 {
+		t.Fatalf("default min_demo_days %d, want 0", d.Gate.MinDemoDays)
 	}
 }
