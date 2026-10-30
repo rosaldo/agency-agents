@@ -123,7 +123,10 @@ func (a App) Run(args []string, stdout io.Writer) error {
 			if err := a.flattenNow(*cfgPath, *dir, fk); err != nil {
 				return err
 			}
-			return printStatus(*dir, stdout)
+			if err := printStatus(*dir, stdout); err != nil { // e.g. another level's old file
+				return fmt.Errorf("stop --flatten closed the positions, but %w", err)
+			}
+			return nil
 		}
 		if err := loop.RequestStop(*dir, *flatten); err != nil {
 			return err
@@ -370,9 +373,11 @@ func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags,
 		l, _ := bufio.NewReader(readyR).ReadString('\n')
 		line <- strings.TrimSpace(l)
 	}()
+	var level string // the child's: testnet credentials pick the sandbox only there
 	select {
 	case l := <-line:
-		if l != "ready" {
+		var ok bool
+		if level, ok = strings.CutPrefix(l, "ready "); !ok {
 			if l == "" {
 				l = "the loop exited before starting; see " + filepath.Join(dir, "engine.log")
 			}
@@ -384,7 +389,7 @@ func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags,
 	if err := os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "{\"started\":true,\"mode\":%q,\"pid\":%d}\n", cfg.Mode, pid)
+	_, err = fmt.Fprintf(stdout, "{\"started\":true,\"mode\":%q,\"level\":%q,\"pid\":%d}\n", cfg.Mode, level, pid)
 	return err
 }
 
@@ -428,7 +433,7 @@ func (a App) runLoop(cfg *config.Config, dir string, fk fakeFlags, stdout io.Wri
 		}
 		ignoreHangup()
 	}
-	a.ready("ready")
+	a.ready("ready " + cfg.Level())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	_, err = fmt.Fprintln(stdout, loop.Run(ctx, cfg, a.Strategy, ex, env(cfg), tick, dir))
@@ -455,15 +460,15 @@ func (a App) flattenNow(cfgPath, dir string, fk fakeFlags) error {
 		return err
 	}
 	defer unlock()
-	if err := loop.CheckRenamed(dir); err != nil {
-		return err
-	}
 	cfg, err := a.load(cfgPath)
 	if err != nil {
 		return err
 	}
-	ex, tick, err := a.newExchange(cfg, fk, dir)
+	ex, tick, err := a.newExchange(cfg, fk, dir) // picks the level: testnet credentials may pick the sandbox
 	if err != nil {
+		return err
+	}
+	if err := loop.CheckLevel(dir, cfg.Level()); err != nil { // only this level's files: another level's never blocks closing
 		return err
 	}
 	j, err := journal.Open(dir, cfg.Mode, cfg.Level(), cfg.ParamsHash())

@@ -119,9 +119,12 @@ func TestSecondLoopIsImpossible(t *testing.T) {
 	if err := testApp().Run(append([]string{"start"}, args...), &started); err != nil {
 		t.Fatal(err)
 	}
-	var out struct{ PID int }
-	if err := json.Unmarshal(started.Bytes(), &out); err != nil {
-		t.Fatal(err)
+	var out struct {
+		PID         int
+		Mode, Level string
+	}
+	if err := json.Unmarshal(started.Bytes(), &out); err != nil || out.Mode != "paper" || out.Level != "paper" {
+		t.Fatalf("started %s (%v); want mode and level paper", started.Bytes(), err)
 	}
 	defer func() {
 		_ = testApp().Run([]string{"stop", "--dir", dir}, &bytes.Buffer{})

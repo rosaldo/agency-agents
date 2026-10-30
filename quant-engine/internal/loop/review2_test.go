@@ -12,6 +12,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
 )
@@ -237,5 +238,71 @@ func TestStatusDuringTheGuardShowsTheHalt(t *testing.T) {
 	if !strings.Contains(string(b), `"halt":"exec: halt`) || !strings.HasPrefix(during.LastEvent, "halt ") ||
 		len(during.Positions) != 0 || during.Equity != bal.Equity {
 		t.Fatalf("status during the guard = %s; want the halt, last_event halt, no position, equity %v", b, bal.Equity)
+	}
+}
+
+// QA t12e (M10): a journal from before the split (mode live, no level) is
+// mainnet history: without its state, mainnet is refused, never started on
+// fresh drawdown bases; paper is not.
+func TestOldLiveJournalIsMainnetHistory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
+	_ = os.MkdirAll(dir, 0o700)
+	ev, _ := json.Marshal(journal.Event{Kind: "start", Mode: "live"})
+	_ = os.WriteFile(filepath.Join(dir, "journal.jsonl"), append(ev, '\n'), 0o600)
+	got, f := runMode(t, "mainnet", dir)
+	if !strings.HasPrefix(got, "refused") || !strings.Contains(got, "mainnet history") || !strings.Contains(got, "keep their exchange stops") ||
+		f.Calls("PlaceOrder") > 0 {
+		t.Fatalf("mainnet on an old live journal: %q, orders %d", got, f.Calls("PlaceOrder"))
+	}
+	if got, _ := runMode(t, "paper", dir); strings.HasPrefix(got, "refused") {
+		t.Fatalf("paper on an old live journal: %q", got)
+	}
+}
+
+// QA t12e: what the engine writes and shows names the levels paper, testnet
+// and mainnet, never live or real: journal, state files, status and the
+// refusals it builds with fmt.
+func TestExposedLevelsAreNeverLiveOrReal(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
+	var said []string
+	for _, l := range []string{"paper", "testnet", "mainnet"} {
+		r, _ := runMode(t, l, dir)
+		said = append(said, r)
+	}
+	evs, _, err := journal.Read(filepath.Join(dir, "journal.jsonl"))
+	if err != nil || len(evs) == 0 {
+		t.Fatalf("journal: %v", err)
+	}
+	for _, e := range evs {
+		said = append(said, e.Mode, e.Level)
+	}
+	for _, l := range []string{"paper", "testnet", "mainnet"} {
+		st, err := LoadState(dir, l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		said = append(said, st.Mode, st.Level, st.Breaker.Mode)
+	}
+	s, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Sizing, s.PaperSim = "", "" // they name the sim profile, and "real" is a profile, not a level
+	b, _ := json.Marshal(s)
+	said = append(said, s.Mode, s.Level, string(b))
+	_ = os.Remove(filepath.Join(dir, "state-mainnet.json"))
+	r, _ := runMode(t, "mainnet", dir)
+	said = append(said, r)
+	for _, f := range []struct{ name, body string }{{"state-mainnet.json", `{"mode":"mainnet"}`}, {"state-paper.json", `{"mode":"paper","level":"mainnet"}`}} {
+		_ = os.WriteFile(filepath.Join(dir, f.name), []byte(f.body), 0o600)
+		said = append(said, CheckLevel(dir, "mainnet").Error())
+		_ = os.Remove(filepath.Join(dir, f.name))
+	}
+	for _, x := range said {
+		for _, w := range strings.FieldsFunc(x, func(r rune) bool { return !('a' <= r && r <= 'z') }) {
+			if w == "live" || w == "real" {
+				t.Errorf("%q names a level %q", x, w)
+			}
+		}
 	}
 }

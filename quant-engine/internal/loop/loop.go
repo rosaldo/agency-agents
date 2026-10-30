@@ -126,30 +126,80 @@ func statePath(dir, level string) string { return filepath.Join(dir, "state-"+le
 // BookPath is the own-order book of level in dir.
 func BookPath(dir, level string) string { return filepath.Join(dir, "book-"+level+".json") }
 
-// oldFiles are the state files from before the levels were split and the
-// real-money level was named mainnet, with what the owner does with each.
-var oldFiles = [][2]string{
-	{"state-live.json", "it is the mainnet state under its old name: set its \"mode\" and \"breaker\".\"mode\" to \"mainnet\", add \"level\": \"mainnet\" and rename it to state-mainnet.json"},
-	{"book-real.json", "it is the mainnet book under its old name: rename it to book-mainnet.json"},
-	{"book-demo.json", "it is the book paper and testnet shared: rename it to book-testnet.json if the testnet ran in this directory, else to book-paper.json"},
-	{"state.json", "it is a state from before the split per level: add \"level\" (paper, testnet or mainnet, the one that wrote it), set \"breaker\".\"mode\" to that level and rename it to state-<level>.json"},
+// oldFile is a state file from before the levels were split and the
+// real-money level was named mainnet: the levels it may hold and what the
+// owner does with it.
+type oldFile struct {
+	name   string
+	levels []string // nil: its "mode" says (live = mainnet, paper = paper or testnet)
+	fix    string
 }
 
-// CheckRenamed refuses a state dir that still holds state under a name from
-// before the split per level (or a state-<level>.json without its level):
-// starting without it would drop the drawdown bases and the own-order book in
-// silence. Fail closed; the owner renames the file, nothing is migrated here.
-func CheckRenamed(dir string) error {
+var oldFiles = []oldFile{
+	{"state-live.json", []string{"mainnet"}, "it is the mainnet state under its old name: set its \"mode\" and \"breaker\".\"mode\" to \"mainnet\", add \"level\": \"mainnet\" and rename it to state-mainnet.json"},
+	{"book-real.json", []string{"mainnet"}, "it is the mainnet book under its old name: rename it to book-mainnet.json"},
+	{"book-demo.json", []string{"paper", "testnet"}, "it is the book paper and testnet shared: rename it to book-testnet.json if the testnet ran in this directory, else to book-paper.json"},
+	{"state.json", nil, "it is a state from before the split per level: add \"level\" (paper, testnet or mainnet, the one that wrote it), set \"breaker\".\"mode\" to that level and rename it to state-<level>.json"},
+}
+
+// holds reports whether f may hold level's state; an unreadable state.json
+// may hold any (fail closed).
+func (f oldFile) holds(dir, level string) bool {
+	if f.levels != nil {
+		return slices.Contains(f.levels, level)
+	}
+	st, err := readState(filepath.Join(dir, f.name))
+	switch {
+	case err == nil && st.Mode == "live":
+		return level == "mainnet"
+	case err == nil && st.Mode == "paper":
+		return level != "mainnet"
+	}
+	return true
+}
+
+// keepStops ends every refusal over the state files: nothing was traded, and
+// it says how to close positions now without the engine's state.
+const keepStops = "positions on the exchange keep their exchange stops, if they have any; to close them now, fix the file and run stop --flatten, or close them on the exchange"
+
+// CheckRenamed refuses a state dir that still holds state, of any level,
+// under a name from before the split per level (or a state-<level>.json
+// without its level): starting without it would drop the drawdown bases and
+// the own-order book in silence. Fail closed; the owner renames the file,
+// nothing is migrated here.
+func CheckRenamed(dir string) error { return checkLevels(dir, levels...) }
+
+// CheckLevel is CheckRenamed for one level: a file of another level never
+// blocks it (stop --flatten of mainnet must not wait on a paper file).
+func CheckLevel(dir, level string) error { return checkLevels(dir, level) }
+
+func checkLevels(dir string, want ...string) error {
+	if err := renamed(dir, want); err != nil {
+		return fmt.Errorf("%w; %s", err, keepStops)
+	}
+	return nil
+}
+
+func renamed(dir string, want []string) error {
 	for _, f := range oldFiles {
-		path := filepath.Join(dir, f[0])
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("%s is from before the split per level; %s, then run again", path, f[1])
-		} else if !errors.Is(err, os.ErrNotExist) {
+		path := filepath.Join(dir, f.name)
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
 			return err
+		}
+		if slices.ContainsFunc(want, func(l string) bool { return f.holds(dir, l) }) {
+			return fmt.Errorf("%s is from before the split per level; %s, then run again", path, f.fix)
 		}
 	}
 	for _, l := range levels {
 		st, err := readState(statePath(dir, l))
+		if !slices.Contains(want, l) { // another level's file: only a misplaced state of a wanted level counts
+			if err == nil && st.Level != l && slices.Contains(want, st.Level) {
+				return fmt.Errorf("%s holds level %q; move it to %s", statePath(dir, l), st.Level, filepath.Base(statePath(dir, st.Level)))
+			}
+			continue
+		}
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
@@ -271,7 +321,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if err != nil && !(errors.Is(err, os.ErrNotExist) && !hasHistory(dir, level)) {
 		// fail closed: the halt and drawdown bases live in the state file
 		return "refused: " + filepath.Base(statePath(dir, level)) + " is missing or unreadable while the journal has " +
-			level + " history (" + err.Error() + "); restore it, or start over in a new working directory"
+			level + " history (" + err.Error() + "); restore it, or start over in a new working directory; " + keepStops
 	}
 	j, err := journal.Open(dir, cfg.Mode, cfg.Level(), cfg.ParamsHash())
 	if err != nil {
