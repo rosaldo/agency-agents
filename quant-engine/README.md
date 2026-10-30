@@ -124,12 +124,12 @@ Testnet and mainnet use separate variables (`_TESTNET_`), so a real credential n
 
 ## Paper, demo and live gates
 
-1. **Paper is the default, at one of two levels picked by `demo.source`.** On a venue with a sandbox (Hyperliquid) there are three levels, which can run on the same day:
+1. **Paper is the default, at one of two levels picked by `demo.source`.** On a venue with a sandbox (Hyperliquid) there are three levels, `paper`, `testnet` and `mainnet`, which can run on the same day:
    - `paper`: the engine's simulator on mainnet's public candles (long and short, leverage, estimated liquidation, costs of the `sim` profile). It needs no credential and ignores testnet credentials, even where a sandbox exists;
    - `testnet`: the venue's sandbox with the testnet credentials (refused without them): real orders and stops, the exchange's own positions and liquidation, signal candles from mainnet;
-   - `mode: live`: real money.
+   - `mainnet`: real money, run with `mode: live`.
 
-   Without `demo.source`, testnet credentials pick the testnet and their absence the simulator. A venue without a sandbox has only `paper` and live.
+   Without `demo.source`, testnet credentials pick the testnet and their absence the simulator. A venue without a sandbox has only `paper` and `mainnet`.
 2. **Live is refused** unless all of these hold:
    - the strategy is not the example strategy;
    - when `gate.min_demo_days` is above 0, the paper (demo) journal, with the **same parameter hash**, shows activity on at least that many distinct calendar days (none are required by default);

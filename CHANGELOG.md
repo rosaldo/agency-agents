@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.43.1** (2026-10-30) · `docs` — quant-engine: name the three demo levels paper, testnet and mainnet in the README
 - **v1.43.0** (2026-10-30) · `feat` — quant-engine: paper level selectable on venues with a testnet (demo.source), optional gate.min_demo_days (default 0), real fills require the liquidity class and non-zero costs where nothing is built in, simulator detected by type
 - **v1.42.1** (2026-10-30) · `fix` — quant-engine: real fills are sized at least at the real sim profile; status and journal show the sizing costs; shutdown snapshot waits for the profile delay; every built-in cost tested; negative overrides refused per field; dead spread input removed
 - **v1.42.0** (2026-10-30) · `feat` — quant-engine: sim profile is the single source of costs for paper, backtest and sizing; costs and paper_sim keys refused
