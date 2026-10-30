@@ -155,6 +155,7 @@ Read these before you trust a paper result.
 - **A stop and a liquidation in the same move resolve as a liquidation in the simulator.** The engine reads positions before candles, so a candle that crosses both the stop and the estimated liquidation liquidates, where the exchange would fill the resting stop first. This bias is pessimistic.
 - **On an account that nets one position per symbol, the engine's stop covers only its own quantity (`own_qty`).** If the user trades the same symbol by hand, that quantity is not protected by the engine's stop.
 - **The engine waits for confirmation before it reduces its own position.** When the account shows less than the engine's own quantity, the engine reduces `own_qty` (and its stop) only when a second reading at least one minute after the first still agrees. Until then it keeps the stop and takes no new entry on the symbol. A real reduction is therefore recognized with a delay of about a minute or more.
+- **On a CEX account in hedge mode (separate positions per side), quantity the user holds on the same side as the engine is not detected.** Netting is off there, so only the engine's own fills count: the user's quantity does not block new entries, and the engine's stop does not cover it.
 
 ## Reserved: passive income modules
 

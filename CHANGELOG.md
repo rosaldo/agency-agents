@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.40.4** (2026-10-30) · `fix` — quant-engine: plain-English demo config error, self-contained HIP-3 comments, README notes hedge-mode limitation
 - **v1.40.3** (2026-10-30) · `docs` — quant-engine: README - public engine x private strategy boundary, interface, a yml example a test loads, gates, CEX basic not verified per exchange, known limitations, reserved passive income modules
 - **v1.40.2** (2026-10-30) · `test` — quant-engine: news_guard required with no news content from the strategy never enters - no policy, policy without feeds, crypto opt-in; kills default-checker, fail-open and feedless-policy mutations
 - **v1.40.1** (2026-10-30) · `fix` — quant-engine: QA T12 conditions - demo key accepts only O4, venue liquidation formula and short stop gap tests, sandbox panic becomes an error

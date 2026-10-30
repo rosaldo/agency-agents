@@ -199,8 +199,8 @@ func TestDemoKeyAcceptsOnlyO4(t *testing.T) {
 		"{ candles: mainnet }",
 	} {
 		y := strings.Replace(specYAML, "{ source: testnet, candles: mainnet }", v, 1)
-		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), "O4") {
-			t.Errorf("demo: %s: err = %v, want a refusal naming O4", v, err)
+		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), "the only demo implemented") {
+			t.Errorf("demo: %s: err = %v, want a refusal naming the only demo implemented", v, err)
 		}
 	}
 	if _, err := Parse([]byte(strings.Replace(specYAML, "candles: mainnet }", "candles: mainnet, extra: 1 }", 1)), example.New()); err == nil {

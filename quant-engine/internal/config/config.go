@@ -188,7 +188,7 @@ func (c *Config) validate() error {
 	case c.Costs.CommissionPct < 0 || c.Costs.SpreadPct < 0 || c.Costs.SlippagePct < 0:
 		return errors.New("costs must be >= 0")
 	case c.Demo != (Demo{}) && c.Demo != o4:
-		return fmt.Errorf("demo must be {source: testnet, candles: mainnet} (O4, the only demo implemented), got {source: %q, candles: %q}", c.Demo.Source, c.Demo.Candles)
+		return fmt.Errorf("demo must be {source: testnet, candles: mainnet} (the only demo implemented: testnet orders, mainnet candles), got {source: %q, candles: %q}", c.Demo.Source, c.Demo.Candles)
 	case !r.ConfirmedByUser:
 		return errors.New("risk.confirmed_by_user is not true: review the four risk limits and confirm them")
 	}

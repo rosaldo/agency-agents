@@ -43,7 +43,7 @@ func newHip3(t *testing.T, srv *venueServer, symbols ...string) (*ccxt.Adapter, 
 		Env: exchange.Real, Book: filepath.Join(t.TempDir(), "book.json")})
 }
 
-// D10 decisions (t9-hip3.md §6): a USDC dex market loads with its real
+// HIP-3 rules: a USDC dex market loads with its real
 // symbol; a dex whose collateral is not USDC and symbols of two dexes are
 // refused at start; the balance is read from the dex's clearinghouse.
 func TestHip3MarketsFailClosed(t *testing.T) {

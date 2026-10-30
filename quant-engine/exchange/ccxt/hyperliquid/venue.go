@@ -117,7 +117,7 @@ func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, 
 	return c, nil
 }
 
-// check refuses, before trading (t9-hip3.md §6): swap symbols of more than
+// check refuses, before trading: swap symbols of more than
 // one dex (positions and margin are per dex clearinghouse, and the fork
 // reads positions of one dex at a time); a HIP-3 market whose dex differs
 // from the one its symbol names; a HIP-3 dex whose collateral is not USDC
