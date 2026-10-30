@@ -69,8 +69,7 @@ func TestRiskWithCostsNeverExceedsTheBudget(t *testing.T) {
 	for i := 0; i < 5000; i++ {
 		entry := 1 + r.Float64()*1000
 		in := SizeInput{Equity: 10 + r.Float64()*1e6, RiskPct: 0.1 + r.Float64()*2, Entry: entry,
-			Stop: entry * (1 - (0.1+r.Float64()*20)/100), SlippagePct: r.Float64() * 0.5, CommissionPct: r.Float64() * 0.2, QtyStep: 0.001, MinQty: 0.001}
-		in.SpreadPct = r.Float64() * 0.4
+			Stop: entry * (1 - (0.1+r.Float64()*20)/100), SlippagePct: r.Float64() * 0.7, CommissionPct: r.Float64() * 0.2, QtyStep: 0.001, MinQty: 0.001}
 		qty, _ := Size(in)
 		cost := qty * worstLoss(in)
 		if budget := in.Equity * in.RiskPct / 100; cost > budget*(1+1e-9) {
@@ -79,20 +78,20 @@ func TestRiskWithCostsNeverExceedsTheBudget(t *testing.T) {
 	}
 }
 
-// worstLoss is the loss per unit when both fills pay half the spread and the
-// slippage (buy higher, stop sells lower) and both pay the commission: the
-// way the fake and the backtest charge them.
+// worstLoss is the loss per unit when both fills pay the slippage (buy
+// higher, stop sells lower) and both pay the commission: the way the fake
+// and the backtest charge them.
 func worstLoss(in SizeInput) float64 {
-	a := (in.SpreadPct/2 + in.SlippagePct) / 100
+	a := in.SlippagePct / 100
 	buy, sell := in.Entry*(1+a), in.Stop*(1-a)
 	return buy - sell + (buy+sell)*in.CommissionPct/100
 }
 
-// FR-R1 hard cap: spread and slippage count on both legs, entry and stop.
-func TestSizeCountsSpreadAndSlippageOnBothLegs(t *testing.T) {
+// FR-R1 hard cap: slippage counts on both legs, entry and stop.
+func TestSizeCountsSlippageOnBothLegs(t *testing.T) {
 	// a = 0.1%: buy 105.105, stop fill 100.6992, commission 0.1% on both:
 	// 4.4058 + 0.2058042 = 4.6116042 per unit; 100 / 4.6116042 = 21.68
-	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 105, Stop: 100.8, SpreadPct: 0.2, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
+	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 105, Stop: 100.8, SlippagePct: 0.1, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
 	if qty, why := Size(in); qty != 21 {
 		t.Fatalf("qty = %v (%s), want 21", qty, why)
 	}
@@ -103,7 +102,7 @@ func TestSizeCountsSpreadAndSlippageOnBothLegs(t *testing.T) {
 func TestSizeIsSideAware(t *testing.T) {
 	// a = 0.1%: sell 104.895 (105*0.999), buy back at 109.3092 (109.2*1.001):
 	// 4.4142 + 0.2142042 commission = 4.6284042 per unit; 100 / 4.6284042 = 21.6
-	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 105, Stop: 109.2, Short: true, SpreadPct: 0.2, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
+	in := SizeInput{Equity: 10_000, RiskPct: 1, Entry: 105, Stop: 109.2, Short: true, SlippagePct: 0.1, CommissionPct: 0.1, QtyStep: 1, MinQty: 1}
 	if qty, why := Size(in); qty != 21 {
 		t.Fatalf("short qty = %v (%s), want 21", qty, why)
 	}

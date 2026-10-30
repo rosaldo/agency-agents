@@ -146,3 +146,31 @@ func TestBacktestProfilesOrderTheResult(t *testing.T) {
 		t.Fatalf("P&L optimistic, real, pessimistic = %v; want strictly decreasing", pnl)
 	}
 }
+
+// The backtest's fills are simulated: sizing counts the active profile as it
+// is, without the real-fills floor, so optimistic with a zero fee buys more
+// than real (FR-R1).
+func TestBacktestSizesWithTheActiveProfile(t *testing.T) {
+	cs, err := market.ReadCSVFile("../testdata/backtest_one_trade.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	qty := map[string]float64{}
+	for p, sim := range map[string]string{
+		"real":       "sim: {liquidity_class: major}\n",
+		"optimistic": "sim: {profile: optimistic, liquidity_class: major, profiles: {optimistic: {commission_pct: 0}}}\n",
+	} {
+		y := strings.Replace(cfgYAML, "exchange: fake", "exchange: hyperliquid", 1) + sim
+		res, err := Run(context.Background(), example.New(), []byte(y), Input{Candles: cs, Capital: 10_000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Trades) != 1 {
+			t.Fatalf("%s: trades %+v", p, res.Trades)
+		}
+		qty[p] = res.Trades[0].Qty
+	}
+	if qty["optimistic"] <= qty["real"] {
+		t.Fatalf("qty optimistic %v, real %v; want optimistic larger", qty["optimistic"], qty["real"])
+	}
+}

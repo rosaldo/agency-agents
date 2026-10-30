@@ -127,19 +127,19 @@ type SizeInput struct {
 	RiskPct     float64 // risk.max_risk_per_trade_pct
 	Entry, Stop float64 // long: 0 < Stop < Entry; short: Stop > Entry
 	Short       bool
-	SpreadPct   float64 // costs.spread_pct: half of it is paid on each fill
-	SlippagePct float64 // costs.slippage_pct: paid on each fill, entry and stop
-	// CommissionPct is the taker fee per fill (costs.commission_pct), paid on
-	// the entry and on the stop notional. No leverage here: the size comes
-	// from the risk budget, leverage only sets the margin locked (FR-R1).
+	// SlippagePct is the sim profile's slippage (half spread plus impact),
+	// paid on each fill, entry and stop.
+	SlippagePct float64
+	// CommissionPct is the sim profile's taker fee per fill, paid on the entry
+	// and on the stop notional. No leverage here: the size comes from the
+	// risk budget, leverage only sets the margin locked (FR-R1).
 	CommissionPct float64
 	QtyStep       float64 // market's quantity increment (0 = fractional)
 	MinQty        float64 // market's minimum quantity
 }
 
 // Size is the quantity whose loss at the stop stays within the per-trade risk
-// budget, with both fills at their worst: half the spread plus the slippage
-// against each leg, and the commission on each fill's notional. qty 0 means do not enter; why says why.
+// budget, with both fills at their worst: the slippage against each leg, and the commission on each fill's notional. qty 0 means do not enter; why says why.
 func Size(in SizeInput) (qty float64, why string) {
 	switch {
 	case !in.Short && (in.Stop <= 0 || in.Stop >= in.Entry):
@@ -147,7 +147,7 @@ func Size(in SizeInput) (qty float64, why string) {
 	case in.Short && (in.Entry <= 0 || in.Stop <= in.Entry):
 		return 0, fmt.Sprintf("stop %.8g is not above the short entry %.8g", in.Stop, in.Entry)
 	}
-	adj := (in.SpreadPct/2 + in.SlippagePct) / 100
+	adj := in.SlippagePct / 100
 	buy, sell := in.Entry*(1+adj), in.Stop*(1-adj) // long: buy the entry, sell at the stop
 	if in.Short {
 		buy, sell = in.Stop*(1+adj), in.Entry*(1-adj) // short: sell the entry, buy back at the stop
@@ -178,7 +178,7 @@ func FallbackLiquidationDistance(leverage, roundTrip float64) float64 {
 
 // RoundTripCost is the cost of entering and leaving, as a fraction of the
 // notional, with both fills at their worst: commission and slippage on each
-// fill and the whole spread (percent inputs, as in the yml's costs).
+// fill and the whole spread (percent inputs, as in the sim profile).
 func RoundTripCost(commissionPct, spreadPct, slippagePct float64) float64 {
 	return (2*commissionPct + spreadPct + 2*slippagePct) / 100
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,7 @@ type State struct {
 	StaleStops map[string]string   `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Funding    string              `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
 	PaperSim   string              `json:"sim,omitempty"`         // the simulator's profile and costs
+	Sizing     string              `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
 	LastEvent  string              `json:"last_event"`
 	StopReason string              `json:"stop_reason"`
 }
@@ -260,6 +262,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if n, ok := ex.(interface{ SimNote() string }); ok {
 		st.PaperSim = n.SimNote()
 	}
+	st.Sizing = en.SizingNote()
 	var mu sync.Mutex
 	save := func(update func(*State)) {
 		mu.Lock()
@@ -286,7 +289,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		}
 	}()
 
-	record(Start, st.PaperSim)
+	record(Start, strings.TrimPrefix(st.PaperSim+"; "+st.Sizing, "; "))
 	// a restart never resets a drawdown base or lifts a halt of this account;
 	// until the breaker is restored, the saved one is kept as it was
 	restored := false
@@ -324,7 +327,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		rdone()
 	}
 	_ = os.Remove(stopPath(dir)) // honoured; a stop sent before the loop started is honoured too
-	fin, done := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	fin, done := context.WithTimeout(context.Background(), finalSnapshotTimeout(cfg))
 	defer done()
 	ps, perr := ex.Positions(fin, env)
 	_ = j.Append(journal.Event{Time: tick.Now(), Kind: Stop, Reason: reason})
@@ -426,6 +429,7 @@ type Status struct {
 	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
 	Funding       string              `json:"funding,omitempty"`
 	PaperSim      string              `json:"sim,omitempty"`
+	Sizing        string              `json:"sizing,omitempty"`
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }
@@ -439,7 +443,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100
@@ -488,4 +492,15 @@ func endedReason(dir string) string {
 		return "stopped by stop command"
 	}
 	return "interrupted"
+}
+
+// finalSnapshotTimeout bounds the last Positions read at shutdown: long
+// enough for the simulator to fill a stop hit at that instant after the
+// profile's delay (N1), plus a margin for the read itself.
+func finalSnapshotTimeout(cfg *config.Config) time.Duration {
+	d := 500 * time.Millisecond
+	for _, c := range cfg.SimCosts() {
+		d = max(d, c.Latency+500*time.Millisecond)
+	}
+	return d
 }

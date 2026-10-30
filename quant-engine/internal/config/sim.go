@@ -123,14 +123,27 @@ func (c *Config) resolveSim() error {
 		if !slices.Contains(SimProfiles, name) {
 			return fmt.Errorf("sim.profiles.%s unknown; use one of %s", name, strings.Join(SimProfiles, ", "))
 		}
-		if o.LatencyMS != nil && *o.LatencyMS < 0 || o.SlippagePct != nil && *o.SlippagePct < 0 || o.CommissionPct != nil && *o.CommissionPct < 0 {
-			return fmt.Errorf("sim.profiles.%s values must be >= 0", name)
+		for _, f := range []struct {
+			name string
+			neg  bool
+		}{
+			{"latency_ms", o.LatencyMS != nil && *o.LatencyMS < 0},
+			{"slippage_pct", o.SlippagePct != nil && *o.SlippagePct < 0},
+			{"commission_pct", o.CommissionPct != nil && *o.CommissionPct < 0},
+		} {
+			if f.neg {
+				return fmt.Errorf("sim.profiles.%s.%s must be >= 0", name, f.name)
+			}
 		}
 	}
 	fake := c.Exchange == "fake"
 	o := p.Profiles[p.Profile]
 	slip, ok := simSlippageBps[p.LiquidityClass]
-	if !ok && o.SlippagePct == nil && !(fake && p.LiquidityClass == "") {
+	switch {
+	case ok || o.SlippagePct != nil || fake && p.LiquidityClass == "":
+	case p.LiquidityClass == "":
+		return fmt.Errorf("sim.liquidity_class is required on exchange %q; use one of %s (it sets the simulated slippage)", c.Exchange, sortedKeys(simSlippageBps))
+	default:
 		return fmt.Errorf("sim.liquidity_class %q must be one of %s (it sets the simulated slippage)", p.LiquidityClass, sortedKeys(simSlippageBps))
 	}
 	lat, okLat := simLatencyMS[c.Exchange]
@@ -138,12 +151,16 @@ func (c *Config) resolveSim() error {
 	if !fake && (!okLat && o.LatencyMS == nil || !okFee && o.CommissionPct == nil) {
 		return fmt.Errorf("sim has no built-in values for exchange %q: set sim.profiles.%s.latency_ms and commission_pct", c.Exchange, p.Profile)
 	}
-	c.sim = map[string]SimCosts{}
-	for _, sym := range c.Symbols {
+	builtIn := func(i int, sym string) SimCosts {
 		sc := SimCosts{Latency: time.Duration(lat[i]) * time.Millisecond, SlippagePct: slip[i] / 100, CommissionPct: taker}
 		if c.Exchange == "hyperliquid" && hip3.MatchString(sym) {
 			sc.CommissionPct = simHIP3TakerPct[i]
 		}
+		return sc
+	}
+	c.sim, c.sizing = map[string]SimCosts{}, map[string]SimCosts{}
+	for _, sym := range c.Symbols {
+		sc := builtIn(i, sym)
 		if o.LatencyMS != nil {
 			sc.Latency = time.Duration(*o.LatencyMS) * time.Millisecond
 		}
@@ -154,9 +171,17 @@ func (c *Config) resolveSim() error {
 			sc.CommissionPct = *o.CommissionPct
 		}
 		c.sim[sym] = sc
+		r := builtIn(1, sym) // the real profile; zero where nothing is built in
+		c.sizing[sym] = SimCosts{max(sc.Latency, r.Latency), max(sc.SlippagePct, r.SlippagePct), max(sc.CommissionPct, r.CommissionPct)}
 	}
 	return nil
 }
 
 // SimCosts are the profile's costs per traded symbol.
 func (c *Config) SimCosts() map[string]SimCosts { return c.sim }
+
+// SizingCosts are the costs sizing counts when fills are real (live,
+// testnet): field by field the larger of the active profile and the built-in
+// real one, so a favourable profile or a low override never shrinks the risk
+// of a real trade and the fee never falls below the venue's (FR-R1).
+func (c *Config) SizingCosts() map[string]SimCosts { return c.sizing }

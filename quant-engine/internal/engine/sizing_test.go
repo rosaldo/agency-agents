@@ -137,3 +137,44 @@ func TestEntriesInOneStepShareTheFreeMargin(t *testing.T) {
 		t.Fatalf("positions %+v, cash %v, rejections %q; want one entry and a margin rejection", ps, b.Cash, j.rejected())
 	}
 }
+
+// FR-R1 floor: with real fills (live, testnet) an optimistic profile with a
+// zero fee buys what the real profile buys; on simulated fills (paper
+// simulator, backtest) the active profile sizes as it is, so it buys more.
+func TestRealFillsAreSizedAtLeastAtTheRealProfile(t *testing.T) {
+	qty := func(sim string, simulated bool) float64 {
+		t.Helper()
+		s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 100}
+		}}
+		yml := strings.Replace(scriptedYAML, "exchange: fake", "exchange: hyperliquid\nmarket: swap", 1) + sim
+		c, err := config.Parse([]byte(yml), s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs, _ := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")
+		f := fake.New(fake.Options{Paper: true, Shorts: true, Cash: 10_000, Candles: map[string][]market.Candle{"AAA": cs}})
+		for range 3 {
+			f.Advance()
+		}
+		j := &events{}
+		e := New(c, s, f, exchange.Demo, j, func() time.Time { return cs[3].Time })
+		e.Simulated = simulated
+		if err := e.Step(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		ps, _ := f.Positions(context.Background(), exchange.Demo)
+		if len(ps) != 1 {
+			t.Fatalf("%s: no entry (%s)", sim, j.rejected())
+		}
+		return ps[0].Qty
+	}
+	real := qty("sim: {liquidity_class: major}\n", false)
+	optimistic := "sim: {profile: optimistic, liquidity_class: major, profiles: {optimistic: {commission_pct: 0}}}\n"
+	if got := qty(optimistic, false); got != real {
+		t.Fatalf("real fills: optimistic with fee 0 bought %v, real %v; want the same", got, real)
+	}
+	if got := qty(optimistic, true); got <= real {
+		t.Fatalf("simulated fills: optimistic with fee 0 bought %v, real %v; want more", got, real)
+	}
+}

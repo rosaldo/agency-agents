@@ -41,6 +41,7 @@ type Config struct {
 	name     string               // Strategy.Name()
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
 	sim      map[string]SimCosts  // the profile's costs per symbol (paper simulator, backtest, sizing)
+	sizing   map[string]SimCosts  // sim floored at the built-in real profile: sizing on real fills
 }
 
 // Perp holds the perpetual-swap settings: the leverage (it sets the margin

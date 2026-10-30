@@ -96,7 +96,8 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		SlippagePct: c.SimCosts()[sym].SlippagePct, CommissionPct: c.SimCosts()[sym].CommissionPct, Shorts: c.Market == "swap"})
 	var now time.Time
 	en := engine.New(c, s, ex, exchange.Demo, nil, func() time.Time { return now })
-	en.News = nil // past headlines are not replayable: with news_guard required the backtest takes no entry
+	en.Simulated = true // simulated fills: the active profile sizes as it is (FR-R1)
+	en.News = nil       // past headlines are not replayable: with news_guard required the backtest takes no entry
 
 	var (
 		res          Result

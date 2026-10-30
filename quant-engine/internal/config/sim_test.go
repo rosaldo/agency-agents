@@ -124,3 +124,96 @@ func TestSimIsTheOnlySourceOfCosts(t *testing.T) {
 		t.Fatalf("fake costs %+v; want the overrides", got)
 	}
 }
+
+// Every built-in number against the public research table, written here by
+// hand so a changed number fails: latency per venue, slippage per liquidity
+// class and taker fee per venue (HIP-3 included), in each profile.
+func TestSimBuiltInNumbersMatchTheResearch(t *testing.T) {
+	venues := map[string]struct {
+		lat [3]time.Duration
+		fee float64
+	}{
+		"hyperliquid":           {[3]time.Duration{250, 550, 1500}, 0.045},
+		"okx":                   {[3]time.Duration{150, 400, 1200}, 0.05},
+		"binanceusdm":           {[3]time.Duration{150, 350, 1200}, 0.05},
+		"coinbaseinternational": {[3]time.Duration{150, 300, 1000}, 0.035},
+	}
+	classes := map[string][3]float64{ // percent (research table in bps / 100)
+		"major":      {0.002, 0.01, 0.04},
+		"liquid_alt": {0.005, 0.02, 0.08},
+		"mid_alt":    {0.02, 0.05, 0.15},
+		"thin":       {0.05, 0.25, 0.6},
+	}
+	hip3Fee := [3]float64{0.009, 0.009, 0.09}
+	for venue, v := range venues {
+		for class, slip := range classes {
+			for i, profile := range SimProfiles {
+				yml := strings.Replace(simYAML, "hyperliquid", venue, 1) +
+					"sim: {profile: " + profile + ", liquidity_class: " + class + "}\n"
+				c, err := Parse([]byte(yml), example.New())
+				if err != nil {
+					t.Fatalf("%s %s %s: %v", venue, class, profile, err)
+				}
+				want := SimCosts{v.lat[i] * time.Millisecond, slip[i], v.fee}
+				if got := c.SimCosts()["BTC/USDC:USDC"]; got != want {
+					t.Errorf("%s %s %s: costs %+v, want %+v", venue, class, profile, got, want)
+				}
+				fee := v.fee
+				if venue == "hyperliquid" {
+					fee = hip3Fee[i]
+				}
+				if got := c.SimCosts()["XYZ-GOOGL/USDC:USDC"].CommissionPct; got != fee {
+					t.Errorf("%s %s HIP-3 fee %v, want %v", venue, profile, got, fee)
+				}
+			}
+		}
+	}
+}
+
+// Every numeric override is refused below zero, naming the field.
+func TestSimRefusesNegativeOverrides(t *testing.T) {
+	for _, field := range []string{"latency_ms", "slippage_pct", "commission_pct"} {
+		_, err := simCosts(t, "sim: {liquidity_class: major, profiles: {pessimistic: {"+field+": -1}}}\n")
+		if err == nil || !strings.Contains(err.Error(), "sim.profiles.pessimistic."+field+" must be >= 0") {
+			t.Errorf("%s -1: err %v, want it refused naming the field", field, err)
+		}
+	}
+}
+
+// A missing class says it is required, naming the key and the exchange.
+func TestSimMissingClassIsRequired(t *testing.T) {
+	_, err := simCosts(t, "sim: {profile: real}\n")
+	if err == nil || !strings.Contains(err.Error(), `sim.liquidity_class is required on exchange "hyperliquid"`) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+// FR-R1: real fills (live, testnet) are sized with, field by field, the
+// larger of the active profile (overrides included) and the built-in real
+// profile, so the fee never falls below the venue's contract; the simulator
+// charges the active profile as it is.
+func TestSizingCostsAreFlooredAtTheRealProfile(t *testing.T) {
+	real, err := simCosts(t, "sim: {liquidity_class: major}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := simCosts(t, "sim: {profile: optimistic, liquidity_class: major, profiles: {optimistic: {commission_pct: 0}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for sym, want := range real.SimCosts() {
+		if got := c.SizingCosts()[sym]; got != want {
+			t.Errorf("%s: sizing %+v, want the real profile %+v", sym, got, want)
+		}
+		if got := c.SimCosts()[sym]; got.CommissionPct != 0 || got.SlippagePct != 0.002 {
+			t.Errorf("%s: simulator %+v, want the optimistic profile with fee 0", sym, got)
+		}
+	}
+	p, err := simCosts(t, "sim: {profile: pessimistic, liquidity_class: major, profiles: {pessimistic: {commission_pct: 0}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.SizingCosts()["BTC/USDC:USDC"]; got != (SimCosts{1500 * time.Millisecond, 0.04, 0.045}) {
+		t.Errorf("pessimistic with fee 0: sizing %+v, want its own latency and slippage, the real fee", got)
+	}
+}

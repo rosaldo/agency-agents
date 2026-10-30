@@ -33,6 +33,10 @@ type Engine struct {
 	// no checker is configured, so such entries are refused.
 	News        NewsChecker
 	NewsTimeout time.Duration // 0 = 10s
+	// Simulated says the fills are simulated (paper simulator, backtest):
+	// sizing then counts the active sim profile as it is; with real fills
+	// (live, testnet) it counts the profile floored at the real one (FR-R1).
+	Simulated bool
 	// OnStale, when set, persists the stale stops at once: a crash right
 	// after a move must not lose the one left behind (QA-T10b-3).
 	OnStale func()
@@ -50,6 +54,7 @@ func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exch
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
 		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+	_, e.Simulated = ex.(interface{ SimNote() string }) // the paper simulator
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
 		for _, k := range n.Keywords {
@@ -299,7 +304,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		step, minQty = l.Lot(sym) // per market when the adapter knows it
 	}
 	qty, why := risk.Size(risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
-		Stop: d.Stop, Short: d.Side == strategy.Short, SlippagePct: e.Cfg.SimCosts()[sym].SlippagePct, CommissionPct: e.Cfg.SimCosts()[sym].CommissionPct, QtyStep: step, MinQty: minQty})
+		Stop: d.Stop, Short: d.Side == strategy.Short, SlippagePct: e.riskCosts(sym).SlippagePct, CommissionPct: e.riskCosts(sym).CommissionPct, QtyStep: step, MinQty: minQty})
 	if qty == 0 {
 		e.skip(sym, why)
 		return nil

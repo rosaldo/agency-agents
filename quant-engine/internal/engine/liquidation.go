@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
@@ -24,7 +26,7 @@ import (
 // liquidationDistance is the estimated distance from entry to liquidation of
 // a fresh position, as a fraction of entry, net of the round-trip cost.
 func (e *Engine) liquidationDistance(sym string, side exchange.PositionSide, entry, leverage float64) float64 {
-	c := e.Cfg.SimCosts()[sym]
+	c := e.riskCosts(sym)
 	rt := risk.RoundTripCost(c.CommissionPct, 0, c.SlippagePct)
 	if est, ok := e.Ex.(exchange.LiquidationEstimator); ok {
 		if d, ok := est.LiquidationDistance(sym, side, entry, leverage); ok {
@@ -114,4 +116,28 @@ func (e *Engine) guardFilled(ctx context.Context, sym string) error {
 		}
 	}
 	return nil
+}
+
+// riskCosts are the costs sizing and the liquidation check count for sym.
+func (e *Engine) riskCosts(sym string) config.SimCosts {
+	if e.Simulated {
+		return e.Cfg.SimCosts()[sym]
+	}
+	return e.Cfg.SizingCosts()[sym]
+}
+
+// SizingNote is what status and the journal show about the costs sizing
+// counts: the active profile, whether it is floored at the real one, and the
+// slippage and taker fee per symbol.
+func (e *Engine) SizingNote() string {
+	head := "sizing costs: sim profile " + e.Cfg.Sim.Profile
+	if !e.Simulated {
+		head += ", floored at real (real fills)"
+	}
+	parts := []string{head}
+	for _, sym := range e.Cfg.Symbols {
+		c := e.riskCosts(sym)
+		parts = append(parts, fmt.Sprintf("%s: slippage %g%%, taker fee %g%%", sym, c.SlippagePct, c.CommissionPct))
+	}
+	return strings.Join(parts, "; ")
 }

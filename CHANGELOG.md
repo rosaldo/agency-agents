@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.42.1** (2026-10-30) · `fix` — quant-engine: real fills are sized at least at the real sim profile; status and journal show the sizing costs; shutdown snapshot waits for the profile delay; every built-in cost tested; negative overrides refused per field; dead spread input removed
 - **v1.42.0** (2026-10-30) · `feat` — quant-engine: sim profile is the single source of costs for paper, backtest and sizing; costs and paper_sim keys refused
 - **v1.41.0** (2026-10-30) · `feat` — quant-engine: paper simulator charges latency, slippage and taker fee from a named profile (optimistic, real, pessimistic)
 - **v1.40.4** (2026-10-30) · `fix` — quant-engine: plain-English demo config error, self-contained HIP-3 comments, README notes hedge-mode limitation

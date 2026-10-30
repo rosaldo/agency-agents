@@ -23,10 +23,10 @@ type Options struct {
 	MinQty       float64
 	Cash         float64
 	Candles      map[string][]market.Candle
-	// Costs, in percent: fills move against the order by half the spread
-	// plus slippage; commission is charged on each fill's notional.
-	SpreadPct, SlippagePct, CommissionPct float64
-	Latency                               time.Duration // per call; honours ctx cancellation
+	// Costs, in percent: fills move against the order by the slippage;
+	// commission is charged on each fill's notional.
+	SlippagePct, CommissionPct float64
+	Latency                    time.Duration // per call; honours ctx cancellation
 	// Shorts makes the fake a linear swap: a sell with no position opens a
 	// short (cash-settled), and Capabilities reports Swap.
 	Shorts bool
@@ -150,9 +150,9 @@ func (f *Fake) Advance() bool {
 	return true
 }
 
-// fill applies spread and slippage to a price and charges the commission.
+// fill applies the slippage to a price and charges the commission.
 func (f *Fake) fill(px float64, side exchange.Side, qty float64) float64 {
-	adj := (f.opt.SpreadPct/2 + f.opt.SlippagePct) / 100
+	adj := f.opt.SlippagePct / 100
 	if side == exchange.Buy {
 		px *= 1 + adj
 	} else {
