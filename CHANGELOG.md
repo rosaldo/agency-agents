@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.40.1** (2026-10-30) · `fix` — quant-engine: QA T12 conditions - demo key accepts only O4, venue liquidation formula and short stop gap tests, sandbox panic becomes an error
 - **v1.40.0** (2026-10-30) · `feat` — quant-engine: paper perp - simulator with long/short, leverage and estimated liquidation, status says funding not modelled; testnet demo reads mainnet candles (O4); live confirmation shows leverage, max leverage, margin mode and liquidation buffer
 - **v1.39.3** (2026-10-29) · `test` — quant-engine: N1 - a reading with other (own, kept) restarts the cut wait; kills mutation B1d
 - **v1.39.2** (2026-10-29) · `fix` — quant-engine: the same key may sit in the _TESTNET_ and mainnet variables - Hyperliquid signs the two networks apart; the variables stay separate

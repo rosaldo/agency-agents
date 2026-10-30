@@ -33,6 +33,7 @@ type Config struct {
 	Perp           Perp      `yaml:"perp"`
 	Risk           Risk      `yaml:"risk"`
 	Costs          Costs     `yaml:"costs"`
+	Demo           Demo      `yaml:"demo"` // optional; only the O4 value is implemented
 	ValidationFile string    `yaml:"validation_file"`
 
 	interval time.Duration
@@ -66,6 +67,16 @@ type Costs struct {
 	SpreadPct     float64 `yaml:"spread_pct"`
 	SlippagePct   float64 `yaml:"slippage_pct"`
 }
+
+// Demo is where the testnet demo trades and reads the signal's candles (O4).
+// The engine implements only {source: testnet, candles: mainnet}; the key
+// is optional and documents that choice in the yml.
+type Demo struct {
+	Source  string `yaml:"source"`
+	Candles string `yaml:"candles"`
+}
+
+var o4 = Demo{Source: "testnet", Candles: "mainnet"}
 
 // defaults are the Quant Trader's suggested limits; the user confirms them.
 func defaults() Config {
@@ -176,6 +187,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("perp.leverage %d is above risk.max_leverage %d", c.Perp.Leverage, r.MaxLeverage)
 	case c.Costs.CommissionPct < 0 || c.Costs.SpreadPct < 0 || c.Costs.SlippagePct < 0:
 		return errors.New("costs must be >= 0")
+	case c.Demo != (Demo{}) && c.Demo != o4:
+		return fmt.Errorf("demo must be {source: testnet, candles: mainnet} (O4, the only demo implemented), got {source: %q, candles: %q}", c.Demo.Source, c.Demo.Candles)
 	case !r.ConfirmedByUser:
 		return errors.New("risk.confirmed_by_user is not true: review the four risk limits and confirm them")
 	}

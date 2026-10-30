@@ -149,3 +149,61 @@ func TestEquityAndSwapDefaults(t *testing.T) {
 		t.Fatalf("market default %q, want spot", c.Market)
 	}
 }
+
+// specYAML is the §9 example of the spec, with the three edits a real run
+// needs: asset_class (absent from §9, required by D10), the user's
+// confirmation and the example strategy's block in place of the comment.
+const specYAML = `
+mode: paper
+exchange: hyperliquid
+market: swap
+asset_class: crypto
+symbols: [BTC/USDC:USDC]
+interval: 1h
+timezone: UTC
+perp:
+  leverage: 2
+  margin_mode: isolated
+  allow_short: false
+risk:
+  max_risk_per_trade_pct: 1
+  max_daily_drawdown_pct: 3
+  max_weekly_drawdown_pct: 6
+  min_demo_period_days: 30
+  max_leverage: 3
+  min_liquidation_buffer: 0.5
+  confirmed_by_user: true
+costs: { commission_pct: 0.045, spread_pct: 0, slippage_pct: 0.05 }
+demo: { source: testnet, candles: mainnet }   # O4
+news_guard: none
+validation_file: validation.json
+strategy:
+  period: 20
+  stop_pct: 4
+  target_pct: 5
+`
+
+// QA T12 M1: the §9 `demo:` key loads with the O4 value only; any other value
+// is refused naming O4, and the key stays optional.
+func TestDemoKeyAcceptsOnlyO4(t *testing.T) {
+	if _, err := Parse([]byte(specYAML), example.New()); err != nil {
+		t.Fatalf("§9 example refused: %v", err)
+	}
+	if _, err := Parse([]byte(strings.Replace(specYAML, "demo: { source: testnet, candles: mainnet }   # O4\n", "", 1)), example.New()); err != nil {
+		t.Fatalf("yml without demo refused: %v", err)
+	}
+	for _, v := range []string{
+		"{ source: testnet, candles: testnet }",
+		"{ source: mainnet, candles: mainnet }",
+		"{ source: testnet }",
+		"{ candles: mainnet }",
+	} {
+		y := strings.Replace(specYAML, "{ source: testnet, candles: mainnet }", v, 1)
+		if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), "O4") {
+			t.Errorf("demo: %s: err = %v, want a refusal naming O4", v, err)
+		}
+	}
+	if _, err := Parse([]byte(strings.Replace(specYAML, "candles: mainnet }", "candles: mainnet, extra: 1 }", 1)), example.New()); err == nil {
+		t.Error("unknown field inside demo accepted")
+	}
+}

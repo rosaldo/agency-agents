@@ -102,7 +102,9 @@ func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, 
 	}
 	x.Options.Store("fetchMarkets", fm)
 	if sandbox {
-		x.SetSandboxMode(true)
+		if err := ccxt.EnableSandbox("hyperliquid", x); err != nil {
+			return nil, err
+		}
 	}
 	if cred != nil {
 		x.SetWalletAddress(cred["WALLET_ADDRESS"])

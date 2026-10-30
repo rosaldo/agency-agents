@@ -136,3 +136,47 @@ func TestPaperPerpReduceOnlyAndFundingNote(t *testing.T) {
 		t.Fatal("spot declares funding")
 	}
 }
+
+// venue is public data whose adapter knows the venue's liquidation formula:
+// 30% from entry for AAA, none for other symbols.
+type venue struct{ *fake.Fake }
+
+func (venue) LiquidationDistance(symbol string, _ exchange.PositionSide, _, _ float64) (float64, bool) {
+	return 0.3, symbol == "AAA"
+}
+
+// QA T12 T1: the simulator estimates liquidation with the venue's formula
+// when the data adapter has one (not the 1/leverage fallback of 50/150).
+func TestPaperPerpUsesTheVenueLiquidationFormula(t *testing.T) {
+	for _, c := range []struct {
+		side exchange.Side
+		want float64
+	}{{exchange.Buy, 70}, {exchange.Sell, 130}} {
+		data, _ := perp(t)
+		s := New(venue{data}, 10_000, func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
+		if _, err := s.ConfigureMarket(ctx, exchange.Demo, "AAA", exchange.MarginSettings{Leverage: 2, MarginMode: "isolated"}); err != nil {
+			t.Fatal(err)
+		}
+		order(t, s, "e", c.side, 10)
+		if ps, _ := s.Positions(ctx, exchange.Demo); len(ps) != 1 || ps[0].LiquidationPrice != c.want {
+			t.Fatalf("%s: position = %+v; want the venue's liquidation %v", c.side, ps, c.want)
+		}
+	}
+}
+
+// QA T12 T2: a short's stop gapped over fills at the open, not at the stop.
+func TestPaperPerpShortStopGap(t *testing.T) {
+	data, s := perp(t, market.Candle{Open: 110, High: 112, Low: 109, Close: 111})
+	order(t, s, "e", exchange.Sell, 10)
+	if _, err := s.PlaceStop(ctx, exchange.Demo, "s", "AAA", exchange.Buy, 10, 104); err != nil {
+		t.Fatal(err)
+	}
+	data.Advance()
+	_, _ = s.Candles(ctx, exchange.Demo, "AAA", time.Hour, 5)
+	if st := s.orders["s"]; st.Status != exchange.Filled || st.FillPrice != 110 {
+		t.Fatalf("stop = %+v; want filled at the 110 open", st)
+	}
+	if b, _ := s.Balance(ctx, exchange.Demo); b.Cash != 9_900 {
+		t.Fatalf("cash = %v, want 9900 (lost 10 x 10 on the gap)", b.Cash)
+	}
+}

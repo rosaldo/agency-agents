@@ -1,5 +1,7 @@
 package ccxt
 
+import "fmt"
+
 // APIKeyClient is a CCXT exchange authenticated by API key, secret and an
 // optional passphrase (the usual centralized exchange).
 type APIKeyClient interface {
@@ -24,7 +26,9 @@ func APIKeyVenue(id string, newClient func() APIKeyClient) Venue {
 		Dial: func(cred map[string]string, sandbox bool, _ []string) (Client, error) {
 			x := newClient()
 			if sandbox {
-				x.SetSandboxMode(true)
+				if err := EnableSandbox(id, x); err != nil {
+					return nil, err
+				}
 			}
 			if cred != nil {
 				x.SetApiKey(cred["API_KEY"])
@@ -36,4 +40,16 @@ func APIKeyVenue(id string, newClient func() APIKeyClient) Venue {
 			return x, nil
 		},
 	}
+}
+
+// EnableSandbox points x at its testnet. The fork panics when the exchange
+// has no sandbox URL; that becomes an explicit error, before any credential.
+func EnableSandbox(id string, x interface{ SetSandboxMode(any) }) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%s: no testnet (sandbox) for this exchange: %v", id, r)
+		}
+	}()
+	x.SetSandboxMode(true)
+	return nil
 }
