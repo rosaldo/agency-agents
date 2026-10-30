@@ -20,13 +20,19 @@ import (
 // strategy enters once on side with stop.
 func liqEngine(t *testing.T, o fake.Options, side strategy.Side, stop float64) (*Engine, *fake.Fake, *events) {
 	t.Helper()
+	return liqEngineWith(t, "", o, side, stop)
+}
+
+// liqEngineWith is liqEngine with extra yml.
+func liqEngineWith(t *testing.T, extra string, o fake.Options, side strategy.Side, stop float64) (*Engine, *fake.Fake, *events) {
+	t.Helper()
 	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
 		if in.Position != nil {
 			return strategy.Decision{}
 		}
 		return strategy.Decision{Action: strategy.Enter, Side: side, Stop: stop, Reason: "test"}
 	}}
-	c, err := config.Parse([]byte(scriptedYAML+"market: swap\nperp: {allow_short: true, leverage: 2}\n"), s)
+	c, err := config.Parse([]byte(scriptedYAML+"market: swap\nperp: {allow_short: true, leverage: 2}\n"+extra), s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,5 +179,18 @@ func TestSpotHasNoLiquidationCheck(t *testing.T) {
 	}
 	if ps, _ := f.Positions(context.Background(), exchange.Demo); len(ps) != 1 {
 		t.Fatalf("spot entry with a 52%% stop refused: %s", j.rejected())
+	}
+}
+
+// FR-P4 with the sim profile's costs: commission 1% and slippage 1% take a
+// round trip of 4% off the liquidation distance (0.5 - 0.04) x 0.5 = 23%, so
+// the 23.8% stop that clears it at zero cost is refused.
+func TestLiquidationBufferCountsTheSimProfileCosts(t *testing.T) {
+	e, f, j := liqEngineWith(t, "sim: {profiles: {real: {commission_pct: 1, slippage_pct: 1}}}\n", fake.Options{}, strategy.Long, 80)
+	if err := e.Step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ps, _ := f.Positions(context.Background(), exchange.Demo); len(ps) != 0 || !strings.Contains(j.rejected(), "liquidation") {
+		t.Fatalf("entered %v (%q); want the stop refused by the costs", ps, j.rejected())
 	}
 }

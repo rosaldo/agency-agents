@@ -290,9 +290,9 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 	return ad, tick, nil
 }
 
-// simProfile is the yml's paper_sim profile the simulator charges (FR-P10).
+// simProfile is the yml's sim profile the simulator charges (FR-P10).
 func simProfile(cfg *config.Config) paper.Profile {
-	return paper.Profile{Name: cfg.PaperSim.Profile, Costs: cfg.SimCosts()}
+	return paper.Profile{Name: cfg.Sim.Profile, Costs: cfg.SimCosts()}
 }
 
 // anySet reports whether any credential variable with prefix is set.

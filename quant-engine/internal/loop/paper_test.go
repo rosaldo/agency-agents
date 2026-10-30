@@ -71,7 +71,7 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 			fill = e.Price
 		}
 	}
-	if !strings.HasPrefix(start, "paper_sim profile real") {
+	if !strings.HasPrefix(start, "sim profile real") {
 		t.Fatalf("journal start %q; want the simulator's profile", start)
 	}
 	if signal != 100 || fill != 101 {
@@ -84,8 +84,8 @@ func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 	if !strings.Contains(st.Funding, "funding not modelled") {
 		t.Fatalf("status funding = %q", st.Funding)
 	}
-	if !strings.HasPrefix(st.PaperSim, "paper_sim profile real") {
-		t.Fatalf("status paper_sim = %q; want the active profile", st.PaperSim)
+	if !strings.HasPrefix(st.PaperSim, "sim profile real") {
+		t.Fatalf("status sim = %q; want the active profile", st.PaperSim)
 	}
 	if len(st.Positions) != 1 {
 		t.Fatalf("positions = %+v", st.Positions)

@@ -1,5 +1,7 @@
 // Package backtest replays candle files through the live engine step against
-// the fake exchange, with the yml's costs, and reports the trades.
+// the fake exchange, with the sim profile's slippage and fee (candles carry
+// no price inside the candle, so the profile's latency is not modelled), and
+// reports the trades.
 package backtest
 
 import (
@@ -45,7 +47,7 @@ type Summary struct {
 	PeriodStart         string  `json:"period_start"`
 	PeriodEnd           string  `json:"period_end"`
 	CommissionPct       float64 `json:"commission_pct"`
-	SpreadPct           float64 `json:"spread_pct"`
+	SimProfile          string  `json:"sim_profile"`
 	SlippagePct         float64 `json:"slippage_pct"`
 	ConfigurationsTried int     `json:"configurations_tried"`
 	Trades              int     `json:"trades"`
@@ -91,7 +93,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		candles[aux] = in.Aux[aux]
 	}
 	ex := fake.New(fake.Options{Paper: true, QtyStep: in.QtyStep, MinQty: in.MinQty, Cash: in.Capital, Candles: candles,
-		SpreadPct: c.Costs.SpreadPct, SlippagePct: c.Costs.SlippagePct, CommissionPct: c.Costs.CommissionPct, Shorts: c.Market == "swap"})
+		SlippagePct: c.SimCosts()[sym].SlippagePct, CommissionPct: c.SimCosts()[sym].CommissionPct, Shorts: c.Market == "swap"})
 	var now time.Time
 	en := engine.New(c, s, ex, exchange.Demo, nil, func() time.Time { return now })
 	en.News = nil // past headlines are not replayable: with news_guard required the backtest takes no entry
@@ -175,7 +177,7 @@ func summarize(c *cfgpkg.Config, in Input, res Result, curve []float64) Summary 
 	s := Summary{
 		ParamsHash: c.ParamsHash(), PeriodStart: in.Candles[0].Time.Format(time.RFC3339),
 		PeriodEnd:     in.Candles[len(curve)-1].Time.Format(time.RFC3339),
-		CommissionPct: c.Costs.CommissionPct, SpreadPct: c.Costs.SpreadPct, SlippagePct: c.Costs.SlippagePct,
+		CommissionPct: c.SimCosts()[c.Symbols[0]].CommissionPct, SlippagePct: c.SimCosts()[c.Symbols[0]].SlippagePct, SimProfile: c.Sim.Profile,
 		ConfigurationsTried: 1, Trades: len(res.Trades), StartEquity: in.Capital, EndEquity: curve[len(curve)-1],
 		Halt: res.Summary.Halt, Status: "not validated",
 	}

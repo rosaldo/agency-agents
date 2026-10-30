@@ -21,7 +21,7 @@ interval: 1h
 symbols: [AAA]
 strategy: {period: 3, stop_pct: 4, target_pct: 5}
 risk: {confirmed_by_user: true}
-paper_sim: {liquidity_class: major}
+sim: {liquidity_class: major}
 `
 
 // renamed is the example under another name: the example never goes live.

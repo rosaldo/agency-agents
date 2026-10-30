@@ -1,18 +1,40 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
-// PaperSim is how the engine's paper simulator charges a fill (it applies
-// only when paper runs without a testnet account): one named profile picks
-// the order delay, the slippage and the taker fee; `profiles:` overrides the
-// built-in numbers of a profile field by field.
-type PaperSim struct {
+// refuseOldCostKeys refuses the keys `sim:` replaced, so no yml keeps two
+// sources of costs.
+func refuseOldCostKeys(b []byte) error {
+	var top map[string]yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&top); err != nil {
+		return nil // Parse reports the syntax error
+	}
+	if _, ok := top["costs"]; ok {
+		return errors.New("config: the costs block is gone; costs come from the sim profile (sim.profile, sim.liquidity_class, sim.profiles.<profile>.commission_pct and slippage_pct)")
+	}
+	if _, ok := top["paper_sim"]; ok {
+		return errors.New("config: paper_sim is now sim (it also sets the backtest's and sizing's costs); rename the key")
+	}
+	return nil
+}
+
+// Sim is the single source of trading costs: one named profile picks the
+// order delay, the slippage and the taker fee that the paper simulator (paper
+// without a testnet account) and the backtest charge, and that sizing counts
+// in the risk of a trade (FR-R1). `profiles:` overrides the built-in numbers
+// of a profile field by field. The backtest has only candles, so it charges
+// the slippage and the fee but cannot model the delay.
+type Sim struct {
 	Profile        string                 `yaml:"profile"`         // optimistic | real (default) | pessimistic
 	LiquidityClass string                 `yaml:"liquidity_class"` // major | liquid_alt | mid_alt | thin
 	Profiles       map[string]SimOverride `yaml:"profiles"`
@@ -85,37 +107,36 @@ func sortedKeys[V any](m map[string]V) string {
 	return strings.Join(ks, ", ")
 }
 
-// resolveSim checks paper_sim and computes the costs of every symbol. The
-// fake exchange has its own fills, so only the profile name is checked there.
+// resolveSim checks sim and computes the costs of every symbol. The fake
+// exchange has no built-in numbers: its costs are the liquidity class's
+// slippage, if set, and the profile's overrides, else zero.
 func (c *Config) resolveSim() error {
-	p := &c.PaperSim
+	p := &c.Sim
 	if p.Profile == "" {
 		p.Profile = "real"
 	}
 	i := slices.Index(SimProfiles, p.Profile)
 	if i < 0 {
-		return fmt.Errorf("paper_sim.profile %q unknown; use one of %s", p.Profile, strings.Join(SimProfiles, ", "))
+		return fmt.Errorf("sim.profile %q unknown; use one of %s", p.Profile, strings.Join(SimProfiles, ", "))
 	}
 	for name, o := range p.Profiles {
 		if !slices.Contains(SimProfiles, name) {
-			return fmt.Errorf("paper_sim.profiles.%s unknown; use one of %s", name, strings.Join(SimProfiles, ", "))
+			return fmt.Errorf("sim.profiles.%s unknown; use one of %s", name, strings.Join(SimProfiles, ", "))
 		}
 		if o.LatencyMS != nil && *o.LatencyMS < 0 || o.SlippagePct != nil && *o.SlippagePct < 0 || o.CommissionPct != nil && *o.CommissionPct < 0 {
-			return fmt.Errorf("paper_sim.profiles.%s values must be >= 0", name)
+			return fmt.Errorf("sim.profiles.%s values must be >= 0", name)
 		}
 	}
-	if c.Exchange == "fake" {
-		return nil
-	}
+	fake := c.Exchange == "fake"
 	o := p.Profiles[p.Profile]
 	slip, ok := simSlippageBps[p.LiquidityClass]
-	if !ok && o.SlippagePct == nil {
-		return fmt.Errorf("paper_sim.liquidity_class %q must be one of %s (it sets the simulated slippage)", p.LiquidityClass, sortedKeys(simSlippageBps))
+	if !ok && o.SlippagePct == nil && !(fake && p.LiquidityClass == "") {
+		return fmt.Errorf("sim.liquidity_class %q must be one of %s (it sets the simulated slippage)", p.LiquidityClass, sortedKeys(simSlippageBps))
 	}
 	lat, okLat := simLatencyMS[c.Exchange]
 	taker, okFee := simTakerPct[c.Exchange]
-	if !okLat && o.LatencyMS == nil || !okFee && o.CommissionPct == nil {
-		return fmt.Errorf("paper_sim has no built-in values for exchange %q: set paper_sim.profiles.%s.latency_ms and commission_pct", c.Exchange, p.Profile)
+	if !fake && (!okLat && o.LatencyMS == nil || !okFee && o.CommissionPct == nil) {
+		return fmt.Errorf("sim has no built-in values for exchange %q: set sim.profiles.%s.latency_ms and commission_pct", c.Exchange, p.Profile)
 	}
 	c.sim = map[string]SimCosts{}
 	for _, sym := range c.Symbols {
@@ -137,6 +158,5 @@ func (c *Config) resolveSim() error {
 	return nil
 }
 
-// SimCosts are the paper simulator's costs per traded symbol; nil on the
-// fake exchange.
+// SimCosts are the profile's costs per traded symbol.
 func (c *Config) SimCosts() map[string]SimCosts { return c.sim }

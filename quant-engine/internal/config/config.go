@@ -32,16 +32,15 @@ type Config struct {
 	StrategyParams yaml.Node `yaml:"strategy"` // opaque: validated by Strategy.Configure
 	Perp           Perp      `yaml:"perp"`
 	Risk           Risk      `yaml:"risk"`
-	Costs          Costs     `yaml:"costs"`
 	Demo           Demo      `yaml:"demo"` // optional; only the O4 value is implemented
-	PaperSim       PaperSim  `yaml:"paper_sim"`
+	Sim            Sim       `yaml:"sim"`
 	ValidationFile string    `yaml:"validation_file"`
 
 	interval time.Duration
 	location *time.Location
 	name     string               // Strategy.Name()
 	news     *strategy.NewsPolicy // nil = the strategy has no news policy
-	sim      map[string]SimCosts  // the paper simulator's costs per symbol
+	sim      map[string]SimCosts  // the profile's costs per symbol (paper simulator, backtest, sizing)
 }
 
 // Perp holds the perpetual-swap settings: the leverage (it sets the margin
@@ -61,13 +60,6 @@ type Risk struct {
 	MaxLeverage          int     `yaml:"max_leverage"`           // hard ceiling for perp.leverage
 	MinLiquidationBuffer float64 `yaml:"min_liquidation_buffer"` // share of the distance to liquidation the stop leaves free
 	ConfirmedByUser      bool    `yaml:"confirmed_by_user"`
-}
-
-// Costs feed the backtest; slippage_pct also widens the per-trade stop distance in sizing.
-type Costs struct {
-	CommissionPct float64 `yaml:"commission_pct"`
-	SpreadPct     float64 `yaml:"spread_pct"`
-	SlippagePct   float64 `yaml:"slippage_pct"`
 }
 
 // Demo is where the testnet demo trades and reads the signal's candles (O4).
@@ -115,6 +107,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		return nil, fmt.Errorf("config: strategy name %q must match %s", s.Name(), strategyName)
 	}
 	if err := refuseSecrets(b); err != nil {
+		return nil, err
+	}
+	if err := refuseOldCostKeys(b); err != nil {
 		return nil, err
 	}
 	c := defaults()
@@ -187,8 +182,6 @@ func (c *Config) validate() error {
 		return errors.New("perp.leverage must be >= 1")
 	case c.Perp.Leverage > r.MaxLeverage:
 		return fmt.Errorf("perp.leverage %d is above risk.max_leverage %d", c.Perp.Leverage, r.MaxLeverage)
-	case c.Costs.CommissionPct < 0 || c.Costs.SpreadPct < 0 || c.Costs.SlippagePct < 0:
-		return errors.New("costs must be >= 0")
 	case c.Demo != (Demo{}) && c.Demo != o4:
 		return fmt.Errorf("demo must be {source: testnet, candles: mainnet} (the only demo implemented: testnet orders, mainnet candles), got {source: %q, candles: %q}", c.Demo.Source, c.Demo.Candles)
 	case !r.ConfirmedByUser:

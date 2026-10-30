@@ -111,7 +111,7 @@ type State struct {
 	Targets    map[string]float64  `json:"targets"`
 	StaleStops map[string]string   `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Funding    string              `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
-	PaperSim   string              `json:"paper_sim,omitempty"`   // the simulator's profile and costs
+	PaperSim   string              `json:"sim,omitempty"`         // the simulator's profile and costs
 	LastEvent  string              `json:"last_event"`
 	StopReason string              `json:"stop_reason"`
 }
@@ -425,7 +425,7 @@ type Status struct {
 	Positions     []exchange.Position `json:"positions"`
 	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
 	Funding       string              `json:"funding,omitempty"`
-	PaperSim      string              `json:"paper_sim,omitempty"`
+	PaperSim      string              `json:"sim,omitempty"`
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }

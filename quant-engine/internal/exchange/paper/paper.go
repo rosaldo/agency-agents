@@ -10,7 +10,7 @@
 // which the position is closed and its margin lost. Funding is not modelled
 // (FR-P5): FundingNote says so in status.
 //
-// Every fill pays the profile's costs (config.PaperSim): it takes the price
+// Every fill pays the profile's costs (config.Sim): it takes the price
 // read after the profile's latency, moved by its slippage against the
 // trader (a triggered stop and an exit too), and pays its taker fee out of
 // cash. shortcut: fixed slippage per liquidity class, not a walk of the live
@@ -71,7 +71,7 @@ type Sim struct {
 	sleep  func(context.Context, time.Duration) error
 }
 
-// Profile is the paper_sim profile the simulator charges: its name and the
+// Profile is the sim profile the simulator charges: its name and the
 // costs per symbol. An empty Costs charges nothing (tests); with Costs set,
 // an order on a symbol without them is refused.
 type Profile struct {
@@ -108,7 +108,7 @@ func (s *Sim) SimNote() string {
 		syms = append(syms, sym)
 	}
 	slices.Sort(syms)
-	parts := []string{"paper_sim profile " + s.prof.Name}
+	parts := []string{"sim profile " + s.prof.Name}
 	for _, sym := range syms {
 		c := s.prof.Costs[sym]
 		parts = append(parts, fmt.Sprintf("%s: latency %v, slippage %g%%, taker fee %g%%", sym, c.Latency, c.SlippagePct, c.CommissionPct))

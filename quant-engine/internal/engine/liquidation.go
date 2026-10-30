@@ -24,8 +24,8 @@ import (
 // liquidationDistance is the estimated distance from entry to liquidation of
 // a fresh position, as a fraction of entry, net of the round-trip cost.
 func (e *Engine) liquidationDistance(sym string, side exchange.PositionSide, entry, leverage float64) float64 {
-	c := e.Cfg.Costs
-	rt := risk.RoundTripCost(c.CommissionPct, c.SpreadPct, c.SlippagePct)
+	c := e.Cfg.SimCosts()[sym]
+	rt := risk.RoundTripCost(c.CommissionPct, 0, c.SlippagePct)
 	if est, ok := e.Ex.(exchange.LiquidationEstimator); ok {
 		if d, ok := est.LiquidationDistance(sym, side, entry, leverage); ok {
 			return d - rt

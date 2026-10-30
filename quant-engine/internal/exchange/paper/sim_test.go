@@ -135,7 +135,7 @@ func TestPaperSimProfilesOrderTheResult(t *testing.T) {
 	for _, p := range config.SimProfiles {
 		y := "exchange: hyperliquid\nmarket: swap\nasset_class: crypto\nsymbols: [AAA]\ninterval: 1h\n" +
 			"strategy: {period: 20, stop_pct: 4, target_pct: 5}\nrisk: {confirmed_by_user: true}\n" +
-			"perp: {leverage: 2}\npaper_sim: {profile: " + p + ", liquidity_class: mid_alt}\n"
+			"perp: {leverage: 2}\nsim: {profile: " + p + ", liquidity_class: mid_alt}\n"
 		cfg, err := config.Parse([]byte(y), example.New())
 		if err != nil {
 			t.Fatal(err)

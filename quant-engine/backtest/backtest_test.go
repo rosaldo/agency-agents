@@ -64,20 +64,20 @@ func TestOneKnownTrade(t *testing.T) {
 	}
 }
 
-// Commission 0.1% and spread 0.2%: sizing assumes half the spread on both
-// legs (buy 105.105, stop fill 100.6992) and commission on both fills,
+// Commission 0.1% and slippage 0.1% (the half spread of 0.2%): sizing assumes
+// the slippage on both legs (buy 105.105, stop fill 100.6992) and commission on both fills,
 // floor(100 / (4.4058 + 0.2058042)) = 21; fills 105.105 and 110.889,
 // commissions 2.207205 + 2.328669, so P&L = 21 x 5.784 - 4.535874 = 116.928126.
 func TestCostsChangeTheResultByTheExpectedAmount(t *testing.T) {
-	res, _, _ := runWith(t, "costs: {commission_pct: 0.1, spread_pct: 0.2}\n")
+	res, _, _ := runWith(t, "sim: {profiles: {real: {commission_pct: 0.1, slippage_pct: 0.1}}}\n")
 	if len(res.Trades) != 1 || res.Trades[0].Qty != 21 || !near(res.Trades[0].PnL, 116.928126) {
 		t.Fatalf("trades = %+v, want 21 units, P&L 116.928126", res.Trades)
 	}
 }
 
 func TestSameInputSameBytes(t *testing.T) {
-	_, t1, s1 := runWith(t, "costs: {commission_pct: 0.1}\n")
-	_, t2, s2 := runWith(t, "costs: {commission_pct: 0.1}\n")
+	_, t1, s1 := runWith(t, "sim: {profiles: {real: {commission_pct: 0.1}}}\n")
+	_, t2, s2 := runWith(t, "sim: {profiles: {real: {commission_pct: 0.1}}}\n")
 	if !bytes.Equal([]byte(t1+s1), []byte(t2+s2)) {
 		t.Fatal("backtest output is not deterministic")
 	}
@@ -120,5 +120,29 @@ func TestBadStrategyBlockFailsEarly(t *testing.T) {
 	_, err := Run(context.Background(), example.New(), []byte(strings.Replace(cfgYAML, "period: 3", "period: 1", 1)), Input{Candles: cs, Capital: 10_000})
 	if err == nil || !strings.Contains(err.Error(), "period") {
 		t.Fatalf("bad block: %v", err)
+	}
+}
+
+// The backtest charges the sim profile; the same backtest
+// ends optimistic >= real >= pessimistic, and the summary names the profile.
+func TestBacktestProfilesOrderTheResult(t *testing.T) {
+	cs, err := market.ReadCSVFile("../testdata/backtest_one_trade.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pnl []float64
+	for _, p := range []string{"optimistic", "real", "pessimistic"} {
+		y := strings.Replace(cfgYAML, "exchange: fake", "exchange: hyperliquid", 1) + "sim: {profile: " + p + ", liquidity_class: thin}\n"
+		res, err := Run(context.Background(), example.New(), []byte(y), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Trades) != 1 || res.Summary.SimProfile != p {
+			t.Fatalf("%s: trades %+v, summary profile %q", p, res.Trades, res.Summary.SimProfile)
+		}
+		pnl = append(pnl, res.Summary.EndEquity-res.Summary.StartEquity)
+	}
+	if !(pnl[0] > pnl[1] && pnl[1] > pnl[2]) {
+		t.Fatalf("P&L optimistic, real, pessimistic = %v; want strictly decreasing", pnl)
 	}
 }

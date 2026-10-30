@@ -299,7 +299,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		step, minQty = l.Lot(sym) // per market when the adapter knows it
 	}
 	qty, why := risk.Size(risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
-		Stop: d.Stop, Short: d.Side == strategy.Short, SpreadPct: e.Cfg.Costs.SpreadPct, SlippagePct: e.Cfg.Costs.SlippagePct, CommissionPct: e.Cfg.Costs.CommissionPct, QtyStep: step, MinQty: minQty})
+		Stop: d.Stop, Short: d.Side == strategy.Short, SlippagePct: e.Cfg.SimCosts()[sym].SlippagePct, CommissionPct: e.Cfg.SimCosts()[sym].CommissionPct, QtyStep: step, MinQty: minQty})
 	if qty == 0 {
 		e.skip(sym, why)
 		return nil
