@@ -229,8 +229,12 @@ func (e *Engine) Step(ctx context.Context) error {
 			return err
 		}
 		errs = append(errs, err)
-		if c, ok := e.closed[sym]; ok && !NeedsDerivatives(e.Strategy) {
-			e.readDeriv(ctx, sym, c) // the recorder reads after the trading actions: a slow endpoint never delays them
+	}
+	if !NeedsDerivatives(e.Strategy) { // the recorder reads after every symbol's trading actions: a slow endpoint delays none
+		for _, sym := range e.Cfg.Symbols {
+			if c, ok := e.closed[sym]; ok {
+				e.readDeriv(ctx, sym, c)
+			}
 		}
 	}
 	return errors.Join(errs...)

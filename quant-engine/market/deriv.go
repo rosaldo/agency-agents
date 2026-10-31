@@ -30,9 +30,13 @@ func (d Deriv) Missing() bool { return d.Time.IsZero() }
 // window of the step that decides on it. A read at or before the close is
 // stale for the step; one after the next close belongs to a later step.
 func (d Deriv) InStep(candle time.Time, interval time.Duration) bool {
-	end := candle.Add(interval)
-	return d.Time.After(end) && !d.Time.After(end.Add(interval))
+	return d.Time.After(candle.Add(interval)) && !d.Time.After(StepEnd(candle, interval))
 }
+
+// StepEnd is the end of the step window of the candle opened at candle: the
+// next candle's close. No snapshot read later belongs to it, so a read for
+// it is not waited on past this point.
+func StepEnd(candle time.Time, interval time.Duration) time.Time { return candle.Add(2 * interval) }
 
 // AlignDeriv returns one snapshot per candle, same index: the latest of ds
 // bound to that candle and read in its step (InStep). The engine reads it

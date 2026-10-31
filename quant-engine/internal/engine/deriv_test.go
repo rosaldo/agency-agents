@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,5 +242,77 @@ func TestDerivativesUserIsRefusedWithoutThePort(t *testing.T) {
 				t.Fatalf("CheckDerivatives = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// snapshotFunc replaces the fake's Snapshot (slow, hung).
+type snapshotFunc struct {
+	*fake.Fake
+	snap func(ctx context.Context) (market.Deriv, error)
+}
+
+func (s snapshotFunc) Snapshot(ctx context.Context, _ exchange.Env, _ string) (market.Deriv, error) {
+	return s.snap(ctx)
+}
+
+// With several symbols, the recorder of a plain strategy reads after every
+// symbol's trading actions: a slow endpoint delays no symbol's decision.
+func TestSlowRecorderDelaysNoSymbol(t *testing.T) {
+	var mu sync.Mutex
+	decided := map[string]time.Time{}
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		mu.Lock()
+		decided[in.Symbol] = time.Now()
+		mu.Unlock()
+		return strategy.Decision{}
+	}}
+	c, err := config.Parse([]byte(strings.Replace(swapYAML, "symbols: [AAA]", "symbols: [AAA, BBB]", 1)), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Shorts: true,
+		Candles: map[string][]market.Candle{"AAA": cs, "BBB": cs}})
+	slow := snapshotFunc{f, func(context.Context) (market.Deriv, error) {
+		time.Sleep(300 * time.Millisecond)
+		return market.Deriv{}, errors.New("venue slow and down")
+	}}
+	e := New(c, s, slow, exchange.Demo, &events{}, func() time.Time { return cs[0].Time })
+	e.OnDeriv = func(string, market.Deriv) {}
+	start := time.Now()
+	if err := e.Step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gap := decided["BBB"].Sub(decided["AAA"]); gap > 100*time.Millisecond {
+		t.Fatalf("BBB decided %v after AAA: the recorder ran between the symbols", gap)
+	}
+	if took := time.Since(start); took < 600*time.Millisecond {
+		t.Fatalf("step took %v: the recorder did not read both symbols", took)
+	}
+}
+
+// A DerivativesUser's read is bounded by the end of the candle's step
+// window: a hung endpoint leaves the candle missing, journaled, and the step
+// goes on to decide.
+func TestHungSnapshotEndsAtTheStepWindow(t *testing.T) {
+	var last []market.Deriv
+	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision { last = in.Deriv; return strategy.Decision{} }}, true}
+	e, f, _, j := derivEngine(t, s, swapYAML, true)
+	e.Ex = snapshotFunc{f, func(ctx context.Context) (market.Deriv, error) {
+		<-ctx.Done() // hung: answers only when the caller gives up
+		return market.Deriv{}, ctx.Err()
+	}}
+	done := make(chan error, 1)
+	go func() { done <- e.Step(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the step is still waiting on a hung snapshot after 3s")
+	}
+	if len(last) == 0 || !last[len(last)-1].Missing() || countDerivNotes(*j, "deadline") != 1 {
+		t.Fatalf("Input.Deriv %+v, journal %+v; want the candle missing and the deadline noted", last, *j)
 	}
 }

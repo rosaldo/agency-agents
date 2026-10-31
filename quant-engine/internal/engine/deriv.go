@@ -67,7 +67,10 @@ func (e *Engine) readDeriv(ctx context.Context, sym string, candle time.Time) {
 	if !ok {
 		return
 	}
-	d, err := dr.Snapshot(ctx, e.Env, sym)
+	// a hung endpoint never holds the step past the candle's window, after which no read could count
+	dctx, cancel := context.WithDeadline(ctx, market.StepEnd(candle, e.Cfg.Interval()))
+	defer cancel()
+	d, err := dr.Snapshot(dctx, e.Env, sym)
 	d.Candle = candle
 	if err == nil && !d.InStep(candle, e.Cfg.Interval()) {
 		err = fmt.Errorf("read at %s, outside the step of the candle opened at %s", d.Time.UTC().Format(time.RFC3339Nano), candle.UTC().Format(time.RFC3339))
