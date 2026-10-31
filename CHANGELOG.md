@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.47.3** (2026-10-31) · `test` — quant-engine: golden journals of the example strategy on a synthetic wave, spot and swap, guard the journal byte for byte
 - **v1.47.2** (2026-10-31) · `test` — quant-engine: the ccxt Snapshot tests assert HasOpenInterest on a reported open interest (stub and the fork's recorded answers)
 - **v1.47.1** (2026-10-31) · `fix` — quant-engine: derivatives snapshots say whether the venue reported open interest (market.Deriv.HasOpenInterest; the recorder writes an empty open_interest without it); funding history never has it, so an open interest rule cannot pass on funding alone; fundingHistory rows must be of the yml symbol's coin; README states live funding vs history is not verified
 - **v1.47.0** (2026-10-31) · `feat` — quant-engine: backtest --deriv replays derivatives data, bound to the candles as the loop bound them: the recorder's deriv-<level>.csv or Hyperliquid fundingHistory JSON (funding only, last rate settled by the close); a DerivativesUser without data spanning the candles is refused; the replay seeds the recording and never reads (no wall-clock deadline)
