@@ -31,6 +31,9 @@ const (
 	// (stop, liquidation or a close outside the engine); target cleared.
 	ClosedOutside = "closed_outside"
 	Funding       = "funding" // FR-P5: a funding payment as the venue reports it (Amount)
+	// Derivatives: a gap or recovery of the derivatives snapshots, or the
+	// recorder switched off, with the reason.
+	Derivatives = "derivatives"
 )
 
 type Event struct {

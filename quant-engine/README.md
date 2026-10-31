@@ -62,10 +62,13 @@ type Strategy interface {
 
 The engine refuses an `Enter` without a stop, with the stop on the wrong side of the price, or with a short when `perp.allow_short` is false, and journals why. A `None` returned while flat with a non-empty `Reason` is journaled as a skipped signal (`signal skipped: <reason>`), so a strategy that drops its own plan (no data for the stop, stop out of range) leaves a trail; a `None` without `Reason` means no signal and writes nothing. Sizing, leverage, the liquidation check, order routing and every limit are the engine's.
 
-Two optional interfaces extend a strategy:
+Three optional interfaces extend a strategy:
 
 - **`strategy.Trailer`** moves the stop by any rule the strategy defines (a moving average, ATR, structure). The engine applies an answer only when it tightens the stop, stays on the right side of the price and clear of the liquidation, and swaps the stop on the exchange without leaving the position unprotected. Backtest, paper, testnet and mainnet use the same rule.
 - **`strategy.NewsSource`** supplies the news policy: feeds, keywords, aliases and lookback. See [News guard](#news-guard).
+- **`strategy.DerivativesUser`** gets `Input.Deriv`: open interest, funding rate and mark price, one snapshot per candle. The snapshot of a closed candle is the one the engine reads in that candle's own step, after the close and before the decision. A read at or before the close, or in a later step, does not count, and a candle without a snapshot is marked missing. The engine refuses such a strategy at load on a spot market or on an adapter that does not read the data.
+
+On swap markets every level (paper, testnet, mainnet) records the snapshots it reads to `deriv-<level>.csv` in the state directory: `time,symbol,candle,open_interest,funding_rate,mark_price`, where `time` is when the snapshot was read and `candle` is the open time of the candle it belongs to. The venue keeps no open interest history, so this file is the only source of it. A restart reloads the file and never writes a row twice. When the strategy does not need the data, the engine reads it after the step's trading actions, so a slow endpoint never delays them. If the file is unreadable (for example a crash cut the last line), a strategy that needs the data is refused; any other strategy keeps trading, and the journal says the recorder is off and which file to fix. The file itself is never changed. Read failures are journaled once per failure streak.
 
 ## Configuration
 

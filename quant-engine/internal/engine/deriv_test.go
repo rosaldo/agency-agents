@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/paper"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
@@ -28,9 +30,9 @@ type noPort struct{ exchange.Exchange }
 
 const swapYAML = scriptedYAML + "market: swap\nperp: {allow_short: true}\n"
 
-// derivSeries is one snapshot per candle, read as live reads it: at the step
-// after the candle closed (close + 5s), so snapshot i lands inside candle
-// i+1 and OpenInterest i+1 tells them apart.
+// derivSeries is one snapshot per candle, read as live reads it: in the step
+// that decides on the candle, 5s after its close; OpenInterest i+1 tells
+// them apart.
 func derivSeries(cs []market.Candle, interval time.Duration) []market.Deriv {
 	ds := make([]market.Deriv, len(cs))
 	for i, c := range cs {
@@ -39,7 +41,7 @@ func derivSeries(cs []market.Candle, interval time.Duration) []market.Deriv {
 	return ds
 }
 
-func derivEngine(t *testing.T, s strategy.Strategy, yml string, series bool) (*Engine, *fake.Fake, []market.Candle) {
+func derivEngine(t *testing.T, s strategy.Strategy, yml string, series bool) (*Engine, *fake.Fake, []market.Candle, *events) {
 	t.Helper()
 	c, err := config.Parse([]byte(yml), s)
 	if err != nil {
@@ -51,22 +53,14 @@ func derivEngine(t *testing.T, s strategy.Strategy, yml string, series bool) (*E
 		o.Deriv = map[string][]market.Deriv{"AAA": derivSeries(cs, c.Interval())}
 	}
 	f := fake.New(o)
-	return New(c, s, f, exchange.Demo, &events{}, func() time.Time { return cs[0].Time }), f, cs
+	j := &events{}
+	return New(c, s, f, exchange.Demo, j, func() time.Time { return cs[0].Time }), f, cs, j
 }
 
-// Input.Deriv has one entry per candle; the closed candle's is the snapshot
-// read while it formed, never the one read after its close, and a candle with
-// none is marked missing.
-func TestInputDerivIsAlignedToTheClosedCandle(t *testing.T) {
-	var got [][]market.Deriv
-	var lens []int
-	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
-		got = append(got, in.Deriv)
-		lens = append(lens, len(in.Candles))
-		return strategy.Decision{}
-	}}, true}
-	e, f, cs := derivEngine(t, s, swapYAML, true)
-	for i := range cs {
+// runAll steps the engine once per candle.
+func runAll(t *testing.T, e *Engine, f *fake.Fake, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
 		if i > 0 && !f.Advance() {
 			t.Fatal("candles ran out")
 		}
@@ -74,26 +68,89 @@ func TestInputDerivIsAlignedToTheClosedCandle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// Input.Deriv has one entry per candle: the closed candle's is the snapshot
+// read in this very step, after its close and before the decision; the
+// older candles keep the ones read in their own steps.
+func TestInputDerivIsTheSnapshotReadInTheCandlesStep(t *testing.T) {
+	var got [][]market.Deriv
+	var lens []int
+	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		got = append(got, in.Deriv)
+		lens = append(lens, len(in.Candles))
+		return strategy.Decision{}
+	}}, true}
+	e, f, cs, _ := derivEngine(t, s, swapYAML, true)
+	runAll(t, e, f, len(cs))
 	for step, ds := range got {
 		if len(ds) != lens[step] {
 			t.Fatalf("step %d: %d snapshots for %d candles", step, len(ds), lens[step])
 		}
 		for k, d := range ds {
 			candle := step - len(ds) + 1 + k // index of the candle this entry belongs to
-			want := float64(candle)          // snapshot candle-1, OpenInterest candle; candle 0 has none
-			if d.OpenInterest != want || d.Missing() != (candle == 0) {
-				t.Fatalf("step %d, candle %d: open interest %v (missing %v), want %v", step, candle, d.OpenInterest, d.Missing(), want)
-			}
-			if !d.Missing() && d.Time.After(cs[candle].Time.Add(time.Hour)) {
-				t.Fatalf("step %d, candle %d: snapshot read after the close", step, candle)
+			if d.OpenInterest != float64(candle+1) || d.Missing() || !d.Candle.Equal(cs[candle].Time) {
+				t.Fatalf("step %d, candle %d: %+v, want snapshot %d bound to it", step, candle, d, candle)
 			}
 		}
 	}
 }
 
+// A snapshot read outside its candle's step (here: before the close, inside
+// the candle) is not bound: the candle is marked missing and the gap is
+// journaled once per streak, not once per step.
+func TestSnapshotOutsideTheStepIsMissingAndNoted(t *testing.T) {
+	var last []market.Deriv
+	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision { last = in.Deriv; return strategy.Decision{} }}, true}
+	e, f, cs, j := derivEngine(t, s, swapYAML, false)
+	stale := make([]market.Deriv, len(cs))
+	for i, c := range cs {
+		stale[i] = market.Deriv{Time: c.Time.Add(30 * time.Minute), OpenInterest: 1}
+	}
+	f.SetDeriv("AAA", stale)
+	runAll(t, e, f, 3)
+	if !last[len(last)-1].Missing() {
+		t.Fatalf("a snapshot read before the close was bound: %+v", last)
+	}
+	if n := countDerivNotes(*j, "not read"); n != 1 {
+		t.Fatalf("%d gap notes over 3 failing steps, want 1: %+v", n, *j)
+	}
+}
+
+// Read failures are journaled once per failure streak, and the recovery too.
+func TestDerivFailuresAreNotedOncePerStreak(t *testing.T) {
+	s := derivUser{&scripted.Strategy{Decider: func(strategy.Input) strategy.Decision { return strategy.Decision{} }}, true}
+	e, f, _, j := derivEngine(t, s, swapYAML, true)
+	for i, fail := range []bool{true, true, false, true} {
+		if i > 0 && !f.Advance() {
+			t.Fatal("candles ran out")
+		}
+		if fail {
+			f.FailNext("Snapshot", errors.New("429 too many requests"), false)
+		}
+		if err := e.Step(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, back := countDerivNotes(*j, "429"), countDerivNotes(*j, "read again"); n != 2 || back != 1 {
+		t.Fatalf("failure notes %d (want 2), recovery notes %d (want 1): %+v", n, back, *j)
+	}
+}
+
+func countDerivNotes(j events, part string) int {
+	n := 0
+	for _, ev := range j {
+		if ev.Kind == journal.Derivatives && strings.Contains(ev.Reason, part) {
+			n++
+		}
+	}
+	return n
+}
+
 // A strategy without the interface (or one that does not need the data)
-// gets no Input.Deriv, and the engine reads no snapshot unless the recorder
-// asks for it.
+// gets no Input.Deriv; the engine reads no snapshot unless the recorder asks
+// for it, and then only after the step's trading actions, so a slow or
+// failing endpoint never delays them. A DerivativesUser reads before Decide.
 func TestStrategiesWithoutDerivativesAreUntouched(t *testing.T) {
 	for name, s := range map[string]strategy.Strategy{
 		"no interface": &scripted.Strategy{},
@@ -101,14 +158,21 @@ func TestStrategiesWithoutDerivativesAreUntouched(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var seen []strategy.Input
-			decide := func(in strategy.Input) strategy.Decision { seen = append(seen, in); return strategy.Decision{} }
+			var f *fake.Fake
+			var readsAtDecide []int
+			decide := func(in strategy.Input) strategy.Decision {
+				seen = append(seen, in)
+				readsAtDecide = append(readsAtDecide, f.Calls("Snapshot"))
+				return strategy.Decision{}
+			}
 			switch v := s.(type) {
 			case *scripted.Strategy:
 				v.Decider = decide
 			case derivUser:
 				v.Decider = decide
 			}
-			e, f, _ := derivEngine(t, s, swapYAML, true)
+			var e *Engine
+			e, f, _, _ = derivEngine(t, s, swapYAML, true)
 			if err := e.Step(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +188,24 @@ func TestStrategiesWithoutDerivativesAreUntouched(t *testing.T) {
 			if len(rec) != 1 || seen[1].Deriv != nil {
 				t.Fatalf("recorded %v, Input.Deriv %v; want one recorded and none handed over", rec, seen[1].Deriv)
 			}
+			if readsAtDecide[1] != 0 {
+				t.Fatalf("the recorder read before the decision (%d reads at Decide)", readsAtDecide[1])
+			}
 		})
+	}
+	var f *fake.Fake
+	reads := -1
+	user := derivUser{&scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+		reads = f.Calls("Snapshot")
+		return strategy.Decision{}
+	}}, true}
+	var e *Engine
+	e, f, _, _ = derivEngine(t, user, swapYAML, true)
+	if err := e.Step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Fatalf("a DerivativesUser decided after %d reads, want the step's snapshot read first", reads)
 	}
 }
 

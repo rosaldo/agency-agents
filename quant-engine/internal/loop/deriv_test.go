@@ -11,6 +11,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
@@ -96,9 +97,9 @@ func TestRestartSeedsTheSnapshotsRecordedBefore(t *testing.T) {
 		return strategy.Decision{}
 	}}}
 	derivRun(t, s, derivYAML, dir, nil) // replays the same candles: every snapshot is already recorded
-	// snapshot 4, read inside the last candle (5 was read after its close)
-	if last.OpenInterest != 1004 {
-		t.Fatalf("last candle's snapshot = %+v, want the recorded one (1004)", last)
+	// snapshot 5, read in the last candle's own step and recorded bound to it
+	if last.OpenInterest != 1005 || last.Missing() {
+		t.Fatalf("last candle's snapshot = %+v, want the recorded one (1005)", last)
 	}
 }
 
@@ -119,5 +120,50 @@ func TestRunRefusesADerivativesUserWithoutThePort(t *testing.T) {
 	r := derivRun(t, s, derivYAML, dir, func(f *fake.Fake) exchange.Exchange { return noPort{f} })
 	if !strings.HasPrefix(r, "refused:") || !strings.Contains(r, "derivatives") || steps != 0 {
 		t.Fatalf("reason = %q after %d steps", r, steps)
+	}
+}
+
+// A torn recorder file (a crash in the middle of an append) refuses only a
+// strategy that needs the data. Any other strategy trades on: the journal
+// says the recorder is off, which file and how to fix it, and the file is
+// left as it was.
+func TestTornRecorderFileRefusesOnlyADerivativesUser(t *testing.T) {
+	torn := market.DerivCSVHeader + "\n" + "2026-01-01T01:00:05Z,AAA,2026-01-01T00:00:00Z,1000,0,100\n2026-01-01T02:00:05Z,AAA,2026"
+	plant := func() (string, string) {
+		dir := filepath.Join(t.TempDir(), "state")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "deriv-paper.csv")
+		if err := os.WriteFile(path, []byte(torn), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir, path
+	}
+
+	dir, path := plant()
+	if r := derivRun(t, derivUser{&scripted.Strategy{Decider: none}}, derivYAML, dir, nil); !strings.HasPrefix(r, "refused:") || !strings.Contains(r, "deriv-paper.csv") {
+		t.Fatalf("DerivativesUser: reason = %q, want refused naming the file", r)
+	}
+
+	dir, path = plant()
+	steps := 0
+	r := derivRun(t, &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision { steps++; return strategy.Decision{} }}, derivYAML, dir, nil)
+	if r != "candles exhausted" || steps != 6 {
+		t.Fatalf("plain strategy: reason = %q after %d steps, want it to run on", r, steps)
+	}
+	if b, _ := os.ReadFile(path); string(b) != torn {
+		t.Fatalf("the bad file was changed:\n%s", b)
+	}
+	evs, _, err := journal.Read(filepath.Join(dir, "journal.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noted := false
+	for _, e := range evs {
+		noted = noted || (e.Kind == journal.Derivatives && strings.Contains(e.Reason, "deriv-paper.csv") && strings.Contains(e.Reason, "recorder off"))
+	}
+	if !noted {
+		t.Fatalf("no journal note on the recorder being off: %+v", evs)
 	}
 }

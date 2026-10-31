@@ -321,10 +321,15 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		return "refused: " + err.Error()
 	}
 	var derivSeen map[string][]market.Deriv // swap only: what the recorder already holds
+	var derivOff string                     // why the recorder stays off this run
 	if cfg.Market == "swap" {
 		var err error
 		if derivSeen, err = market.ReadDerivCSVFile(derivPath(dir, level)); err != nil {
-			return "refused: " + err.Error() + "; fix or move " + filepath.Base(derivPath(dir, level)) + ", then run again"
+			fix := filepath.Base(derivPath(dir, level)) + " is unreadable (" + err.Error() + "); fix or move it, then run again"
+			if engine.NeedsDerivatives(s) { // its decisions read this history: fail closed
+				return "refused: " + fix
+			}
+			derivOff = "recorder off: " + fix + " to record again; the file is left as it is"
 		}
 	}
 	prev, err := LoadState(dir, level)
@@ -380,6 +385,9 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
+	if derivOff != "" {
+		record(journal.Derivatives, derivOff)
+	}
 	if derivSeen != nil { // every level records: the venue keeps no open interest history, backtests read this file
 		en.SeedDeriv(derivSeen)
 		en.OnDeriv = func(sym string, d market.Deriv) {

@@ -234,6 +234,16 @@ func (f *Fake) Candles(ctx context.Context, env exchange.Env, symbol string, _ t
 	return slices.Clone(cs[max(0, end-n):end]), late
 }
 
+// SetDeriv replaces symbol's derivatives snapshots (Options.Deriv).
+func (f *Fake) SetDeriv(symbol string, ds []market.Deriv) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.opt.Deriv == nil {
+		f.opt.Deriv = map[string][]market.Deriv{}
+	}
+	f.opt.Deriv[symbol] = ds
+}
+
 // Snapshot is the derivatives snapshot at the current candle
 // (exchange.DerivativesReader).
 func (f *Fake) Snapshot(ctx context.Context, env exchange.Env, symbol string) (market.Deriv, error) {

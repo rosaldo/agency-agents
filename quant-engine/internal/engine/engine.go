@@ -46,6 +46,8 @@ type Engine struct {
 	OnDeriv func(symbol string, d market.Deriv)
 
 	deriv      map[string][]market.Deriv // snapshots read, oldest first; the last one always kept
+	derivDown  map[string]bool           // symbol -> snapshot reads failing (one journal note per streak)
+	closed     map[string]time.Time      // symbol -> open time of the candle this step decided on
 	targets    map[string]float64
 	stops      map[string]float64 // stop given at entry or moved by the trail, re-placed if the exchange drops it
 	staleStops map[string]string  // symbol -> old stop a trail could not cancel (FR-P9)
@@ -58,7 +60,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
-		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
@@ -227,19 +229,26 @@ func (e *Engine) Step(ctx context.Context) error {
 			return err
 		}
 		errs = append(errs, err)
+		if c, ok := e.closed[sym]; ok && !NeedsDerivatives(e.Strategy) {
+			e.readDeriv(ctx, sym, c) // the recorder reads after the trading actions: a slow endpoint never delays them
+		}
 	}
 	return errors.Join(errs...)
 }
 
 func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64) error {
-	e.readDeriv(ctx, sym)
+	delete(e.closed, sym)
 	n := max(e.Strategy.Warmup(), 1)
 	cs, err := e.Ex.Candles(ctx, e.Env, sym, e.Cfg.Interval(), n)
 	if err != nil || len(cs) == 0 {
 		return fmt.Errorf("step: candles %s: %v", sym, err)
 	}
-	e.dropDeriv(sym, cs[0].Time)
 	last := cs[len(cs)-1]
+	e.closed[sym] = last.Time
+	if NeedsDerivatives(e.Strategy) {
+		e.readDeriv(ctx, sym, last.Time) // after the close, before the decision: the snapshot of this candle
+	}
+	e.dropDeriv(sym, cs[0].Time)
 	p := held[sym]
 	holding := p.Qty > 0 // a blocked symbol may come back with nothing held
 	if _, known := e.stops[sym]; known && !holding {
@@ -259,7 +268,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	if holding {
 		in.Position = &strategy.PositionView{Side: side, Qty: p.Qty, AvgPrice: p.AvgPrice, Stop: p.StopPrice, Target: e.targets[sym]}
 	}
-	if needsDeriv(e.Strategy) {
+	if NeedsDerivatives(e.Strategy) {
 		in.Deriv = market.AlignDeriv(cs, e.deriv[sym], e.Cfg.Interval())
 	}
 	for _, aux := range e.Strategy.Inputs() {

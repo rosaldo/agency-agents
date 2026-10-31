@@ -362,7 +362,9 @@ type derivClient interface {
 
 // Snapshot reads symbol's open interest, funding rate and mark price over
 // REST (exchange.DerivativesReader), from the same source as the candles.
-// Time is when the answer arrived: the venue may stamp none.
+// Time is the local clock when the answer arrived: Hyperliquid's REST
+// answers carry no timestamp (the fork's fundingRate and openInterest leave
+// it empty).
 func (a *Adapter) Snapshot(ctx context.Context, env exchange.Env, symbol string) (market.Deriv, error) {
 	if !a.swap() {
 		return market.Deriv{}, fmt.Errorf("ccxt: %s: derivatives data is read on swap markets only", symbol)

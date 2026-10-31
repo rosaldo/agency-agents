@@ -14,47 +14,62 @@ import (
 // Deriv is a derivatives snapshot of a swap market: open interest in the base
 // asset, the funding rate of the current period and the mark price (0 = not
 // reported). Time is when it was read, never before the data it holds; a zero
-// Time marks no snapshot.
+// Time marks no snapshot. Candle is the open time of the closed candle it is
+// bound to: the one the step that read it decided on.
 type Deriv struct {
 	Time                                 time.Time
+	Candle                               time.Time
 	OpenInterest, FundingRate, MarkPrice float64
 }
 
 // Missing reports no snapshot.
 func (d Deriv) Missing() bool { return d.Time.IsZero() }
 
+// InStep reports whether d may belong to the closed candle opened at candle:
+// read after that candle's close and no later than the next close, the
+// window of the step that decides on it. A read at or before the close is
+// stale for the step; one after the next close belongs to a later step.
+func (d Deriv) InStep(candle time.Time, interval time.Duration) bool {
+	end := candle.Add(interval)
+	return d.Time.After(end) && !d.Time.After(end.Add(interval))
+}
+
 // AlignDeriv returns one snapshot per candle, same index: the latest of ds
-// read after the candle opened and at or before its close (Time + interval).
-// A snapshot read after the close never counts for that candle: it would put
-// the future in the decision. ds is oldest first.
+// bound to that candle and read in its step (InStep). The engine reads it
+// after the candle closed and before deciding on it, and the recorder keeps
+// the same binding, so a replay hands the strategy what the live step had.
+// ds is oldest first.
 func AlignDeriv(cs []Candle, ds []Deriv, interval time.Duration) []Deriv {
 	out := make([]Deriv, len(cs))
-	j := 0
+	at := make(map[time.Time]int, len(cs))
 	for i, c := range cs {
-		for ; j < len(ds) && !ds[j].Time.After(c.Time.Add(interval)); j++ {
-			if ds[j].Time.After(c.Time) {
-				out[i] = ds[j]
-			}
+		at[c.Time.UTC()] = i
+	}
+	for _, d := range ds {
+		if i, ok := at[d.Candle.UTC()]; ok && d.InStep(cs[i].Time, interval) {
+			out[i] = d
 		}
 	}
 	return out
 }
 
-// DerivCSVHeader is the first line of the recorder's file.
-const DerivCSVHeader = "time,symbol,open_interest,funding_rate,mark_price"
+// DerivCSVHeader is the first line of the recorder's file: the read time,
+// the symbol and the open time of the candle the snapshot is bound to.
+const DerivCSVHeader = "time,symbol,candle,open_interest,funding_rate,mark_price"
 
 // DerivCSVRow is one line of the recorder's file, newline included.
 func DerivCSVRow(symbol string, d Deriv) string {
 	var b strings.Builder
 	w := csv.NewWriter(&b)
 	g := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
-	_ = w.Write([]string{d.Time.UTC().Format(time.RFC3339Nano), symbol, g(d.OpenInterest), g(d.FundingRate), g(d.MarkPrice)})
+	ts := func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+	_ = w.Write([]string{ts(d.Time), symbol, ts(d.Candle), g(d.OpenInterest), g(d.FundingRate), g(d.MarkPrice)})
 	w.Flush()
 	return b.String()
 }
 
 // ReadDerivCSV parses the recorder's file into each symbol's snapshots,
-// oldest first; times must increase per symbol. An empty file has none.
+// oldest first; read times must increase per symbol. An empty file has none.
 func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 	rows, err := csv.NewReader(r).ReadAll()
 	if err != nil {
@@ -68,21 +83,23 @@ func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 		return nil, fmt.Errorf("derivatives: header must be %q", DerivCSVHeader)
 	}
 	for i, row := range rows[1:] {
-		t, err := time.Parse(time.RFC3339Nano, row[0])
-		if err != nil {
-			return nil, fmt.Errorf("derivatives: line %d: bad time %q", i+2, row[0])
+		var ts [2]time.Time
+		for j, col := range []int{0, 2} {
+			if ts[j], err = time.Parse(time.RFC3339Nano, row[col]); err != nil {
+				return nil, fmt.Errorf("derivatives: line %d: bad time %q", i+2, row[col])
+			}
 		}
 		var v [3]float64
 		for j := range v {
-			if v[j], err = strconv.ParseFloat(row[j+2], 64); err != nil {
-				return nil, fmt.Errorf("derivatives: line %d: bad number %q", i+2, row[j+2])
+			if v[j], err = strconv.ParseFloat(row[j+3], 64); err != nil {
+				return nil, fmt.Errorf("derivatives: line %d: bad number %q", i+2, row[j+3])
 			}
 		}
 		sym := row[1]
-		if prev := out[sym]; len(prev) > 0 && !t.After(prev[len(prev)-1].Time) {
+		if prev := out[sym]; len(prev) > 0 && !ts[0].After(prev[len(prev)-1].Time) {
 			return nil, fmt.Errorf("derivatives: line %d: time not after the previous %s snapshot", i+2, sym)
 		}
-		out[sym] = append(out[sym], Deriv{Time: t, OpenInterest: v[0], FundingRate: v[1], MarkPrice: v[2]})
+		out[sym] = append(out[sym], Deriv{Time: ts[0], Candle: ts[1], OpenInterest: v[0], FundingRate: v[1], MarkPrice: v[2]})
 	}
 	return out, nil
 }

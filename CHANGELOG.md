@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.46.1** (2026-10-31) · `fix` — quant-engine: derivatives snapshot bound to the candle its own step decides on (read after the close, before the decision; next step and at-or-before-close reads rejected; the CSV records read time and candle); a torn deriv CSV refuses only a DerivativesUser, other strategies trade on with a journaled note and the file untouched; the recorder reads after the step's trading actions; read gaps journaled once per failure streak
 - **v1.46.0** (2026-10-31) · `feat` — quant-engine: derivatives port — exchange.DerivativesReader (open interest, funding rate, mark price) with the ccxt REST adapter (fetchOpenInterests/fetchFundingRates) and the fake; strategy.DerivativesUser gets Input.Deriv aligned to the closed candle (latest snapshot read at or before the close, missing marked), refused at load on spot or an adapter without the port; every level records swap snapshots to deriv-<level>.csv in the state dir, seeded on restart and never written twice
 - **v1.45.1** (2026-10-30) · `test` — quant-engine: a None with a Reason while holding journals nothing and the trail still runs
 - **v1.45.0** (2026-10-30) · `feat` — quant-engine: a None returned while flat with a Reason is journaled as a skipped signal; None without Reason writes nothing
