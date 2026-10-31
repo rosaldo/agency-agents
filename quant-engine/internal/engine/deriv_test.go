@@ -293,15 +293,23 @@ func TestSlowRecorderDelaysNoSymbol(t *testing.T) {
 
 // A DerivativesUser's read is bounded by the end of the candle's step
 // window: a hung endpoint leaves the candle missing, journaled, and the step
-// goes on to decide.
+// goes on to decide. The candle is placed so its window ends 2s from now: the
+// step must return then, neither earlier nor a later interval.
 func TestHungSnapshotEndsAtTheStepWindow(t *testing.T) {
 	var last []market.Deriv
 	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision { last = in.Deriv; return strategy.Decision{} }}, true}
-	e, f, _, j := derivEngine(t, s, swapYAML, true)
-	e.Ex = snapshotFunc{f, func(ctx context.Context) (market.Deriv, error) {
+	c, err := config.Parse([]byte(swapYAML), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(2 * time.Second)
+	cs := []market.Candle{{Time: end.Add(-2 * c.Interval()), Open: 100, High: 100, Low: 100, Close: 100, Volume: 10}}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Shorts: true, Candles: map[string][]market.Candle{"AAA": cs}})
+	j := &events{}
+	e := New(c, s, snapshotFunc{f, func(ctx context.Context) (market.Deriv, error) {
 		<-ctx.Done() // hung: answers only when the caller gives up
 		return market.Deriv{}, ctx.Err()
-	}}
+	}}, exchange.Demo, j, func() time.Time { return cs[0].Time })
 	done := make(chan error, 1)
 	go func() { done <- e.Step(context.Background()) }()
 	select {
@@ -309,8 +317,11 @@ func TestHungSnapshotEndsAtTheStepWindow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("the step is still waiting on a hung snapshot after 3s")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the step is still waiting on a hung snapshot 3s past the end of the candle's step window")
+	}
+	if late := time.Since(end); late < -100*time.Millisecond || late > time.Second {
+		t.Fatalf("the step returned %v from the end of the candle's step window, want at it", late)
 	}
 	if len(last) == 0 || !last[len(last)-1].Missing() || countDerivNotes(*j, "deadline") != 1 {
 		t.Fatalf("Input.Deriv %+v, journal %+v; want the candle missing and the deadline noted", last, *j)
