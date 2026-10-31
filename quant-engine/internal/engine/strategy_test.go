@@ -177,3 +177,26 @@ func TestNoneWithAReasonIsJournaled(t *testing.T) {
 		})
 	}
 }
+
+// §6: holding, a None with a Reason is not a dropped signal: nothing is
+// journaled and the trail still runs (the frozen engine never skipped while holding).
+func TestNoneWithAReasonWhileHoldingStillTrails(t *testing.T) {
+	e, f, j, s := trailEngine(t, "", fake.Options{}, strategy.Long, 90, []float64{100, 100}, answers(95))
+	ctx := context.Background()
+	if err := e.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.Decider = func(strategy.Input) strategy.Decision {
+		return strategy.Decision{Reason: "stop -5 is not between 0 and the entry 90"}
+	}
+	f.Advance()
+	if err := e.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := j.rejected(); r != "" {
+		t.Fatalf("a None with a Reason while holding was journaled: %q", r)
+	}
+	if s.calls != 1 || position(t, f).StopPrice != 95 {
+		t.Fatalf("trail calls %d, stop %g; want 1 and 95", s.calls, position(t, f).StopPrice)
+	}
+}
