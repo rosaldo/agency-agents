@@ -138,9 +138,48 @@ type SizeInput struct {
 	MinQty        float64 // market's minimum quantity
 }
 
+// Trade is the risk budget of one position entered in tranches (graduated
+// entry): fixed at the first tranche as equity x max_risk_per_trade_pct,
+// and the fraction of it the tranches used so far. Persisted, so a restart
+// cannot renew it.
+type Trade struct {
+	Budget float64 `json:"budget"`
+	Used   float64 `json:"used"`
+}
+
+// Tranche sizes a tranche of fraction f (0 = 1) of t's budget against
+// in.Stop (for an add, the position's stop); on the first tranche (t zero)
+// the budget is fixed from in.Equity x in.RiskPct, later tranches ignore the
+// current equity. Fractions of one trade summing above 1 are refused. next
+// is t with this tranche counted; qty 0 means do not enter, why says why.
+func (t Trade) Tranche(f float64, in SizeInput) (next Trade, qty float64, why string) {
+	if f == 0 {
+		f = 1
+	}
+	if !(f > 0 && f <= 1) {
+		return t, 0, fmt.Sprintf("fraction %g is not in (0, 1]", f)
+	}
+	if t.Budget <= 0 {
+		t = Trade{Budget: in.Equity * in.RiskPct / 100}
+	}
+	if t.Used+f > 1+1e-9 {
+		return t, 0, fmt.Sprintf("fraction %g on top of %g used is above the whole trade budget", f, t.Used)
+	}
+	f = min(f, 1-t.Used) // a rounding excess never sizes above the budget
+	if qty, why = size(t.Budget*f, in); qty == 0 {
+		return t, 0, why
+	}
+	return Trade{t.Budget, t.Used + f}, qty, why
+}
+
 // Size is the quantity whose loss at the stop stays within the per-trade risk
 // budget, with both fills at their worst: the slippage against each leg, and the commission on each fill's notional. qty 0 means do not enter; why says why.
 func Size(in SizeInput) (qty float64, why string) {
+	return size(in.Equity*in.RiskPct/100, in)
+}
+
+// size is Size for a budget in quote currency.
+func size(budget float64, in SizeInput) (qty float64, why string) {
 	switch {
 	case !in.Short && (in.Stop <= 0 || in.Stop >= in.Entry):
 		return 0, fmt.Sprintf("stop %.8g is not between 0 and the long entry %.8g", in.Stop, in.Entry)
@@ -153,7 +192,7 @@ func Size(in SizeInput) (qty float64, why string) {
 		buy, sell = in.Stop*(1+adj), in.Entry*(1-adj) // short: sell the entry, buy back at the stop
 	}
 	perUnit := buy - sell + (buy+sell)*in.CommissionPct/100
-	raw := in.Equity * in.RiskPct / 100 / perUnit
+	raw := budget / perUnit
 	if in.QtyStep > 0 {
 		raw = math.Floor(raw/in.QtyStep) * in.QtyStep
 	}
