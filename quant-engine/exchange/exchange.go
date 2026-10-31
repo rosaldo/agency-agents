@@ -176,6 +176,13 @@ type FundingPayment struct {
 	Amount float64
 }
 
+// DerivativesReader is implemented by adapters that read a swap market's
+// derivatives data (market.Deriv: open interest, funding rate, mark price).
+// The snapshot's Time is when it was read, never before the data it holds.
+type DerivativesReader interface {
+	Snapshot(ctx context.Context, env Env, symbol string) (market.Deriv, error)
+}
+
 // IDFormatter is implemented by adapters whose venue needs client order IDs
 // in a given shape; the engine hands it a 16-byte digest.
 type IDFormatter interface {

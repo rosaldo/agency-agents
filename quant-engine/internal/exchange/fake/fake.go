@@ -36,6 +36,9 @@ type Options struct {
 	// as applied (0 = not reported). SetLiquidation sets their liquidation price.
 	ReportsLiquidation bool
 	Leverage           float64
+	// Deriv is each symbol's derivatives snapshots, one per candle index:
+	// Snapshot returns the one at the current candle.
+	Deriv map[string][]market.Deriv
 }
 
 type position struct {
@@ -229,6 +232,22 @@ func (f *Fake) Candles(ctx context.Context, env exchange.Env, symbol string, _ t
 	}
 	end := min(f.cursor+1, len(cs))
 	return slices.Clone(cs[max(0, end-n):end]), late
+}
+
+// Snapshot is the derivatives snapshot at the current candle
+// (exchange.DerivativesReader).
+func (f *Fake) Snapshot(ctx context.Context, env exchange.Env, symbol string) (market.Deriv, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	late, err := f.begin(ctx, "Snapshot", env)
+	if err != nil {
+		return market.Deriv{}, err
+	}
+	ds := f.opt.Deriv[symbol]
+	if f.cursor >= len(ds) {
+		return market.Deriv{}, fmt.Errorf("fake: no derivatives snapshot for %s", symbol)
+	}
+	return ds[f.cursor], late
 }
 
 func (f *Fake) Quote(ctx context.Context, env exchange.Env, symbol string) (exchange.Quote, error) {

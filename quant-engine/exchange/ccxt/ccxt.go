@@ -353,6 +353,46 @@ func (a *Adapter) Candles(ctx context.Context, env exchange.Env, symbol string, 
 	})
 }
 
+// derivClient is the part of a CCXT client that reads derivatives data; a
+// client without it gives the adapter no snapshot.
+type derivClient interface {
+	FetchOpenInterests(options ...lib.FetchOpenInterestsOptions) (lib.OpenInterests, error)
+	FetchFundingRates(options ...lib.FetchFundingRatesOptions) (lib.FundingRates, error)
+}
+
+// Snapshot reads symbol's open interest, funding rate and mark price over
+// REST (exchange.DerivativesReader), from the same source as the candles.
+// Time is when the answer arrived: the venue may stamp none.
+func (a *Adapter) Snapshot(ctx context.Context, env exchange.Env, symbol string) (market.Deriv, error) {
+	if !a.swap() {
+		return market.Deriv{}, fmt.Errorf("ccxt: %s: derivatives data is read on swap markets only", symbol)
+	}
+	src := a.c
+	if a.opt.Candles != nil {
+		src = a.opt.Candles
+	}
+	dc, ok := src.(derivClient)
+	if !ok {
+		return market.Deriv{}, errors.New("ccxt: the venue's client reads no open interest and funding rates")
+	}
+	return do(ctx, a, env, func() (market.Deriv, error) {
+		ois, err := dc.FetchOpenInterests(lib.WithFetchOpenInterestsSymbols([]string{symbol}))
+		if err != nil {
+			return market.Deriv{}, err
+		}
+		rates, err := dc.FetchFundingRates(lib.WithFetchFundingRatesSymbols([]string{symbol}))
+		if err != nil {
+			return market.Deriv{}, err
+		}
+		oi, rate := ois.OpenInterests[symbol], rates.FundingRates[symbol]
+		if oi.OpenInterestAmount == nil || rate.FundingRate == nil {
+			return market.Deriv{}, fmt.Errorf("ccxt: %s: the venue reported no open interest or funding rate", symbol)
+		}
+		return market.Deriv{Time: a.opt.Now(), OpenInterest: *oi.OpenInterestAmount * a.contractSize(symbol),
+			FundingRate: *rate.FundingRate, MarkPrice: val(rate.MarkPrice)}, nil
+	})
+}
+
 func val(p *float64) float64 {
 	if p == nil {
 		return 0

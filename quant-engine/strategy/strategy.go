@@ -34,6 +34,10 @@ type Input struct {
 	Candles  []market.Candle            // closed only, oldest first, len <= Warmup()
 	Aux      map[string][]market.Candle // candles of Inputs(), same window
 	Position *PositionView              // nil = flat (the engine's own quantity only)
+	// Deriv is set for a DerivativesUser only: one snapshot per entry of
+	// Candles, same index, read at or before that candle's close; a Missing
+	// one means none was read for that candle.
+	Deriv []market.Deriv
 }
 
 type PositionView struct {
@@ -78,6 +82,13 @@ type NewsPolicy struct {
 	Keywords []string            // no engine default list
 	Aliases  map[string][]string // base asset -> extra names
 	Lookback time.Duration
+}
+
+// DerivativesUser is optional: a strategy whose NeedsDerivatives is true gets
+// Input.Deriv, and is refused at load on a spot market or on an adapter
+// without exchange.DerivativesReader (fail closed).
+type DerivativesUser interface {
+	NeedsDerivatives() bool
 }
 
 // Trailer is optional: a strategy that implements it moves its own stop by

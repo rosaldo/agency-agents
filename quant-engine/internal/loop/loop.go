@@ -123,6 +123,9 @@ var levels = []string{"paper", "testnet", "mainnet"}
 
 func statePath(dir, level string) string { return filepath.Join(dir, "state-"+level+".json") }
 
+// derivPath is the derivatives recorder's file of level in dir.
+func derivPath(dir, level string) string { return filepath.Join(dir, "deriv-"+level+".csv") }
+
 // BookPath is the own-order book of level in dir.
 func BookPath(dir, level string) string { return filepath.Join(dir, "book-"+level+".json") }
 
@@ -314,6 +317,16 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if err := CheckRenamed(dir); err != nil {
 		return "refused: " + err.Error()
 	}
+	if err := engine.CheckDerivatives(cfg, s, ex); err != nil {
+		return "refused: " + err.Error()
+	}
+	var derivSeen map[string][]market.Deriv // swap only: what the recorder already holds
+	if cfg.Market == "swap" {
+		var err error
+		if derivSeen, err = market.ReadDerivCSVFile(derivPath(dir, level)); err != nil {
+			return "refused: " + err.Error() + "; fix or move " + filepath.Base(derivPath(dir, level)) + ", then run again"
+		}
+	}
 	prev, err := LoadState(dir, level)
 	if err == nil && prev.Level != level {
 		err = fmt.Errorf("it holds no %s run", level) // e.g. emptied by hand
@@ -367,6 +380,14 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
+	if derivSeen != nil { // every level records: the venue keeps no open interest history, backtests read this file
+		en.SeedDeriv(derivSeen)
+		en.OnDeriv = func(sym string, d market.Deriv) {
+			if err := appendDeriv(derivPath(dir, level), sym, d); err != nil {
+				record(Error, "derivatives recorder: "+err.Error())
+			}
+		}
+	}
 	beatDone := make(chan struct{})
 	go func() {
 		defer close(beatDone)
@@ -607,4 +628,19 @@ func finalSnapshotTimeout(cfg *config.Config) time.Duration {
 		d = max(d, c.Latency+500*time.Millisecond)
 	}
 	return d
+}
+
+// appendDeriv appends one snapshot to the recorder's file, with the header
+// first when the file is new, in one write.
+func appendDeriv(path, sym string, d market.Deriv) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	row := market.DerivCSVRow(sym, d)
+	if st, err := f.Stat(); err == nil && st.Size() == 0 {
+		row = market.DerivCSVHeader + "\n" + row
+	}
+	_, err = f.WriteString(row)
+	return errors.Join(err, f.Close())
 }

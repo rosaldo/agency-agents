@@ -177,6 +177,9 @@ func (s *Sim) LiquidationDistance(symbol string, side exchange.PositionSide, ent
 	return 0, false
 }
 
+// Data is the adapter whose public data the simulator trades on.
+func (s *Sim) Data() exchange.Exchange { return s.data }
+
 func check(env exchange.Env) error { return exchange.CheckEnv(true, env) }
 
 func (s *Sim) Candles(ctx context.Context, env exchange.Env, symbol string, interval time.Duration, n int) ([]market.Candle, error) {
