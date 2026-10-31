@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.47.0** (2026-10-31) · `feat` — quant-engine: backtest --deriv replays derivatives data, bound to the candles as the loop bound them: the recorder's deriv-<level>.csv or Hyperliquid fundingHistory JSON (funding only, last rate settled by the close); a DerivativesUser without data spanning the candles is refused; the replay seeds the recording and never reads (no wall-clock deadline)
 - **v1.46.3** (2026-10-31) · `test` — quant-engine: TestHungSnapshotEndsAtTheStepWindow places the candle so its step window ends 2s from now and checks the step returns at that instant, not just that some deadline exists
 - **v1.46.2** (2026-10-31) · `fix` — quant-engine: the derivatives recorder reads after every symbol's trading actions, in a second loop of the step, so a slow endpoint delays no symbol; a DerivativesUser's snapshot read is bounded by the end of its candle's step window (market.StepEnd), so a hung endpoint leaves the candle missing and journaled instead of holding the step
 - **v1.46.1** (2026-10-31) · `fix` — quant-engine: derivatives snapshot bound to the candle its own step decides on (read after the close, before the decision; next step and at-or-before-close reads rejected; the CSV records read time and candle); a torn deriv CSV refuses only a DerivativesUser, other strategies trade on with a journaled note and the file untouched; the recorder reads after the step's trading actions; read gaps journaled once per failure streak

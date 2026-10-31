@@ -327,3 +327,21 @@ func TestHungSnapshotEndsAtTheStepWindow(t *testing.T) {
 		t.Fatalf("Input.Deriv %+v, journal %+v; want the candle missing and the deadline noted", last, *j)
 	}
 }
+
+// A backtest replays a recording: the engine reads no snapshot (its deadline
+// is wall-clock time) and hands the strategy the seeded ones.
+func TestReplayReadsNoSnapshot(t *testing.T) {
+	var last []market.Deriv
+	s := derivUser{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision { last = in.Deriv; return strategy.Decision{} }}, true}
+	e, f, cs, _ := derivEngine(t, s, swapYAML, true)
+	ds := derivSeries(cs, e.Cfg.Interval())
+	for i := range ds {
+		ds[i].Candle, ds[i].OpenInterest = cs[i].Time, float64(100+i)
+	}
+	e.SeedDeriv(map[string][]market.Deriv{"AAA": ds})
+	e.DerivReplay = true
+	runAll(t, e, f, len(cs))
+	if n := f.Calls("Snapshot"); n != 0 || len(last) == 0 || last[len(last)-1].OpenInterest != float64(100+len(cs)-1) {
+		t.Fatalf("%d Snapshot calls, last Input.Deriv %+v; want none read and the seeded ones", n, last)
+	}
+}

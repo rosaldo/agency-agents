@@ -60,7 +60,7 @@ func (e *Engine) SeedDeriv(h map[string][]market.Deriv) {
 // newer than the last one is dropped, so a restart never hands the recorder
 // a row twice.
 func (e *Engine) readDeriv(ctx context.Context, sym string, candle time.Time) {
-	if e.Cfg.Market != "swap" || (!NeedsDerivatives(e.Strategy) && e.OnDeriv == nil) {
+	if e.Cfg.Market != "swap" || e.DerivReplay || (!NeedsDerivatives(e.Strategy) && e.OnDeriv == nil) {
 		return
 	}
 	dr, ok := derivReader(e.Ex)

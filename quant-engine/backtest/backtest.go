@@ -29,6 +29,11 @@ type Input struct {
 	Aux             map[string][]market.Candle // one series per Strategy.Inputs(), aligned with Candles
 	Capital         float64
 	QtyStep, MinQty float64
+	// Deriv is the symbol's derivatives snapshots, oldest first, bound to
+	// their candles as the recorder writes them (market.ReadDerivCSV, or
+	// market.ReadFundingHistory). A DerivativesUser is refused unless they
+	// span every candle; any other strategy ignores them.
+	Deriv []market.Deriv
 }
 
 type Trade struct {
@@ -96,6 +101,17 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		SlippagePct: c.SimCosts()[sym].SlippagePct, CommissionPct: c.SimCosts()[sym].CommissionPct, Shorts: c.Market == "swap"})
 	var now time.Time
 	en := engine.New(c, s, ex, exchange.Demo, nil, func() time.Time { return now })
+	if engine.NeedsDerivatives(s) {
+		if err := engine.CheckDerivatives(c, s, ex); err != nil {
+			return Result{}, fmt.Errorf("backtest: %w", err)
+		}
+		if err := derivCovers(in.Candles, in.Deriv, c.Interval(), sym); err != nil {
+			return Result{}, err
+		}
+		// replayed, never read: the binding is the recording's (market.AlignDeriv), with no wall-clock deadline
+		en.SeedDeriv(map[string][]market.Deriv{sym: in.Deriv})
+		en.DerivReplay = true
+	}
 	en.Simulated = true // simulated fills: the active profile sizes as it is (FR-R1)
 	en.News = nil       // past headlines are not replayable: with news_guard required the backtest takes no entry
 
@@ -172,6 +188,35 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 	}
 	res.Summary = summarize(c, in, res, curve)
 	return res, nil
+}
+
+// derivCovers refuses snapshots that do not span the candles, counting only
+// those read in their candle's step: the strategy never runs as if its
+// filter passed, and the venue keeps no open interest history to fill in.
+func derivCovers(cs []market.Candle, ds []market.Deriv, interval time.Duration, sym string) error {
+	var from, to time.Time
+	for _, d := range ds {
+		if !d.InStep(d.Candle, interval) {
+			continue
+		}
+		if from.IsZero() || d.Candle.Before(from) {
+			from = d.Candle
+		}
+		if d.Candle.After(to) {
+			to = d.Candle
+		}
+	}
+	first, last := cs[0].Time, cs[len(cs)-1].Time
+	if !from.IsZero() && !from.After(first) && !to.Before(last) {
+		return nil
+	}
+	have := "has none for " + sym
+	if !from.IsZero() {
+		have = fmt.Sprintf("covers %s to %s for %s", from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339), sym)
+	}
+	return fmt.Errorf("backtest: the strategy needs derivatives data (open interest, funding) for every candle from %s to %s; the data %s. "+
+		"Open interest exists only in our own recording (deriv-<level>.csv): replay candles inside it",
+		first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339), have)
 }
 
 func summarize(c *cfgpkg.Config, in Input, res Result, curve []float64) Summary {

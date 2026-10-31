@@ -1,11 +1,14 @@
 package market
 
 import (
+	"cmp"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +16,8 @@ import (
 
 // Deriv is a derivatives snapshot of a swap market: open interest in the base
 // asset, the funding rate of the current period and the mark price (0 = not
-// reported). Time is when it was read, never before the data it holds; a zero
+// reported; a funding-only history reports no open interest either, so 0
+// there too). Time is when it was read, never before the data it holds; a zero
 // Time marks no snapshot. Candle is the open time of the closed candle it is
 // bound to: the one the step that read it decided on.
 type Deriv struct {
@@ -120,4 +124,55 @@ func ReadDerivCSVFile(path string) (map[string][]Deriv, error) {
 	}
 	defer f.Close()
 	return ReadDerivCSV(f)
+}
+
+// ReadFundingHistory parses Hyperliquid fundingHistory responses, one JSON
+// array per call appended as fetched (a page repeats the previous page's last
+// row, which binds alike), and binds them to cs: each candle gets the
+// last rate settled at or before its close, as a snapshot read just after
+// the close, with no open interest and no mark price. A rate settled after
+// the close waits for the next candle, so none leaks from the future, and a
+// candle closing after the history's last rate gets none: the history must
+// outlast the candles. All rows must be of one coin.
+func ReadFundingHistory(r io.Reader, cs []Candle, interval time.Duration) ([]Deriv, error) {
+	type row struct {
+		Coin        string `json:"coin"`
+		FundingRate string `json:"fundingRate"`
+		Time        int64  `json:"time"`
+	}
+	var rows []row
+	dec := json.NewDecoder(r)
+	for {
+		var page []row
+		if err := dec.Decode(&page); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("funding history: %w", err)
+		}
+		rows = append(rows, page...)
+	}
+	slices.SortStableFunc(rows, func(a, b row) int { return cmp.Compare(a.Time, b.Time) })
+	rates := make([]float64, len(rows))
+	for i, r := range rows {
+		if r.Coin != rows[0].Coin {
+			return nil, fmt.Errorf("funding history: coins %s and %s in one file", rows[0].Coin, r.Coin)
+		}
+		var err error
+		if rates[i], err = strconv.ParseFloat(r.FundingRate, 64); err != nil {
+			return nil, fmt.Errorf("funding history: bad rate %q", r.FundingRate)
+		}
+	}
+	var out []Deriv
+	i := -1 // the last row settled by the candle's close
+	for _, c := range cs {
+		end := c.Time.Add(interval)
+		for i+1 < len(rows) && !time.UnixMilli(rows[i+1].Time).After(end) {
+			i++
+		}
+		if i < 0 || i == len(rows)-1 { // before the first rate, or no later rate shows the history reaches past this close
+			continue
+		}
+		out = append(out, Deriv{Time: end.Add(time.Nanosecond), Candle: c.Time, FundingRate: rates[i]})
+	}
+	return out, nil
 }

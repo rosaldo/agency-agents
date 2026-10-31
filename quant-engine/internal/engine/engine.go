@@ -44,6 +44,9 @@ type Engine struct {
 	// OnDeriv, when set, gets each new derivatives snapshot of a swap symbol
 	// (the loop's recorder); snapshots are then read for every strategy.
 	OnDeriv func(symbol string, d market.Deriv)
+	// DerivReplay says the snapshots were seeded from a recording (backtest):
+	// none is read, since a read's deadline is wall-clock time.
+	DerivReplay bool
 
 	deriv      map[string][]market.Deriv // snapshots read, oldest first; the last one always kept
 	derivDown  map[string]bool           // symbol -> snapshot reads failing (one journal note per streak)

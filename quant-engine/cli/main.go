@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,7 +54,8 @@ const usage = `usage: NAME <command> [--config NAME.yml] [--dir .NAME]
   status   one JSON line: alive, mode, P&L, limits, positions with their stops, why it stopped
   stop     end the loop; positions stay protected by their exchange stops
            --flatten also closes every position at market (stop cancelled first)
-  backtest --candles <csv> --capital <n> [--aux <symbol>=<csv> ...] [--qty-step <n>] [--min-qty <n>] [--out <dir>]`
+  backtest --candles <csv> --capital <n> [--aux <symbol>=<csv> ...] [--qty-step <n>] [--min-qty <n>] [--out <dir>]
+           [--deriv <csv|json>]  derivatives data: the recorder's deriv-<level>.csv, or Hyperliquid fundingHistory JSON`
 
 // Main runs the command line and exits 1 on error.
 func Main(a App) {
@@ -93,6 +95,7 @@ func (a App) Run(args []string, stdout io.Writer) error {
 		aux[sym] = file
 		return nil
 	})
+	deriv := fs.String("deriv", "", "derivatives data of the config's symbol: the recorder's deriv-<level>.csv, or Hyperliquid fundingHistory JSON (funding only)")
 	capital := fs.Float64("capital", 0, "starting capital in quote currency")
 	qtyStep := fs.Float64("qty-step", 0, "quantity increment (0 = fractional)")
 	minQty := fs.Float64("min-qty", 0, "minimum order quantity")
@@ -142,7 +145,7 @@ func (a App) Run(args []string, stdout io.Writer) error {
 		_, err := fmt.Fprintln(stdout, `{"config":"ok"}`)
 		return err
 	case "backtest":
-		return a.runBacktest(*cfgPath, *candles, aux, *capital, *qtyStep, *minQty, *out, stdout)
+		return a.runBacktest(cfg, *cfgPath, *candles, *deriv, aux, *capital, *qtyStep, *minQty, *out, stdout)
 	case "start":
 		return a.start(cfg, *dir, args[1:], fk, stdout)
 	case "run": // the background loop that start launches
@@ -152,7 +155,7 @@ func (a App) Run(args []string, stdout io.Writer) error {
 	}
 }
 
-func (a App) runBacktest(cfgPath, candles string, aux map[string]string, capital, qtyStep, minQty float64, out string, stdout io.Writer) error {
+func (a App) runBacktest(cfg *config.Config, cfgPath, candles, deriv string, aux map[string]string, capital, qtyStep, minQty float64, out string, stdout io.Writer) error {
 	if candles == "" || capital <= 0 {
 		return errors.New("backtest needs --candles <csv> and --capital > 0")
 	}
@@ -172,6 +175,11 @@ func (a App) runBacktest(cfgPath, candles string, aux map[string]string, capital
 			return err
 		}
 	}
+	if deriv != "" {
+		if in.Deriv, err = readDeriv(deriv, cfg, in.Candles); err != nil {
+			return err
+		}
+	}
 	res, err := backtest.Run(context.Background(), a.Strategy, yml, in)
 	if err != nil {
 		return err
@@ -185,6 +193,23 @@ func (a App) runBacktest(cfgPath, candles string, aux map[string]string, capital
 	}
 	_, err = fmt.Fprintf(stdout, "%s\n", b)
 	return err
+}
+
+// readDeriv reads the config symbol's snapshots from the recorder's file or,
+// when it holds JSON, from Hyperliquid fundingHistory pages.
+func readDeriv(path string, cfg *config.Config, cs []market.Candle) ([]market.Deriv, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("derivatives: %w", err)
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(b), []byte("[")) {
+		return market.ReadFundingHistory(bytes.NewReader(b), cs, cfg.Interval())
+	}
+	all, err := market.ReadDerivCSV(bytes.NewReader(b))
+	if err != nil || len(cfg.Symbols) == 0 {
+		return nil, err
+	}
+	return all[cfg.Symbols[0]], nil
 }
 
 type fakeFlags struct {

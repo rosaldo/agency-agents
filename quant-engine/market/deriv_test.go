@@ -1,6 +1,7 @@
 package market
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -74,4 +75,41 @@ func TestDerivCSVRoundTrip(t *testing.T) {
 
 func same(a, b Deriv) bool {
 	return a.Time.Equal(b.Time) && a.Candle.Equal(b.Candle) && a.OpenInterest == b.OpenInterest && a.FundingRate == b.FundingRate && a.MarkPrice == b.MarkPrice
+}
+
+// Hyperliquid fundingHistory pages, appended as fetched (each page repeats
+// the previous one's last row): every candle gets the last rate settled at
+// or before its close, as a snapshot read in its own step, with no open
+// interest. A rate settled just after the close waits for the next candle,
+// and a candle the history does not outlast gets none.
+func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
+	iv := time.Hour
+	cs := []Candle{{Time: t0}, {Time: t0.Add(iv)}, {Time: t0.Add(2 * iv)}, {Time: t0.Add(3 * iv)}}
+	row := func(h int, rate string) string {
+		return `{"coin":"BTC","fundingRate":"` + rate + `","premium":"0","time":` + strconv.FormatInt(t0.Add(time.Duration(h)*iv+21*time.Millisecond).UnixMilli(), 10) + `}`
+	}
+	pages := "[" + row(0, "0.0001") + "," + row(1, "0.0002") + "]\n[" + row(1, "0.0002") + "," + row(2, "0.0003") + "," + row(3, "-0.0004") + "]"
+	got, err := ReadFundingHistory(strings.NewReader(pages), cs, iv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	al := AlignDeriv(cs, got, iv)
+	for i, want := range []float64{0.0001, 0.0002, 0.0003} {
+		if d := al[i]; d.Missing() || d.FundingRate != want || d.OpenInterest != 0 || d.MarkPrice != 0 {
+			t.Fatalf("candle %d: %+v, want funding %v and no open interest", i, d, want)
+		}
+	}
+	if !al[3].Missing() || len(got) != 3 {
+		t.Fatalf("got %+v; the last candle closes after the history's last rate and must have none", got)
+	}
+
+	for name, in := range map[string]string{
+		"two coins": "[" + row(0, "0.0001") + "," + strings.Replace(row(1, "0.0002"), "BTC", "ETH", 1) + "]",
+		"bad rate":  "[" + row(0, "x") + "]",
+		"not json":  "time,symbol",
+	} {
+		if _, err := ReadFundingHistory(strings.NewReader(in), cs, iv); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
 }

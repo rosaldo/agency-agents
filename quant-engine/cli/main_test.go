@@ -3,13 +3,17 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	ccxtx "github.com/rosaldo/agency-agents/quant-engine/exchange/ccxt"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
+	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
 )
@@ -290,5 +294,48 @@ func TestCredentialPickedTestnetChecksRealFills(t *testing.T) {
 	t.Setenv("TEST_STRATEGY_HYPERLIQUID_TESTNET_PRIVATE_KEY", "test-hunter2")
 	if _, _, err := app.newExchange(c, fakeFlags{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "liquidity_class is required with real fills") || got.cred != nil {
 		t.Fatalf("err %v, dialed %v; want the class required before any dial", err, got.cred != nil)
+	}
+}
+
+type derivApp struct{ *scripted.Strategy }
+
+func (derivApp) Name() string           { return "test-strategy" }
+func (derivApp) NeedsDerivatives() bool { return true }
+
+// backtest --deriv takes the recorder's file or Hyperliquid fundingHistory
+// JSON; a strategy that needs the data is refused without it.
+func TestBacktestDeriv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test-strategy.yml")
+	if err := os.WriteFile(path, []byte(cfg+"market: swap\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 21_000_000, time.UTC) // the venue stamps funding just after the hour
+	var funding, rec []string
+	for h := range 7 {
+		at := t0.Add(time.Duration(h) * time.Hour)
+		funding = append(funding, fmt.Sprintf(`{"coin":"AAA","fundingRate":"0.0001","premium":"0","time":%d}`, at.UnixMilli()))
+		if h < 6 {
+			rec = append(rec, strings.TrimSuffix(market.DerivCSVRow("AAA", market.Deriv{Time: at.Add(time.Hour), Candle: at.Truncate(time.Hour), OpenInterest: 5}), "\n"))
+		}
+	}
+	files := map[string]string{
+		"funding.json": "[" + strings.Join(funding, ",") + "]",
+		"deriv.csv":    market.DerivCSVHeader + "\n" + strings.Join(rec, "\n") + "\n",
+	}
+	app := App{Strategy: derivApp{&scripted.Strategy{Decider: func(strategy.Input) strategy.Decision { return strategy.Decision{} }}}}
+	args := []string{"backtest", "--config", path, "--candles", "../testdata/backtest_one_trade.csv", "--capital", "10000", "--out", filepath.Join(dir, "bt")}
+	for name, body := range files {
+		file := filepath.Join(dir, name)
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+		if err := app.Run(append(args, "--deriv", file), &stdout); err != nil || !strings.Contains(stdout.String(), `"trades":0`) {
+			t.Fatalf("%s: %v, stdout %q", name, err, stdout.String())
+		}
+	}
+	if err := app.Run(args, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "derivatives data") {
+		t.Fatalf("without --deriv: %v, want a refusal", err)
 	}
 }
