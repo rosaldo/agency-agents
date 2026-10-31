@@ -390,7 +390,7 @@ func (a *Adapter) Snapshot(ctx context.Context, env exchange.Env, symbol string)
 		if oi.OpenInterestAmount == nil || rate.FundingRate == nil {
 			return market.Deriv{}, fmt.Errorf("ccxt: %s: the venue reported no open interest or funding rate", symbol)
 		}
-		return market.Deriv{Time: a.opt.Now(), OpenInterest: *oi.OpenInterestAmount * a.contractSize(symbol),
+		return market.Deriv{Time: a.opt.Now(), OpenInterest: *oi.OpenInterestAmount * a.contractSize(symbol), HasOpenInterest: true,
 			FundingRate: *rate.FundingRate, MarkPrice: val(rate.MarkPrice)}, nil
 	})
 }

@@ -37,7 +37,7 @@ const swapYAML = scriptedYAML + "market: swap\nperp: {allow_short: true}\n"
 func derivSeries(cs []market.Candle, interval time.Duration) []market.Deriv {
 	ds := make([]market.Deriv, len(cs))
 	for i, c := range cs {
-		ds[i] = market.Deriv{Time: c.Time.Add(interval + 5*time.Second), OpenInterest: float64(i + 1), FundingRate: 0.0001, MarkPrice: c.Close}
+		ds[i] = market.Deriv{Time: c.Time.Add(interval + 5*time.Second), OpenInterest: float64(i + 1), HasOpenInterest: true, FundingRate: 0.0001, MarkPrice: c.Close}
 	}
 	return ds
 }

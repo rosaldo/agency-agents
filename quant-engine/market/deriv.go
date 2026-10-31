@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,14 +17,17 @@ import (
 
 // Deriv is a derivatives snapshot of a swap market: open interest in the base
 // asset, the funding rate of the current period and the mark price (0 = not
-// reported; a funding-only history reports no open interest either, so 0
-// there too). Time is when it was read, never before the data it holds; a zero
+// reported). HasOpenInterest says the venue reported the open interest: a
+// funding-only history has none, and OpenInterest is then 0, not a reading. A
+// rule on open interest must treat a snapshot without it as not passing.
+// Time is when it was read, never before the data it holds; a zero
 // Time marks no snapshot. Candle is the open time of the closed candle it is
 // bound to: the one the step that read it decided on.
 type Deriv struct {
 	Time                                 time.Time
 	Candle                               time.Time
 	OpenInterest, FundingRate, MarkPrice float64
+	HasOpenInterest                      bool
 }
 
 // Missing reports no snapshot.
@@ -62,7 +66,8 @@ func AlignDeriv(cs []Candle, ds []Deriv, interval time.Duration) []Deriv {
 }
 
 // DerivCSVHeader is the first line of the recorder's file: the read time,
-// the symbol and the open time of the candle the snapshot is bound to.
+// the symbol and the open time of the candle the snapshot is bound to. An
+// empty open_interest is one the venue did not report.
 const DerivCSVHeader = "time,symbol,candle,open_interest,funding_rate,mark_price"
 
 // DerivCSVRow is one line of the recorder's file, newline included.
@@ -71,7 +76,11 @@ func DerivCSVRow(symbol string, d Deriv) string {
 	w := csv.NewWriter(&b)
 	g := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
 	ts := func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
-	_ = w.Write([]string{ts(d.Time), symbol, ts(d.Candle), g(d.OpenInterest), g(d.FundingRate), g(d.MarkPrice)})
+	oi := ""
+	if d.HasOpenInterest {
+		oi = g(d.OpenInterest)
+	}
+	_ = w.Write([]string{ts(d.Time), symbol, ts(d.Candle), oi, g(d.FundingRate), g(d.MarkPrice)})
 	w.Flush()
 	return b.String()
 }
@@ -98,7 +107,11 @@ func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 			}
 		}
 		var v [3]float64
+		hasOI := row[3] != ""
 		for j := range v {
+			if j == 0 && !hasOI {
+				continue
+			}
 			if v[j], err = strconv.ParseFloat(row[j+3], 64); err != nil {
 				return nil, fmt.Errorf("derivatives: line %d: bad number %q", i+2, row[j+3])
 			}
@@ -107,7 +120,7 @@ func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 		if prev := out[sym]; len(prev) > 0 && !ts[0].After(prev[len(prev)-1].Time) {
 			return nil, fmt.Errorf("derivatives: line %d: time not after the previous %s snapshot", i+2, sym)
 		}
-		out[sym] = append(out[sym], Deriv{Time: ts[0], Candle: ts[1], OpenInterest: v[0], FundingRate: v[1], MarkPrice: v[2]})
+		out[sym] = append(out[sym], Deriv{Time: ts[0], Candle: ts[1], OpenInterest: v[0], HasOpenInterest: hasOI, FundingRate: v[1], MarkPrice: v[2]})
 	}
 	return out, nil
 }
@@ -130,11 +143,11 @@ func ReadDerivCSVFile(path string) (map[string][]Deriv, error) {
 // array per call appended as fetched (a page repeats the previous page's last
 // row, which binds alike), and binds them to cs: each candle gets the
 // last rate settled at or before its close, as a snapshot read just after
-// the close, with no open interest and no mark price. A rate settled after
-// the close waits for the next candle, so none leaks from the future, and a
-// candle closing after the history's last rate gets none: the history must
-// outlast the candles. All rows must be of one coin.
-func ReadFundingHistory(r io.Reader, cs []Candle, interval time.Duration) ([]Deriv, error) {
+// the close, with no open interest (HasOpenInterest false) and no mark price.
+// A rate settled after the close waits for the next candle, so none leaks from
+// the future, and a candle closing after the history's last rate gets none:
+// the history must outlast the candles. Every row must be of symbol's coin.
+func ReadFundingHistory(r io.Reader, symbol string, cs []Candle, interval time.Duration) ([]Deriv, error) {
 	type row struct {
 		Coin        string `json:"coin"`
 		FundingRate string `json:"fundingRate"`
@@ -152,10 +165,11 @@ func ReadFundingHistory(r io.Reader, cs []Candle, interval time.Duration) ([]Der
 		rows = append(rows, page...)
 	}
 	slices.SortStableFunc(rows, func(a, b row) int { return cmp.Compare(a.Time, b.Time) })
+	coin := hyperliquidCoin(symbol)
 	rates := make([]float64, len(rows))
 	for i, r := range rows {
-		if r.Coin != rows[0].Coin {
-			return nil, fmt.Errorf("funding history: coins %s and %s in one file", rows[0].Coin, r.Coin)
+		if !strings.EqualFold(r.Coin, coin) {
+			return nil, fmt.Errorf("funding history: a row of coin %s; %s is coin %s", r.Coin, symbol, coin)
 		}
 		var err error
 		if rates[i], err = strconv.ParseFloat(r.FundingRate, 64); err != nil {
@@ -175,4 +189,18 @@ func ReadFundingHistory(r io.Reader, cs []Candle, interval time.Duration) ([]Der
 		out = append(out, Deriv{Time: end.Add(time.Nanosecond), Candle: c.Time, FundingRate: rates[i]})
 	}
 	return out, nil
+}
+
+// hip3Base is a HIP-3 symbol's base as the ccxt fork builds it: the dex
+// upper-cased, a dash, the ticker (xyz:GOOGL -> XYZ-GOOGL/USDC:USDC).
+var hip3Base = regexp.MustCompile(`^([A-Z0-9]+)-([A-Z0-9]+)$`)
+
+// hyperliquidCoin is the venue's coin of a symbol: the base, or dex:ticker on
+// a HIP-3 market.
+func hyperliquidCoin(symbol string) string {
+	base, _, _ := strings.Cut(symbol, "/")
+	if m := hip3Base.FindStringSubmatch(base); m != nil {
+		return strings.ToLower(m[1]) + ":" + m[2]
+	}
+	return base
 }

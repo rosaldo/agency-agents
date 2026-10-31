@@ -17,7 +17,7 @@ func TestAlignDerivTakesTheSnapshotReadInTheCandlesStep(t *testing.T) {
 	iv := time.Minute
 	cs := []Candle{{Time: t0}, {Time: t0.Add(iv)}, {Time: t0.Add(2 * iv)}, {Time: t0.Add(3 * iv)}, {Time: t0.Add(4 * iv)}, {Time: t0.Add(5 * iv)}}
 	snap := func(candle int, at time.Duration, oi float64) Deriv {
-		return Deriv{Time: cs[candle].Time.Add(at), Candle: cs[candle].Time, OpenInterest: oi}
+		return Deriv{Time: cs[candle].Time.Add(at), Candle: cs[candle].Time, OpenInterest: oi, HasOpenInterest: true}
 	}
 	ds := []Deriv{
 		snap(0, iv+5*time.Second, 1),   // candle 0: read 5s after its close
@@ -41,14 +41,18 @@ func TestAlignDerivTakesTheSnapshotReadInTheCandlesStep(t *testing.T) {
 }
 
 func TestDerivCSVRoundTrip(t *testing.T) {
-	a := Deriv{Time: t0.Add(time.Minute + 1500*time.Millisecond), Candle: t0, OpenInterest: 12345.5, FundingRate: -0.0000125, MarkPrice: 101.25}
-	b := Deriv{Time: t0.Add(2*time.Minute + time.Second), Candle: t0.Add(time.Minute), OpenInterest: 12000, FundingRate: 0.0001}
-	file := DerivCSVHeader + "\n" + DerivCSVRow("BTC/USDC:USDC", a) + DerivCSVRow("XYZ-XYZ100/USDC:USDC", b) + DerivCSVRow("BTC/USDC:USDC", b)
+	a := Deriv{Time: t0.Add(time.Minute + 1500*time.Millisecond), Candle: t0, OpenInterest: 12345.5, HasOpenInterest: true, FundingRate: -0.0000125, MarkPrice: 101.25}
+	b := Deriv{Time: t0.Add(2*time.Minute + time.Second), Candle: t0.Add(time.Minute), OpenInterest: 12000, HasOpenInterest: true, FundingRate: 0.0001}
+	c := Deriv{Time: t0.Add(3*time.Minute + time.Second), Candle: t0.Add(2 * time.Minute), FundingRate: 0.0002} // open interest not reported
+	if row := DerivCSVRow("BTC/USDC:USDC", c); !strings.Contains(row, ",,0.0002,") {
+		t.Fatalf("row without open interest = %q, want the field empty", row)
+	}
+	file := DerivCSVHeader + "\n" + DerivCSVRow("BTC/USDC:USDC", a) + DerivCSVRow("XYZ-XYZ100/USDC:USDC", b) + DerivCSVRow("BTC/USDC:USDC", b) + DerivCSVRow("BTC/USDC:USDC", c)
 	got, err := ReadDerivCSV(strings.NewReader(file))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bt := got["BTC/USDC:USDC"]; len(bt) != 2 || !same(bt[0], a) || !same(bt[1], b) {
+	if bt := got["BTC/USDC:USDC"]; len(bt) != 3 || !same(bt[0], a) || !same(bt[1], b) || !same(bt[2], c) {
 		t.Fatalf("BTC = %+v", bt)
 	}
 	if x := got["XYZ-XYZ100/USDC:USDC"]; len(x) != 1 || !same(x[0], b) {
@@ -74,13 +78,13 @@ func TestDerivCSVRoundTrip(t *testing.T) {
 }
 
 func same(a, b Deriv) bool {
-	return a.Time.Equal(b.Time) && a.Candle.Equal(b.Candle) && a.OpenInterest == b.OpenInterest && a.FundingRate == b.FundingRate && a.MarkPrice == b.MarkPrice
+	return a.Time.Equal(b.Time) && a.Candle.Equal(b.Candle) && a.OpenInterest == b.OpenInterest && a.HasOpenInterest == b.HasOpenInterest && a.FundingRate == b.FundingRate && a.MarkPrice == b.MarkPrice
 }
 
 // Hyperliquid fundingHistory pages, appended as fetched (each page repeats
 // the previous one's last row): every candle gets the last rate settled at
 // or before its close, as a snapshot read in its own step, with no open
-// interest. A rate settled just after the close waits for the next candle,
+// interest reported. Pages may come in any order. A rate settled just after the close waits for the next candle,
 // and a candle the history does not outlast gets none.
 func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
 	iv := time.Hour
@@ -89,13 +93,17 @@ func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
 		return `{"coin":"BTC","fundingRate":"` + rate + `","premium":"0","time":` + strconv.FormatInt(t0.Add(time.Duration(h)*iv+21*time.Millisecond).UnixMilli(), 10) + `}`
 	}
 	pages := "[" + row(0, "0.0001") + "," + row(1, "0.0002") + "]\n[" + row(1, "0.0002") + "," + row(2, "0.0003") + "," + row(3, "-0.0004") + "]"
-	got, err := ReadFundingHistory(strings.NewReader(pages), cs, iv)
+	got, err := ReadFundingHistory(strings.NewReader(pages), "BTC/USDC:USDC", cs, iv)
 	if err != nil {
 		t.Fatal(err)
 	}
+	reversed := "[" + row(3, "-0.0004") + "," + row(2, "0.0003") + "]\n[" + row(1, "0.0002") + "," + row(0, "0.0001") + "]"
+	if again, err := ReadFundingHistory(strings.NewReader(reversed), "BTC/USDC:USDC", cs, iv); err != nil || len(again) != len(got) || !same(again[0], got[0]) || !same(again[2], got[2]) {
+		t.Fatalf("pages out of order = %+v, %v; want %+v", again, err, got)
+	}
 	al := AlignDeriv(cs, got, iv)
 	for i, want := range []float64{0.0001, 0.0002, 0.0003} {
-		if d := al[i]; d.Missing() || d.FundingRate != want || d.OpenInterest != 0 || d.MarkPrice != 0 {
+		if d := al[i]; d.Missing() || d.FundingRate != want || d.HasOpenInterest || d.MarkPrice != 0 {
 			t.Fatalf("candle %d: %+v, want funding %v and no open interest", i, d, want)
 		}
 	}
@@ -104,12 +112,18 @@ func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
 	}
 
 	for name, in := range map[string]string{
-		"two coins": "[" + row(0, "0.0001") + "," + strings.Replace(row(1, "0.0002"), "BTC", "ETH", 1) + "]",
-		"bad rate":  "[" + row(0, "x") + "]",
-		"not json":  "time,symbol",
+		"two coins":  "[" + row(0, "0.0001") + "," + strings.Replace(row(1, "0.0002"), "BTC", "ETH", 1) + "]",
+		"bad rate":   "[" + row(0, "x") + "]",
+		"not json":   "time,symbol",
+		"other coin": "[" + strings.ReplaceAll(row(0, "0.0001"), "BTC", "ETH") + "]",
 	} {
-		if _, err := ReadFundingHistory(strings.NewReader(in), cs, iv); err == nil {
+		if _, err := ReadFundingHistory(strings.NewReader(in), "BTC/USDC:USDC", cs, iv); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// the coin of a symbol: a HIP-3 market's dex lower-cased, a colon, the ticker
+	hip3 := strings.ReplaceAll(row(0, "0.0001"), "BTC", "xyz:XYZ100")
+	if _, err := ReadFundingHistory(strings.NewReader("["+hip3+"]"), "XYZ-XYZ100/USDC:USDC", cs, iv); err != nil {
+		t.Fatalf("HIP-3 coin refused: %v", err)
 	}
 }

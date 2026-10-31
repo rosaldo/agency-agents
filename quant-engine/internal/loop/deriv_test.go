@@ -46,7 +46,7 @@ func derivRun(t *testing.T, s strategy.Strategy, yml, dir string, wrap func(*fak
 	}
 	ds := make([]market.Deriv, len(cs))
 	for i, k := range cs {
-		ds[i] = market.Deriv{Time: k.Time.Add(time.Hour + 5*time.Second), OpenInterest: float64(1000 + i), FundingRate: -0.00001, MarkPrice: k.Close}
+		ds[i] = market.Deriv{Time: k.Time.Add(time.Hour + 5*time.Second), OpenInterest: float64(1000 + i), HasOpenInterest: true, FundingRate: -0.00001, MarkPrice: k.Close}
 	}
 	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Shorts: true,
 		Candles: map[string][]market.Candle{"AAA": cs}, Deriv: map[string][]market.Deriv{"AAA": ds}})

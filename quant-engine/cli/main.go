@@ -203,7 +203,10 @@ func readDeriv(path string, cfg *config.Config, cs []market.Candle) ([]market.De
 		return nil, fmt.Errorf("derivatives: %w", err)
 	}
 	if bytes.HasPrefix(bytes.TrimSpace(b), []byte("[")) {
-		return market.ReadFundingHistory(bytes.NewReader(b), cs, cfg.Interval())
+		if len(cfg.Symbols) == 0 {
+			return nil, nil
+		}
+		return market.ReadFundingHistory(bytes.NewReader(b), cfg.Symbols[0], cs, cfg.Interval())
 	}
 	all, err := market.ReadDerivCSV(bytes.NewReader(b))
 	if err != nil || len(cfg.Symbols) == 0 {

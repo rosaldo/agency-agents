@@ -64,7 +64,10 @@ type Summary struct {
 	StartEquity         float64 `json:"start_equity"`
 	EndEquity           float64 `json:"end_equity"`
 	Halt                string  `json:"halt,omitempty"`
-	Status              string  `json:"status"`
+	// CandlesWithoutDerivatives counts the candles a DerivativesUser got no
+	// snapshot for (recorded gaps); nil for any other strategy.
+	CandlesWithoutDerivatives *int   `json:"candles_without_derivatives,omitempty"`
+	Status                    string `json:"status"`
 }
 
 type Result struct {
@@ -187,6 +190,15 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		closeTrade(in.Candles[len(curve)-1].Close, "open_at_end")
 	}
 	res.Summary = summarize(c, in, res, curve)
+	if engine.NeedsDerivatives(s) {
+		gaps := 0
+		for _, d := range market.AlignDeriv(in.Candles[:len(curve)], in.Deriv, c.Interval()) {
+			if d.Missing() {
+				gaps++
+			}
+		}
+		res.Summary.CandlesWithoutDerivatives = &gaps
+	}
 	return res, nil
 }
 

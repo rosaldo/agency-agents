@@ -316,7 +316,7 @@ func TestBacktestDeriv(t *testing.T) {
 		at := t0.Add(time.Duration(h) * time.Hour)
 		funding = append(funding, fmt.Sprintf(`{"coin":"AAA","fundingRate":"0.0001","premium":"0","time":%d}`, at.UnixMilli()))
 		if h < 6 {
-			rec = append(rec, strings.TrimSuffix(market.DerivCSVRow("AAA", market.Deriv{Time: at.Add(time.Hour), Candle: at.Truncate(time.Hour), OpenInterest: 5}), "\n"))
+			rec = append(rec, strings.TrimSuffix(market.DerivCSVRow("AAA", market.Deriv{Time: at.Add(time.Hour), Candle: at.Truncate(time.Hour), OpenInterest: 5, HasOpenInterest: true}), "\n"))
 		}
 	}
 	files := map[string]string{
@@ -337,5 +337,12 @@ func TestBacktestDeriv(t *testing.T) {
 	}
 	if err := app.Run(args, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "derivatives data") {
 		t.Fatalf("without --deriv: %v, want a refusal", err)
+	}
+	other := filepath.Join(dir, "other.json")
+	if err := os.WriteFile(other, []byte(strings.ReplaceAll(files["funding.json"], `"AAA"`, `"ZZZ"`)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run(append(args, "--deriv", other), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "ZZZ") {
+		t.Fatalf("funding of another coin: %v, want a refusal naming it", err)
 	}
 }

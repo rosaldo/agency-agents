@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.47.1** (2026-10-31) · `fix` — quant-engine: derivatives snapshots say whether the venue reported open interest (market.Deriv.HasOpenInterest; the recorder writes an empty open_interest without it); funding history never has it, so an open interest rule cannot pass on funding alone; fundingHistory rows must be of the yml symbol's coin; README states live funding vs history is not verified
 - **v1.47.0** (2026-10-31) · `feat` — quant-engine: backtest --deriv replays derivatives data, bound to the candles as the loop bound them: the recorder's deriv-<level>.csv or Hyperliquid fundingHistory JSON (funding only, last rate settled by the close); a DerivativesUser without data spanning the candles is refused; the replay seeds the recording and never reads (no wall-clock deadline)
 - **v1.46.3** (2026-10-31) · `test` — quant-engine: TestHungSnapshotEndsAtTheStepWindow places the candle so its step window ends 2s from now and checks the step returns at that instant, not just that some deadline exists
 - **v1.46.2** (2026-10-31) · `fix` — quant-engine: the derivatives recorder reads after every symbol's trading actions, in a second loop of the step, so a slow endpoint delays no symbol; a DerivativesUser's snapshot read is bounded by the end of its candle's step window (market.StepEnd), so a hung endpoint leaves the candle missing and journaled instead of holding the step
