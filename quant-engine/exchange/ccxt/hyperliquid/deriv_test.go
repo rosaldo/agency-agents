@@ -27,7 +27,7 @@ func TestSnapshotThroughTheFork(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", sym, err)
 		}
-		if got := [3]float64{d.OpenInterest, d.FundingRate, d.MarkPrice}; got != want || d.Missing() {
+		if got := [3]float64{d.OpenInterest, d.FundingRate, d.MarkPrice}; got != want || d.Missing() || !d.HasOpenInterest {
 			t.Fatalf("%s: snapshot %+v, want %v", sym, d, want)
 		}
 	}

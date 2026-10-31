@@ -53,7 +53,7 @@ func TestSnapshotReadsOpenInterestAndFunding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.OpenInterest != 2500 || d.FundingRate != -0.0000125 || d.MarkPrice != 101.5 || !d.Time.Equal(now) {
+	if !d.HasOpenInterest || d.OpenInterest != 2500 || d.FundingRate != -0.0000125 || d.MarkPrice != 101.5 || !d.Time.Equal(now) {
 		t.Fatalf("snapshot = %+v", d)
 	}
 	for _, syms := range c.asked {
@@ -71,7 +71,7 @@ func TestSnapshotReadsOpenInterestAndFunding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d, err := big.Snapshot(context.Background(), exchange.Real, "BIG/USDC:USDC"); err != nil || d.OpenInterest != 3 || d.MarkPrice != 0 {
+	if d, err := big.Snapshot(context.Background(), exchange.Real, "BIG/USDC:USDC"); err != nil || !d.HasOpenInterest || d.OpenInterest != 3 || d.MarkPrice != 0 {
 		t.Fatalf("contract size 0.01: snapshot = %+v, %v; want 3 base units, mark 0 (not reported)", d, err)
 	}
 	if _, err := a.Snapshot(context.Background(), exchange.Real, "AAA/USDC:USDC"); err == nil {
