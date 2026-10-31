@@ -159,7 +159,7 @@ func TestReconcileRetriesTheStaleStops(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e.Restore(nil, nil, map[string]string{"AAA": "old-stop"})
+	e.Restore(nil, nil, map[string]string{"AAA": "old-stop"}, nil)
 	if err := e.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}

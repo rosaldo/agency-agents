@@ -71,8 +71,7 @@ func (e *Engine) trail(ctx context.Context, p exchange.Position, in strategy.Inp
 	}
 	switch {
 	case errors.Is(err, exec.ErrStopFilled):
-		delete(e.targets, p.Symbol)
-		delete(e.stops, p.Symbol)
+		e.forget(p.Symbol)
 		return nil
 	case err != nil:
 		return err // the old stop stands; the next step tries again

@@ -100,23 +100,24 @@ type Limits struct {
 // State is <state dir>/state-<level>.json: paper, testnet and mainnet are
 // different accounts, so each level keeps its own (the book is per level too).
 type State struct {
-	Running    bool                `json:"running"`
-	Pid        int                 `json:"pid"`
-	Mode       string              `json:"mode"`
-	Level      string              `json:"level"` // paper | testnet | mainnet; a state of another level is refused
-	ParamsHash string              `json:"params_hash"`
-	Heartbeat  time.Time           `json:"heartbeat"`
-	Equity     float64             `json:"equity"`
-	Breaker    risk.Snapshot       `json:"breaker"` // drawdown bases and halt, restored on start
-	Limits     Limits              `json:"limits"`
-	Positions  []exchange.Position `json:"positions"`
-	Targets    map[string]float64  `json:"targets"`
-	StaleStops map[string]string   `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
-	Funding    string              `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
-	PaperSim   string              `json:"sim,omitempty"`         // the simulator's profile and costs
-	Sizing     string              `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
-	LastEvent  string              `json:"last_event"`
-	StopReason string              `json:"stop_reason"`
+	Running    bool                  `json:"running"`
+	Pid        int                   `json:"pid"`
+	Mode       string                `json:"mode"`
+	Level      string                `json:"level"` // paper | testnet | mainnet; a state of another level is refused
+	ParamsHash string                `json:"params_hash"`
+	Heartbeat  time.Time             `json:"heartbeat"`
+	Equity     float64               `json:"equity"`
+	Breaker    risk.Snapshot         `json:"breaker"` // drawdown bases and halt, restored on start
+	Limits     Limits                `json:"limits"`
+	Positions  []exchange.Position   `json:"positions"`
+	Targets    map[string]float64    `json:"targets"`
+	StaleStops map[string]string     `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
+	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget and fraction used (graduated entry); absent = none in progress
+	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
+	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs
+	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
+	LastEvent  string                `json:"last_event"`
+	StopReason string                `json:"stop_reason"`
 }
 
 var levels = []string{"paper", "testnet", "mainnet"}
@@ -360,10 +361,10 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	}()
 
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
-	en.Restore(prev.Targets, prev.Positions, prev.StaleStops)
+	en.Restore(prev.Targets, prev.Positions, prev.StaleStops, prev.Trades)
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
-		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Breaker: prev.Breaker,
+		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), Breaker: prev.Breaker,
 		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
@@ -452,7 +453,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	ps, perr := ex.Positions(fin, env)
 	_ = j.Append(journal.Event{Time: tick.Now(), Kind: Stop, Reason: reason})
 	save(func(s *State) {
-		s.Running, s.StopReason, s.LastEvent, s.Targets, s.StaleStops = false, reason, Stop+" "+reason, en.Targets(), en.StaleStops()
+		s.Running, s.StopReason, s.LastEvent, s.Targets, s.StaleStops, s.Trades = false, reason, Stop+" "+reason, en.Targets(), en.StaleStops(), en.Trades()
 		if restored {
 			s.Breaker = snapshot(en)
 		}
@@ -511,7 +512,7 @@ func saveAccount(ctx context.Context, en *engine.Engine, ex exchange.Exchange, e
 	if bal, err := ex.Balance(ctx, env); err == nil {
 		ps, _ := ex.Positions(ctx, env)
 		save(func(s *State) {
-			s.Equity, s.Positions, s.Targets, s.StaleStops, s.Breaker = bal.Equity, ps, en.Targets(), en.StaleStops(), snapshot(en)
+			s.Equity, s.Positions, s.Targets, s.StaleStops, s.Trades, s.Breaker = bal.Equity, ps, en.Targets(), en.StaleStops(), en.Trades(), snapshot(en)
 		})
 	}
 }

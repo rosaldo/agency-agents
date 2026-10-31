@@ -52,9 +52,10 @@ type Engine struct {
 	derivDown  map[string]bool           // symbol -> snapshot reads failing (one journal note per streak)
 	closed     map[string]time.Time      // symbol -> open time of the candle this step decided on
 	targets    map[string]float64
-	stops      map[string]float64 // stop given at entry or moved by the trail, re-placed if the exchange drops it
-	staleStops map[string]string  // symbol -> old stop a trail could not cancel (FR-P9)
-	blocked    map[string]string  // last journaled block reason per symbol
+	stops      map[string]float64    // stop given at entry or moved by the trail, re-placed if the exchange drops it
+	staleStops map[string]string     // symbol -> old stop a trail could not cancel (FR-P9)
+	trades     map[string]risk.Trade // symbol -> budget fixed at the first tranche and fraction used (graduated entry)
+	blocked    map[string]string     // last journaled block reason per symbol
 	funding    map[string]time.Time
 }
 
@@ -62,7 +63,7 @@ type Engine struct {
 // parsed for s. j may be nil.
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
-	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{},
+	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{}, trades: map[string]risk.Trade{},
 		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
@@ -129,11 +130,15 @@ func (e *Engine) Targets() map[string]float64 {
 	return out
 }
 
-// Restore reloads the targets, the positions' stops and the stale stops
-// saved by a previous run.
-func (e *Engine) Restore(targets map[string]float64, positions []exchange.Position, stale map[string]string) {
+// Restore reloads the targets, the positions' stops, the stale stops and
+// the trade budgets saved by a previous run; nil trades (a state from before
+// graduated entries) means no tranche in progress.
+func (e *Engine) Restore(targets map[string]float64, positions []exchange.Position, stale map[string]string, trades map[string]risk.Trade) {
 	for k, v := range targets {
 		e.targets[k] = v
+	}
+	for k, v := range trades {
+		e.trades[k] = v
 	}
 	for k, v := range stale {
 		e.staleStops[k] = v
@@ -143,6 +148,22 @@ func (e *Engine) Restore(targets map[string]float64, positions []exchange.Positi
 			e.stops[p.Symbol] = p.StopPrice
 		}
 	}
+}
+
+// Trades returns a copy of the open trades' budgets and used fractions.
+func (e *Engine) Trades() map[string]risk.Trade {
+	out := make(map[string]risk.Trade, len(e.trades))
+	for k, v := range e.trades {
+		out[k] = v
+	}
+	return out
+}
+
+// forget drops what the engine keeps about a position that is gone.
+func (e *Engine) forget(sym string) {
+	delete(e.targets, sym)
+	delete(e.stops, sym)
+	delete(e.trades, sym)
 }
 
 // ConfigureMarkets applies perp.margin_mode and perp.leverage to every
@@ -181,8 +202,7 @@ func (e *Engine) Flatten(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		delete(e.targets, p.Symbol)
-		delete(e.stops, p.Symbol)
+		e.forget(p.Symbol)
 	}
 	return errors.Join(errs...)
 }
@@ -258,11 +278,13 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	e.dropDeriv(sym, cs[0].Time)
 	p := held[sym]
 	holding := p.Qty > 0 // a blocked symbol may come back with nothing held
+	if !holding {
+		delete(e.trades, sym) // no trade in progress while flat
+	}
 	if _, known := e.stops[sym]; known && !holding {
 		e.note(journal.ClosedOutside, sym, "the engine's position is gone without an exit of this step "+
 			"(its stop, a liquidation or a close outside the engine); target cleared")
-		delete(e.targets, sym)
-		delete(e.stops, sym)
+		e.forget(sym)
 	}
 	side := strategy.Long
 	if p.PSide() == exchange.Short {
@@ -290,6 +312,8 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	switch {
 	case d.Action == strategy.Exit && holding:
 		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
+	case d.Action == strategy.Add:
+		return e.add(ctx, sym, p, d, last, equity, free)
 	case d.Action == strategy.None && holding:
 		return e.trail(ctx, p, in, last.Close, last.Time)
 	case d.Action == strategy.None && d.Reason != "":
@@ -325,15 +349,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, why)
 		return nil
 	}
-	caps := e.Ex.Capabilities()
-	step, minQty := caps.QtyStep, caps.MinQty
-	if l, ok := e.Ex.(interface {
-		Lot(string) (float64, float64)
-	}); ok {
-		step, minQty = l.Lot(sym) // per market when the adapter knows it
-	}
-	qty, why := risk.Size(risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: last.Close,
-		Stop: d.Stop, Short: d.Side == strategy.Short, SlippagePct: e.riskCosts(sym).SlippagePct, CommissionPct: e.riskCosts(sym).CommissionPct, QtyStep: step, MinQty: minQty})
+	trade, qty, why := risk.Trade{}.Tranche(d.Fraction, e.sizeInput(sym, equity, last.Close, d.Stop, d.Side == strategy.Short))
 	if qty == 0 {
 		e.skip(sym, why)
 		return nil
@@ -343,11 +359,111 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
 		return nil
 	}
-	*free -= margin // also on a failed entry: it may have filled
+	*free -= margin       // also on a failed entry: it may have filled
+	e.trades[sym] = trade // before the order: a fill of unknown fate keeps the budget used
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}
 	e.stops[sym] = d.Stop
+	if d.Target > 0 {
+		e.targets[sym] = d.Target
+	}
+	return e.guardFilled(ctx, sym)
+}
+
+// sizeInput is what sizes a tranche of sym entered at entry with stop.
+func (e *Engine) sizeInput(sym string, equity, entry, stop float64, short bool) risk.SizeInput {
+	caps := e.Ex.Capabilities()
+	step, minQty := caps.QtyStep, caps.MinQty
+	if l, ok := e.Ex.(interface {
+		Lot(string) (float64, float64)
+	}); ok {
+		step, minQty = l.Lot(sym) // per market when the adapter knows it
+	}
+	c := e.riskCosts(sym)
+	return risk.SizeInput{Equity: equity, RiskPct: e.Cfg.Risk.MaxRiskPerTradePct, Entry: entry, Stop: stop, Short: short,
+		SlippagePct: c.SlippagePct, CommissionPct: c.CommissionPct, QtyStep: step, MinQty: minQty}
+}
+
+// add is a further tranche of the position p (graduated entry, spec §6.1):
+// sized from the budget fixed at the trade's first tranche, never the
+// current equity, against the position's stop (or a tighter one the Add
+// brings); free margin, the leverage ceiling and the stop clear of the
+// liquidation are checked on the AGGREGATE position, the drawdown breaker
+// by the executor. It is decided on the same closed candle as an Enter.
+func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d strategy.Decision, last market.Candle, equity float64, free *float64) error {
+	side, short := strategy.Long, p.PSide() == exchange.Short
+	if short {
+		side = strategy.Short
+	}
+	trade, known := e.trades[sym]
+	cur := p.StopPrice
+	if cur <= 0 {
+		cur = e.stops[sym]
+	}
+	stop := cur
+	if d.Stop > 0 {
+		stop = d.Stop
+	}
+	var why string
+	switch {
+	case p.Qty <= 0:
+		why = "add refused: no own open position"
+	case d.Side != side:
+		why = fmt.Sprintf("add refused: side %q on a %s position", d.Side, side)
+	case !known:
+		why = "add refused: no trade budget recorded for this position (entered before graduated entries); a new budget is never fixed on an open position"
+	case cur <= 0:
+		why = "add refused: the position's stop is unknown"
+	case !short && stop < cur, short && stop > cur:
+		why = fmt.Sprintf("add refused: stop %.8g is looser than the position's %.8g", stop, cur)
+	case p.Blocked != "":
+		why = "symbol blocked: " + p.Blocked
+	case e.staleStops[sym] != "":
+		why = "symbol blocked: old stop " + e.staleStops[sym] + " not cancelled yet"
+	}
+	if why == "" {
+		why = e.newsBlocks(ctx, sym, last.Time)
+	}
+	if why != "" {
+		e.skip(sym, why)
+		return nil
+	}
+	next, qty, why := trade.Tranche(d.Fraction, e.sizeInput(sym, equity, last.Close, stop, short))
+	if qty == 0 {
+		e.skip(sym, "add refused: "+why)
+		return nil
+	}
+	why = ""
+	lev := float64(e.Cfg.Perp.Leverage)
+	total := p.Qty + qty
+	agg := p
+	agg.Qty, agg.AvgPrice, agg.StopPrice = total, (p.AvgPrice*p.Qty+last.Close*qty)/total, stop
+	if p.Leverage > 0 {
+		lev = p.Leverage
+	}
+	agg.LiquidationPrice = risk.LiquidationPrice(short, agg.AvgPrice, e.liquidationDistance(sym, p.PSide(), agg.AvgPrice, lev))
+	margin := qty * last.Close / float64(e.Cfg.Perp.Leverage)
+	switch {
+	case margin > *free:
+		why = fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free)
+	case total*last.Close > equity*float64(e.Cfg.Perp.Leverage):
+		why = fmt.Sprintf("the position's notional %.2f after the add is above equity %.2f x leverage %d", total*last.Close, equity, e.Cfg.Perp.Leverage)
+	default:
+		if err := e.liquidationViolation(agg); err != nil {
+			why = "stop vs liquidation of the position after the add: " + err.Error()
+		}
+	}
+	if why != "" {
+		e.skip(sym, "add refused: "+why)
+		return nil
+	}
+	*free -= margin
+	e.trades[sym] = next // before the order: a fill of unknown fate keeps the fraction used
+	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: p.PSide(), Entry: last.Close, Stop: stop, Target: d.Target, Qty: qty}); err != nil {
+		return err
+	}
+	e.stops[sym] = stop
 	if d.Target > 0 {
 		e.targets[sym] = d.Target
 	}
@@ -360,8 +476,7 @@ func (e *Engine) exit(ctx context.Context, p exchange.Position, candle time.Time
 	if err := e.Exec.Exit(ctx, p, candle, reason); err != nil {
 		return err
 	}
-	delete(e.targets, p.Symbol)
-	delete(e.stops, p.Symbol)
+	e.forget(p.Symbol)
 	return nil
 }
 

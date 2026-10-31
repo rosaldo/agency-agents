@@ -61,14 +61,24 @@ const (
 	None Action = iota // the zero Decision does nothing (safe default)
 	Enter
 	Exit
+	// Add is a further tranche of the open position (graduated entry): same
+	// side as the position, which the engine holds itself. Refused flat, on
+	// the other side, with a stop looser than the position's, or when the
+	// fractions of the trade would sum above 1.
+	Add
 )
 
 type Decision struct {
 	Action Action
-	Side   Side    // Enter only
-	Stop   float64 // Enter: required protective stop price
-	Target float64 // Enter: optional exit price, 0 = none
-	Reason string  // journal; on None while flat, journaled as a skipped signal (leave empty when there is no signal)
+	Side   Side    // Enter and Add
+	Stop   float64 // Enter: required protective stop price; Add: 0 keeps the position's, else as tight or tighter
+	Target float64 // Enter: optional exit price, 0 = none; Add: replaces the target, 0 keeps it
+	// Fraction is the part of the trade's risk budget this Enter or Add
+	// takes, in (0, 1]; 0 means 1, the whole budget at once. The budget is
+	// fixed at the first tranche (equity x max_risk_per_trade_pct) and the
+	// fractions of one trade sum to at most 1.
+	Fraction float64
+	Reason   string // journal; on None while flat, journaled as a skipped signal (leave empty when there is no signal)
 }
 
 // NewsSource is optional. With news_guard: required, a strategy that does not

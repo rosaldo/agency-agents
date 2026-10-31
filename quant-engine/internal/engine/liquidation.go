@@ -91,8 +91,7 @@ func (e *Engine) guardLiquidation(ctx context.Context, p exchange.Position) erro
 	if xerr := e.Exec.Exit(ctx, p, e.Exec.Now(), why); xerr != nil {
 		herr = fmt.Errorf("%w: %s %s; flattening failed: %v", exec.ErrHalt, p.Symbol, why, xerr)
 	} else {
-		delete(e.targets, p.Symbol)
-		delete(e.stops, p.Symbol)
+		e.forget(p.Symbol)
 	}
 	if e.Exec.Journal != nil {
 		_ = e.Exec.Journal.Append(journal.Event{Time: e.Exec.Now(), Kind: journal.Halt, Symbol: p.Symbol, Reason: herr.Error()})
