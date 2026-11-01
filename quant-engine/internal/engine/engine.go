@@ -41,6 +41,10 @@ type Engine struct {
 	// OnStale, when set, persists the stale stops at once: a crash right
 	// after a move must not lose the one left behind (QA-T10b-3).
 	OnStale func()
+	// OnTrade, when set, persists the trade budgets and fractions used before
+	// each tranche's order: a kill -9 between the fill and the end-of-step save
+	// must not renew the budget (spec §6.2). An error refuses the order.
+	OnTrade func() error
 	// OnDeriv, when set, gets each new derivatives snapshot of a swap symbol
 	// (the loop's recorder); snapshots are then read for every strategy.
 	OnDeriv func(symbol string, d market.Deriv)
@@ -361,6 +365,10 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	*free -= margin       // also on a failed entry: it may have filled
 	e.trades[sym] = trade // before the order: a fill of unknown fate keeps the budget used
+	if why := e.persistTrades(); why != "" {
+		e.skip(sym, why)
+		return nil
+	}
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}
@@ -369,6 +377,18 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.targets[sym] = d.Target
 	}
 	return e.guardFilled(ctx, sym)
+}
+
+// persistTrades saves the trades through OnTrade; a failure is the reason
+// the order is not sent (the fraction stays counted: conservative).
+func (e *Engine) persistTrades() string {
+	if e.OnTrade == nil {
+		return ""
+	}
+	if err := e.OnTrade(); err != nil {
+		return "trade budget not persisted, order not sent: " + err.Error()
+	}
+	return ""
 }
 
 // sizeInput is what sizes a tranche of sym entered at entry with stop.
@@ -460,6 +480,10 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 	}
 	*free -= margin
 	e.trades[sym] = next // before the order: a fill of unknown fate keeps the fraction used
+	if why := e.persistTrades(); why != "" {
+		e.skip(sym, "add refused: "+why)
+		return nil
+	}
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: p.PSide(), Entry: last.Close, Stop: stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}

@@ -386,6 +386,12 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
+	en.OnTrade = func() error { // before each tranche's order, unlike save: a failed write refuses it
+		mu.Lock()
+		defer mu.Unlock()
+		st.Trades, st.Heartbeat = en.Trades(), time.Now()
+		return SaveState(dir, st)
+	}
 	if derivOff != "" {
 		record(journal.Derivatives, derivOff)
 	}

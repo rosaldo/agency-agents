@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -209,5 +210,26 @@ func TestExitEndsTheTrade(t *testing.T) {
 	steps(t, e, f, 2)
 	if _, ok := e.Trades()["AAA"]; ok {
 		t.Fatalf("trades %+v after the exit, want none", e.Trades())
+	}
+}
+
+// Spec §6.2: when the trade budget cannot be persisted before a tranche's
+// order, the order is not sent and the reason is journaled; the fraction
+// stays counted (conservative).
+func TestTrancheIsNotSentWhenItsBudgetCannotBePersisted(t *testing.T) {
+	e, f, _ := trancheEngine(t, "", []float64{105, 103}, enter(0.5, 100), add(0.5, 0))
+	saved := 0
+	e.OnTrade = func() error { saved++; return nil }
+	steps(t, e, f, 1)
+	e.OnTrade = func() error { return errors.New("disk full") }
+	f.Advance()
+	if err := e.Step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if saved != 1 || f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "not persisted") {
+		t.Fatalf("saves %d, orders %d, rejections %q; want the add saved-or-not-sent", saved, f.Calls("PlaceOrder"), journalOf(e).rejected())
+	}
+	if got := e.Trades()["AAA"]; got.Used != 1 {
+		t.Fatalf("trade %+v, want the fraction counted (used 1)", got)
 	}
 }

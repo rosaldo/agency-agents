@@ -1,10 +1,21 @@
 package loop
 
 import (
+	"context"
+	"math"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
+	"github.com/rosaldo/agency-agents/quant-engine/market"
+	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
 // A state file written before graduated entries has no "trades": it loads
@@ -34,4 +45,112 @@ func TestStateWithoutTradesLoadsAsNoTrancheInProgress(t *testing.T) {
 	if err != nil || back.Trades["AAA"] != (risk.Trade{Budget: 100, Used: 0.5}) {
 		t.Fatalf("round trip %+v (%v), want budget 100 used 0.5", back.Trades, err)
 	}
+}
+
+const trancheYAML = "exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA]\nrisk: {confirmed_by_user: true}\n"
+
+// trancheFake is a fake on closes 100 100 100 105 103 102 102 102; QtyStep
+// 0.001, cash 10 000, so the trade budget (1%) is 100.
+func trancheFake() (*fake.Fake, []market.Candle) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for k, x := range []float64{100, 100, 100, 105, 103, 102, 102, 102} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(k) * time.Hour), Open: x, High: x, Low: x, Close: x, Volume: 10})
+	}
+	return fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}}), cs
+}
+
+var wait = strategy.Decision{} // the warm-up candles 100 100 100
+
+func tranche(a strategy.Action, stop float64) strategy.Decision {
+	return strategy.Decision{Action: a, Side: strategy.Long, Stop: stop, Fraction: 0.5}
+}
+
+// crashAfterFill is the exchange of a process killed (kill -9) right after
+// the fill of an order: from then on, the first Balance — the end-of-step
+// save's — never returns.
+type crashAfterFill struct {
+	*fake.Fake
+	armedAt int // orders placed when armed; -1 = not armed
+}
+
+func (c *crashAfterFill) Balance(ctx context.Context, env exchange.Env) (exchange.Balance, error) {
+	if c.armedAt >= 0 && c.Fake.Calls("PlaceOrder") > c.armedAt {
+		panic(killed{})
+	}
+	return c.Fake.Balance(ctx, env)
+}
+
+type killed struct{}
+
+// runUntilKilled runs the loop; a kill ends it with nothing saved after it.
+func runUntilKilled(t *testing.T, c *config.Config, s strategy.Strategy, ex exchange.Exchange, tick *FakeTicker, dir string) (dead bool) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(killed); !ok {
+				panic(r)
+			}
+			dead = true
+		}
+	}()
+	Run(context.Background(), c, s, ex, exchange.Demo, tick, dir)
+	return false
+}
+
+// Spec §6.2: a kill -9 between an Add's fill and the end-of-step save must
+// not renew the budget: after the restart the next Add is refused, and the
+// position's loss at the stop stays within the trade budget (1% of 10 000).
+func TestKillAfterAnAddFillKeepsTheFractionUsed(t *testing.T) {
+	f, cs := trancheFake()
+	ex := &crashAfterFill{Fake: f, armedAt: -1}
+	dir := filepath.Join(t.TempDir(), "state")
+	script := func(arm bool, answers ...strategy.Decision) *scripted.Strategy {
+		return &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+			if len(answers) == 0 {
+				return strategy.Decision{}
+			}
+			d := answers[0]
+			answers = answers[1:]
+			if arm && d.Action == strategy.Add {
+				ex.armedAt = f.Calls("PlaceOrder") // the kill lands after this Add's fill
+			}
+			return d
+		}}
+	}
+	s := script(true, wait, wait, wait, tranche(strategy.Enter, 100), tranche(strategy.Add, 0)) // at 105, then at 103
+	c, err := config.Parse([]byte(trancheYAML), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tick := &FakeTicker{Ex: f, Candles: cs}
+	if !runUntilKilled(t, c, s, ex, tick, dir) {
+		b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
+		t.Fatalf("setup: the loop was never killed after the add; journal:\n%s", b)
+	}
+	if p := ownPosition(t, f); math.Abs(p.Qty-(10+16.666)) > 1e-9 {
+		t.Fatalf("setup: qty %v at the kill, want 10 + 16.666", p.Qty)
+	}
+
+	ex.armedAt = -1
+	f.Advance() // the restart comes a candle later
+	s2 := script(false, tranche(strategy.Add, 0))
+	c2, _ := config.Parse([]byte(trancheYAML), s2)
+	Run(context.Background(), c2, s2, ex, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, i: tick.i + 1}, dir)
+	p := ownPosition(t, f)
+	if loss := p.Qty * (p.AvgPrice - 100); loss > 100+1e-6 {
+		t.Fatalf("loss at the stop %.4f (qty %v avg %v) is above the trade budget 100: the restart renewed the fraction used", loss, p.Qty, p.AvgPrice)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl")); !strings.Contains(string(b), "above the whole trade budget") {
+		t.Fatalf("the restart never refused an add; journal:\n%s", b)
+	}
+}
+
+func ownPosition(t *testing.T, f *fake.Fake) exchange.Position {
+	t.Helper()
+	ps, _ := f.Positions(context.Background(), exchange.Demo)
+	if len(ps) != 1 {
+		t.Fatalf("positions %+v, want one", ps)
+	}
+	return ps[0]
 }

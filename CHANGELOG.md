@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.49.1** (2026-10-31) · `fix` — quant-engine: the trade budget and fraction used are saved to state-<level>.json before each tranche's order (OnTrade), so a kill -9 between a fill and the end of the step cannot renew the budget; a failed save sends no order and is journaled
 - **v1.49.0** (2026-10-31) · `feat` — quant-engine: graduated entry contract, Decision.Fraction and strategy.Add, every tranche checked against the aggregate position and the trade budget kept in state-<level>.json
 - **v1.48.0** (2026-10-31) · `feat` — quant-engine: risk.Trade sizes a graduated entry's tranches from the budget fixed at the first one, refusing fractions above the whole budget
 - **v1.47.3** (2026-10-31) · `test` — quant-engine: golden journals of the example strategy on a synthetic wave, spot and swap, guard the journal byte for byte
