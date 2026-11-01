@@ -213,6 +213,65 @@ func TestExitEndsTheTrade(t *testing.T) {
 	}
 }
 
+// QA-T4 M2: the ceiling is on the AGGREGATE notional: the tranche alone
+// (90.909 x 103 = 9 363.6) fits 10 000 x 1, the position after it does not.
+func TestAddWhoseAggregateNotionalIsAboveTheLeverageCeilingIsRefused(t *testing.T) {
+	e, f, _ := trancheEngine(t, "", []float64{105, 103}, enter(0.5, 100), add(0.5, 102.45)) // 50 / 0.55 = 90.909 units
+	e.Ex, e.Exec.Ex = richCash{f}, richCash{f}
+	steps(t, e, f, 2)
+	if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "leverage") {
+		t.Fatalf("orders %d, rejections %q; want a leverage refusal of the aggregate", f.Calls("PlaceOrder"), journalOf(e).rejected())
+	}
+}
+
+// blockedOwn reports the engine's own position as blocked (e.g. foreign qty
+// detected on the symbol after the entry).
+type blockedOwn struct{ *fake.Fake }
+
+func (b blockedOwn) Positions(ctx context.Context, env exchange.Env) ([]exchange.Position, error) {
+	ps, err := b.Fake.Positions(ctx, env)
+	for i := range ps {
+		ps[i].Blocked = "foreign qty detected"
+	}
+	return ps, err
+}
+
+type notClear struct{}
+
+func (notClear) Clear(context.Context, string, time.Time) (bool, string, error) {
+	return false, "exchange hack", nil
+}
+
+// QA-T4 M7–M9: an Add on a symbol with a stale stop, a blocked symbol or a
+// not-clear news check is refused, journaled, never sent.
+func TestAddOnABlockedSymbolIsRefused(t *testing.T) {
+	cases := map[string]struct {
+		block func(*Engine, *fake.Fake)
+		want  string
+	}{
+		"stale stop": {func(e *Engine, _ *fake.Fake) { e.staleStops["AAA"] = "old-stop" }, "old stop old-stop not cancelled"},
+		"blocked":    {func(e *Engine, f *fake.Fake) { e.Ex, e.Exec.Ex = blockedOwn{f}, blockedOwn{f} }, "foreign qty detected"},
+		"news": {func(e *Engine, _ *fake.Fake) {
+			cfg := *e.Cfg
+			cfg.NewsGuard, e.Cfg, e.News = "required", &cfg, notClear{}
+		}, "news check not clear"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, f, _ := trancheEngine(t, "", []float64{105, 103}, enter(0.5, 100), add(0.5, 0))
+			steps(t, e, f, 1)
+			tc.block(e, f)
+			f.Advance()
+			if err := e.Step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), tc.want) {
+				t.Fatalf("orders %d, rejections %q; want the add refused with %q", f.Calls("PlaceOrder"), journalOf(e).rejected(), tc.want)
+			}
+		})
+	}
+}
+
 // Spec §6.2: when the trade budget cannot be persisted before a tranche's
 // order, the order is not sent and the reason is journaled; the fraction
 // stays counted (conservative).

@@ -66,6 +66,40 @@ func tranche(a strategy.Action, stop float64) strategy.Decision {
 	return strategy.Decision{Action: a, Side: strategy.Long, Stop: stop, Fraction: 0.5}
 }
 
+// QA-T4 M6: the loop writes the trade budget to state-<level>.json once the
+// first tranche is sent, and drops it once the position is closed.
+func TestLoopKeepsTheTradeInTheStateFile(t *testing.T) {
+	f, cs := trancheFake()
+	dir := filepath.Join(t.TempDir(), "state")
+	answers := []strategy.Decision{wait, wait, wait, tranche(strategy.Enter, 100), {Action: strategy.Exit}}
+	s := &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+		if len(answers) == 0 {
+			return strategy.Decision{}
+		}
+		d := answers[0]
+		answers = answers[1:]
+		return d
+	}}
+	c, err := config.Parse([]byte(trancheYAML), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var held map[string]risk.Trade
+	tick := &FakeTicker{Ex: f, Candles: cs, OnStep: func(i int) {
+		if i == 3 { // after the entry step
+			st, _ := LoadState(dir, "paper")
+			held = st.Trades
+		}
+	}}
+	Run(context.Background(), c, s, f, exchange.Demo, tick, dir)
+	if held["AAA"] != (risk.Trade{Budget: 100, Used: 0.5}) {
+		t.Fatalf("state after the entry holds trades %+v, want AAA budget 100 used 0.5", held)
+	}
+	if st, _ := LoadState(dir, "paper"); len(st.Trades) != 0 || len(st.Positions) != 0 {
+		t.Fatalf("state after the exit holds trades %+v positions %+v, want none", st.Trades, st.Positions)
+	}
+}
+
 // crashAfterFill is the exchange of a process killed (kill -9) right after
 // the fill of an order: from then on, the first Balance — the end-of-step
 // save's — never returns.
