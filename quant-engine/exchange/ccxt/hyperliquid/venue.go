@@ -14,7 +14,10 @@ import (
 	"slices"
 	"strings"
 
+	"time"
+
 	lib "github.com/rosaldo/ccxt/v5"
+	pro "github.com/rosaldo/ccxt/v5/pro"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange/ccxt"
 )
@@ -34,7 +37,16 @@ var Venue = ccxt.Venue{
 	// liquidationPrice comes from the clearinghouse's liquidationPx (V2)
 	ReportsLiquidation: true,
 	MaintenanceMargin:  maintenanceMargin,
+	DialFeed:           dialFeed,
+	// the candle channel's intervals (websocket subscriptions doc), without
+	// 1w and 1M: the adapter names a week 7d and a month has no fixed length
+	FeedIntervals: []time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute,
+		time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 12 * time.Hour, 24 * time.Hour, 72 * time.Hour},
 }
+
+// feedKeepAlive is the ping period of the stream: the venue closes a
+// connection it sent nothing to in the last 60 s (timeouts-and-heartbeats doc).
+const feedKeepAlive = 20 * time.Second
 
 // maintenanceMargin: "The maintenance margin is half of the initial margin
 // at max leverage" (hyperliquid docs, trading/liquidations), so the rate is
@@ -85,22 +97,27 @@ func dexOf(symbol string) string {
 	return ""
 }
 
-func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, error) {
-	x := lib.NewHyperliquid(nil)
-	var dexes []any
+// marketsFor is the fetchMarkets option scoping LoadMarkets to the main
+// dex's spot and swap markets plus exactly the HIP-3 dexes the symbols name
+// (the fork would otherwise load the first 10 dexes of perpDexs and silently
+// miss the others).
+func marketsFor(symbols []string) (fm map[string]any, dexes []any) {
 	for _, s := range symbols {
 		if d := dexOf(s); d != "" && !slices.Contains(dexes, any(d)) {
 			dexes = append(dexes, d)
 		}
 	}
-	// before LoadMarkets: the main dex's spot and swap markets, plus exactly
-	// the HIP-3 dexes the symbols name (the fork would otherwise load the
-	// first 10 dexes of perpDexs and silently miss the others)
-	fm := map[string]any{"types": []any{"spot", "swap"}}
+	fm = map[string]any{"types": []any{"spot", "swap"}}
 	if len(dexes) > 0 {
 		fm = map[string]any{"types": []any{"spot", "swap", "hip3"}, "hip3": map[string]any{"limit": len(dexes), "dexes": dexes}}
 	}
-	x.Options.Store("fetchMarkets", fm)
+	return fm, dexes
+}
+
+func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, error) {
+	x := lib.NewHyperliquid(nil)
+	fm, dexes := marketsFor(symbols)
+	x.Options.Store("fetchMarkets", fm) // before LoadMarkets
 	if sandbox {
 		if err := ccxt.EnableSandbox("hyperliquid", x); err != nil {
 			return nil, err
@@ -115,6 +132,15 @@ func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, 
 		c.dex = dexes[0].(string)
 	}
 	return c, nil
+}
+
+// dialFeed builds the fork's Pro client on the public mainnet stream, with
+// no credential, its markets scoped like the trading client's.
+func dialFeed(symbols []string) (ccxt.Watcher, error) {
+	x := pro.NewHyperliquid(map[string]any{"streaming": map[string]any{"keepAlive": feedKeepAlive.Milliseconds()}})
+	fm, _ := marketsFor(symbols)
+	x.Options.Store("fetchMarkets", fm)
+	return x, nil
 }
 
 // check refuses, before trading: swap symbols of more than

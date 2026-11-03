@@ -73,6 +73,11 @@ type Venue struct {
 	// as a fraction of the notional; ok=false = unknown. With it the adapter
 	// estimates the liquidation distance (exchange.LiquidationEstimator).
 	MaintenanceMargin func(m lib.MarketInterface) (rate float64, ok bool)
+	// DialFeed, when set, builds the client streaming the public mainnet
+	// candles of symbols (feed: websocket); FeedIntervals are the intervals
+	// its candle channel carries.
+	DialFeed      func(symbols []string) (Watcher, error)
+	FeedIntervals []time.Duration
 	// SetMargin, when set, applies margin mode and leverage on symbol in
 	// place of CCXT's unified setMarginMode + setLeverage, for a venue whose
 	// fork has no setMarginMode; an error refuses to start. Its positions
@@ -96,6 +101,9 @@ type Options struct {
 	// Candles, when set, serves the candles in place of the trading client:
 	// the testnet demo reads the signal from mainnet's public data (O4).
 	Candles Client
+	// Feed, when set, streams the candles (exchange.CandleFeed); nil = no
+	// stream, the loop then polls REST only.
+	Feed Watcher
 }
 
 // ref is an order the engine sent. It is written to the book BEFORE the

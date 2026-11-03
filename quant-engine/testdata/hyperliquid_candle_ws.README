@@ -1,0 +1,8 @@
+hyperliquid_candle_ws.jsonl: Hyperliquid mainnet `candle` channel messages (1m),
+in receive order, one per line, each with a `src` saying what was captured and
+what was rebuilt around it. Captured on 2026-10-31: the BTC message verbatim,
+ETH's last pushed state of the 16:22 candle (c 2250.7, v 4.6282, n 20) while
+the REST candleSnapshot of the same candle says c 2250.8, v 4.6728, n 21 (the
+last trade of the minute was never pushed), and the boundary latency. The
+other lines rebuild the orderings observed then (an old-candle update after
+the clock boundary; the first update of the new candle) with made-up prices.

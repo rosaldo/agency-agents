@@ -209,3 +209,37 @@ func CheckEnv(paper bool, env Env) error {
 	}
 	return nil
 }
+
+// CandleFeed is implemented by adapters that stream a venue's candles (a
+// websocket). It is a trigger only: a Boundary says a candle ended, and the
+// engine still reads that candle's value over REST (Candles), because a
+// stream's last update of a candle is not always its final state.
+type CandleFeed interface {
+	// FeedIntervals lists the candle intervals the stream carries; empty
+	// means the adapter has no stream.
+	FeedIntervals() []time.Duration
+	// Subscribe streams symbols' candles of interval until ctx ends. The
+	// channel closes when ctx ends; the adapter reconnects on its own and
+	// reports the link with LinkDown/LinkUp boundaries meanwhile.
+	Subscribe(ctx context.Context, env Env, symbols []string, interval time.Duration) (<-chan Boundary, error)
+}
+
+// Link is the state a Boundary reports about the stream itself.
+type Link string
+
+const (
+	LinkDown Link = "down" // the connection dropped: no boundary until LinkUp
+	LinkUp   Link = "up"   // reconnected after LinkDown: what was missed comes from REST
+)
+
+// Boundary says the candle of Symbol opened at Closed has ended: the first
+// update of a later candle arrived. Last is the stream's last update of that
+// candle, for diagnostics only, never a value to decide on. A Boundary with
+// Link set carries no candle; Reason says why the link dropped.
+type Boundary struct {
+	Symbol string
+	Closed time.Time
+	Last   market.Candle
+	Link   Link
+	Reason string
+}
