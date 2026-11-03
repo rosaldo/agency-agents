@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.51.2** (2026-11-02) · `test` — quant-engine: ccxt netting test: an Add's tranches sum in own_qty under one resting stop, and foreign_qty_detected still fires
 - **v1.51.1** (2026-11-02) · `test` — quant-engine: loop tests for a kill between an Add's fill and the stop swap (the start covers the whole quantity at the Add's stop, budget kept), a kill after the first tranche's fill, and a state file that cannot be written refusing the tranche
 - **v1.51.0** (2026-11-02) · `feat` — quant-engine: after an Add fills, the engine swaps the stop for one covering the whole position (stale old stop kept as for a trail; closed at once on spot) and checks it against the liquidation at the new average price; the trade keeps the Add's stop for a restart; the paper simulator cancels a replaced stop
 - **v1.50.0** (2026-11-02) · `feat` — quant-engine: Executor.Add grows a position and swaps its stop for one of the whole quantity, new first; Reconcile covers a stop that closes less than the own quantity, flattening the uncovered part when it cannot
