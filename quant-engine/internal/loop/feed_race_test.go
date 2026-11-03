@@ -96,7 +96,7 @@ func TestLateBoundaryAfterTheDeadlineWakesNoExtraStep(t *testing.T) {
 		ended(t0.Add(3*time.Minute+700*time.Millisecond), t0.Add(2*time.Minute)),
 	}, 3)
 	wantSteps(t, got, []step{
-		{t0.Add(time.Minute + 5*time.Second), t0},                              // 16:23 at its deadline
+		{t0.Add(time.Minute + 5*time.Second), t0},                               // 16:23 at its deadline
 		{t0.Add(2*time.Minute + 700*time.Millisecond), t0.Add(time.Minute)},     // 16:24 on its boundary
 		{t0.Add(3*time.Minute + 700*time.Millisecond), t0.Add(2 * time.Minute)}, // 16:25 on its boundary
 	})
