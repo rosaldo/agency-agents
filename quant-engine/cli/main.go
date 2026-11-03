@@ -314,20 +314,33 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 			return nil, nil, fmt.Errorf("%s mainnet candles: %w", v.ID, err)
 		}
 	}
+	var feed ccxtx.Watcher // feed: websocket; without one the loop refuses it at load
+	if cfg.Feed == "websocket" && v.DialFeed != nil {
+		if feed, err = v.DialFeed(symbols); err != nil {
+			return nil, nil, fmt.Errorf("%s candle stream: %w", v.ID, err)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, err
 	}
 	ad, err := ccxtx.New(client, ccxtx.Options{Venue: v, Symbols: symbols, Market: cfg.Market, Env: env(cfg), Paper: testnet,
-		Book: loop.BookPath(dir, cfg.Level()), Candles: candles})
+		Book: loop.BookPath(dir, cfg.Level()), Candles: candles, Feed: feed})
 	if err != nil {
 		return nil, nil, err
 	}
-	tick := loop.RealTicker{Interval: cfg.Interval(), Grace: 5 * time.Second}
+	var tick loop.Ticker = loop.RealTicker{Interval: cfg.Interval(), Grace: grace}
+	if feed != nil {
+		tick = &loop.FeedTicker{Interval: cfg.Interval(), Grace: grace}
+	}
 	if cred == nil {
 		return paper.New(ad, fk.paperCapital, time.Now, simProfile(cfg)), tick, nil
 	}
 	return ad, tick, nil
 }
+
+// grace is how long after a candle's close the loop steps at the latest:
+// RealTicker always, FeedTicker when the stream says nothing.
+const grace = 5 * time.Second
 
 // simProfile is the yml's sim profile the simulator charges (FR-P10).
 func simProfile(cfg *config.Config) paper.Profile {

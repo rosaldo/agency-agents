@@ -21,12 +21,16 @@ import (
 var exchangeID = regexp.MustCompile(`^[a-z0-9]+$`)
 
 type Config struct {
-	Mode           string    `yaml:"mode"`
-	Exchange       string    `yaml:"exchange"`
-	Market         string    `yaml:"market"` // spot | swap (linear)
-	AssetClass     string    `yaml:"asset_class"`
-	NewsGuard      string    `yaml:"news_guard"`
-	IntervalSpec   string    `yaml:"interval"`
+	Mode         string `yaml:"mode"`
+	Exchange     string `yaml:"exchange"`
+	Market       string `yaml:"market"` // spot | swap (linear)
+	AssetClass   string `yaml:"asset_class"`
+	NewsGuard    string `yaml:"news_guard"`
+	IntervalSpec string `yaml:"interval"`
+	// Feed is how the loop learns a candle closed: rest polls at the boundary
+	// plus a grace; websocket wakes on the venue's stream, the value still
+	// read over REST. Latency only, not a rule: outside the parameter hash.
+	Feed           string    `yaml:"feed"`
 	Timezone       string    `yaml:"timezone"`
 	Symbols        []string  `yaml:"symbols"`
 	StrategyParams yaml.Node `yaml:"strategy"` // opaque: validated by Strategy.Configure
@@ -86,6 +90,7 @@ type Gate struct {
 func defaults() Config {
 	return Config{
 		Mode:     "paper",
+		Feed:     "rest",
 		Market:   "spot",
 		Timezone: "UTC",
 		Perp:     Perp{Leverage: 1},
@@ -187,6 +192,8 @@ func (c *Config) validate() error {
 		return errors.New("perp settings apply to market: swap only; remove the perp block on spot")
 	case c.Market == "swap" && c.Perp.MarginMode != "" && c.Perp.MarginMode != "isolated" && c.Perp.MarginMode != "cross":
 		return fmt.Errorf("perp.margin_mode must be isolated or cross, got %q", c.Perp.MarginMode)
+	case c.Feed != "rest" && c.Feed != "websocket":
+		return fmt.Errorf("feed must be rest or websocket, got %q", c.Feed)
 	case c.AssetClass != "crypto" && c.AssetClass != "equity":
 		return fmt.Errorf("asset_class must be crypto or equity, got %q", c.AssetClass)
 	case c.NewsGuard != "" && c.NewsGuard != "none" && c.NewsGuard != "required":

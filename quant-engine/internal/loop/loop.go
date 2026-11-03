@@ -116,6 +116,8 @@ type State struct {
 	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
 	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs
 	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
+	Feed       string                `json:"feed,omitempty"`        // rest | websocket
+	FeedState  *FeedState            `json:"feed_state,omitempty"`  // websocket only
 	LastEvent  string                `json:"last_event"`
 	StopReason string                `json:"stop_reason"`
 }
@@ -321,6 +323,10 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	if err := engine.CheckDerivatives(cfg, s, ex); err != nil {
 		return "refused: " + err.Error()
 	}
+	feed, ft, err := checkFeed(cfg, ex, tick)
+	if err != nil {
+		return "refused: " + err.Error()
+	}
 	var derivSeen map[string][]market.Deriv // swap only: what the recorder already holds
 	var derivOff string                     // why the recorder stays off this run
 	if cfg.Market == "swap" {
@@ -373,11 +379,15 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		st.PaperSim = n.SimNote()
 	}
 	st.Sizing = en.SizingNote()
+	st.Feed = cfg.Feed
 	var mu sync.Mutex
 	save := func(update func(*State)) {
 		mu.Lock()
 		defer mu.Unlock()
 		update(&st)
+		if fs, ok := ft.state(); ok {
+			st.FeedState = &fs
+		}
 		st.Heartbeat = time.Now()
 		_ = SaveState(dir, st)
 	}
@@ -401,6 +411,19 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			if err := appendDeriv(derivPath(dir, level), sym, d); err != nil {
 				record(Error, "derivatives recorder: "+err.Error())
 			}
+		}
+	}
+	if ft != nil {
+		symbols := slices.Clone(cfg.Symbols)
+		for _, aux := range s.Inputs() {
+			if !slices.Contains(symbols, aux) {
+				symbols = append(symbols, aux)
+			}
+		}
+		en.Buffer = &engine.CandleBuffer{} // empty: the first step reads the whole windows
+		en.ClosedCandle = ft.Closed
+		if err := ft.start(ctx, feed, env, symbols, record, en.Buffer.Reset); err != nil {
+			return "refused: feed: websocket: " + err.Error()
 		}
 	}
 	beatDone := make(chan struct{})
@@ -558,6 +581,8 @@ type Status struct {
 	Funding       string              `json:"funding,omitempty"`
 	PaperSim      string              `json:"sim,omitempty"`
 	Sizing        string              `json:"sizing,omitempty"`
+	Feed          string              `json:"feed,omitempty"`
+	FeedState     *FeedState          `json:"feed_state,omitempty"`
 	LastEvent     string              `json:"last_event,omitempty"`
 	StopReason    string              `json:"stop_reason,omitempty"`
 }
@@ -574,7 +599,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Level: st.Level, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, Feed: st.Feed, FeedState: st.FeedState, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100

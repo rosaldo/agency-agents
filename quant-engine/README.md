@@ -95,6 +95,7 @@ market: swap                  # spot | swap (linear perpetual)
 asset_class: crypto           # crypto | equity (required)
 symbols: [BTC/USDC:USDC]
 interval: 1h
+feed: rest                    # rest (default) | websocket: how the loop learns a candle closed
 timezone: UTC
 perp:
   leverage: 2
@@ -125,7 +126,8 @@ strategy:                     # opaque to the engine; this block is strategy/exa
 - The risk limits default to 1% per trade, 3% daily drawdown and 6% weekly drawdown. The engine refuses to run until `risk.confirmed_by_user` is `true`.
 - `gate.min_demo_days` is optional and defaults to 0: mainnet needs no demo days. Set it above 0 to require that many days of demo first (see [Paper, demo and mainnet gates](#paper-demo-and-mainnet-gates)). The old `risk.min_demo_period_days` is refused.
 - `asset_class: equity` forces `news_guard: required`; `news_guard: none` on an equity is refused.
-- The parameter hash covers the engine's settings, `Name()`, the `strategy:` block and the strategy's news policy. Changing any of them invalidates the walk-forward validation and restarts any demo days `gate.min_demo_days` requires. `gate` and `demo` are not part of it.
+- The parameter hash covers the engine's settings, `Name()`, the `strategy:` block and the strategy's news policy. Changing any of them invalidates the walk-forward validation and restarts any demo days `gate.min_demo_days` requires. `gate`, `demo` and `feed` are not part of it.
+- `feed: rest` (default) steps 5 s after each candle boundary. `feed: websocket` steps on the venue's candle stream instead: the first update of the next candle says the candle ended, usually within a couple of seconds, and the step still runs 5 s after the boundary at the latest (a minute without a trade sends nothing; a dropped stream journals `feed_degraded`, then `feed_restored`, and the loop keeps the 5 s deadline meanwhile). The stream is only the trigger: the value decided on is always the closed candle read over REST, because the stream's last update of a candle is not always its final state. If REST's last closed candle is not the one the stream ended, that symbol takes no decision in that step (`candle_not_final`). Between steps the engine keeps each symbol's window and reads over REST only the candles closed since; it reads the whole window again at start and after the stream comes back. `websocket` is refused at load on an adapter without a candle stream (only Hyperliquid has one) or on an interval its stream does not carry (Hyperliquid: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d). The backtest is the same for both: it replays closed candles. `status` shows `feed` and, on `websocket`, `feed_state` (`ok` or `degraded`, and the stream's last update of each symbol's newest ended candle).
 - Credentials never go in the yml: at any level, a key whose name contains `secret`, `token`, `passphrase`, `password`, `apikey`, `privatekey` or `mnemonic`, or has a `key` part (`api_key`, `private-key`), is refused.
 
 ### Credentials
