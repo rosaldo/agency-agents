@@ -63,16 +63,25 @@ func TestDerivCSVRoundTrip(t *testing.T) {
 	}
 	row := func(at string) string { return at + ",AAA,2026-01-01T00:00:00Z,1,0,1\n" }
 	for name, bad := range map[string]string{
-		"header": "time,symbol,open_interest,funding_rate,mark_price\n",
-		"time":   DerivCSVHeader + "\n" + row("yesterday"),
-		"candle": DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,later,1,0,1\n",
-		"number": DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,2026-01-01T00:00:00Z,x,0,1\n",
-		"order":  DerivCSVHeader + "\n" + row("2026-01-01T00:02:00Z") + row("2026-01-01T00:01:00Z"),
-		"repeat": DerivCSVHeader + "\n" + row("2026-01-01T00:01:00Z") + row("2026-01-01T00:01:00Z"),
-		"torn":   DerivCSVHeader + "\n" + row("2026-01-01T00:01:00Z") + "2026-01-01T00:02:00Z,AAA,2026",
+		"header":      "time,symbol,open_interest,funding_rate,mark_price\n",
+		"time":        DerivCSVHeader + "\n" + row("yesterday"),
+		"candle":      DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,later,1,0,1\n",
+		"number":      DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,2026-01-01T00:00:00Z,x,0,1\n",
+		"nan oi":      DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,2026-01-01T00:00:00Z,NaN,0,1\n",
+		"inf funding": DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,2026-01-01T00:00:00Z,1,+Inf,1\n",
+		"inf mark":    DerivCSVHeader + "\n2026-01-01T00:01:00Z,AAA,2026-01-01T00:00:00Z,1,0,-Inf\n",
+		"order":       DerivCSVHeader + "\n" + row("2026-01-01T00:02:00Z") + row("2026-01-01T00:01:00Z"),
+		"repeat":      DerivCSVHeader + "\n" + row("2026-01-01T00:01:00Z") + row("2026-01-01T00:01:00Z"),
+		"torn":        DerivCSVHeader + "\n" + row("2026-01-01T00:01:00Z") + "2026-01-01T00:02:00Z,AAA,2026",
 	} {
-		if _, err := ReadDerivCSV(strings.NewReader(bad)); err == nil {
+		_, err := ReadDerivCSV(strings.NewReader(bad))
+		switch {
+		case err == nil:
 			t.Errorf("%s: accepted a bad file", name)
+		case strings.HasPrefix(name, "nan") || strings.HasPrefix(name, "inf"):
+			if !strings.Contains(err.Error(), "line 2") {
+				t.Errorf("%s: %v, want the line named", name, err)
+			}
 		}
 	}
 }

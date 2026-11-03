@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.56.4** (2026-11-03) · `fix` — quant-engine: the derivatives file refuses a non-finite number, naming the file and the line
 - **v1.56.3** (2026-11-03) · `fix` — quant-engine: status shows each trade in progress (budget, budget_used, tranches, stop)
 - **v1.56.2** (2026-11-03) · `fix` — quant-engine: an Add whose trade budget cannot be saved sends no order and counts nothing
 - **v1.56.1** (2026-11-03) · `test` — quant-engine: an Add refused by margin, leverage or liquidation counts neither a tranche nor its fraction

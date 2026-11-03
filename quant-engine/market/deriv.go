@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"slices"
@@ -86,7 +87,8 @@ func DerivCSVRow(symbol string, d Deriv) string {
 }
 
 // ReadDerivCSV parses the recorder's file into each symbol's snapshots,
-// oldest first; read times must increase per symbol. An empty file has none.
+// oldest first; read times must increase per symbol and every number must be
+// finite. An empty file has none.
 func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 	rows, err := csv.NewReader(r).ReadAll()
 	if err != nil {
@@ -112,8 +114,8 @@ func ReadDerivCSV(r io.Reader) (map[string][]Deriv, error) {
 			if j == 0 && !hasOI {
 				continue
 			}
-			if v[j], err = strconv.ParseFloat(row[j+3], 64); err != nil {
-				return nil, fmt.Errorf("derivatives: line %d: bad number %q", i+2, row[j+3])
+			if v[j], err = strconv.ParseFloat(row[j+3], 64); err != nil || math.IsNaN(v[j]) || math.IsInf(v[j], 0) {
+				return nil, fmt.Errorf("derivatives: line %d: bad number %q (finite numbers only)", i+2, row[j+3])
 			}
 		}
 		sym := row[1]
