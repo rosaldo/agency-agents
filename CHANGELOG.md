@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.51.7** (2026-11-02) · `fix` — quant-engine: after an Add whose swap failed, the engine keeps the stop the exchange actually holds (the cover's), not the one from before the Add
 - **v1.51.6** (2026-11-02) · `fix` — quant-engine: a backtest trade entered in tranches measures R against the stop in force after the Add, not the first tranche's
 - **v1.51.5** (2026-11-02) · `docs` — quant-engine: README describes the stop swap after each Add (whole quantity, stale old stop, restart cover, liquidation at the average price) in place of the warning against Add on a live account
 - **v1.51.4** (2026-11-02) · `chore` — quant-engine: code comments explain the why without citing internal documents (review, spec and task references removed)

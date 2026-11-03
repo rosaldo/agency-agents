@@ -504,6 +504,7 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		e.forget(sym)
 		return nil
 	case err != nil:
+		e.keepRestingStop(ctx, sym)
 		return err // Reconcile covers the whole quantity next step, or flattened and halted already
 	}
 	e.stops[sym] = stop
@@ -522,6 +523,22 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		}
 	}
 	return e.guardFilled(ctx, sym)
+}
+
+// keepRestingStop takes sym's stop price from the exchange after a failed
+// add: the swap's own Reconcile may already have covered the whole quantity
+// at the add's stop, and the engine must not fall back to the older one. An
+// unreadable position leaves the engine's stop as it was.
+func (e *Engine) keepRestingStop(ctx context.Context, sym string) {
+	ps, err := e.Ex.Positions(ctx, e.Env)
+	if err != nil {
+		return
+	}
+	for _, p := range ps {
+		if p.Symbol == sym && p.StopClientID != "" && p.StopPrice > 0 {
+			e.stops[sym] = p.StopPrice
+		}
+	}
 }
 
 // exit closes p at market; on failure its target and stop are kept for the
