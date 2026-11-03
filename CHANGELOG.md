@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.55.11** (2026-11-03) · `build` — quant-engine: depend on ccxt fork v5.0.3, which fixes the websocket client races
 - **v1.55.10** (2026-11-03) · `docs` — quant-engine: comments say why in words instead of internal requirement and review labels; code unchanged
 - **v1.55.9** (2026-11-03) · `fix` — quant-engine: news: a news block that cannot be saved goes to the journal as an error; the emergency exit still goes out
 - **v1.55.8** (2026-11-03) · `test` — quant-engine: news: a kill at the emergency exit's order finds the news block already on disk, and the restart within the lookback retries the exit and never re-enters, with the stop kept or already cancelled
