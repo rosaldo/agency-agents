@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.55.6** (2026-11-03) · `docs` — quant-engine: README: the news block survives a restart, 429/529 are retried within the timeout, choice questions are refused at load
 - **v1.55.5** (2026-11-03) · `fix` — quant-engine: news: judged headlines are kept until the end of their lookback, then dropped; one judged again is handed over again
 - **v1.55.4** (2026-11-03) · `fix` — quant-engine: news: a classification cut short by the caller's deadline is not kept: the next check asks again instead of blocking until the end of the lookback
 - **v1.55.3** (2026-11-03) · `fix` — quant-engine: a news result that comes during a stop is dropped: no false emergency_exit in the journal
