@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.57.5** (2026-11-03) · `perf` — quant-engine: the funding history finds each row's line in one pass
 - **v1.57.4** (2026-11-03) · `test` — quant-engine: an Add whose state cannot be saved leaves its margin free for the step's next symbol
 - **v1.57.3** (2026-11-03) · `fix` — quant-engine: a tranche whose state could not be written is never written by a later save
 - **v1.57.2** (2026-11-03) · `fix` — quant-engine: the funding history refuses a non-finite rate, naming the file and the line

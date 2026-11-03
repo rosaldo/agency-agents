@@ -162,9 +162,12 @@ func ReadFundingHistory(r io.Reader, symbol string, cs []Candle, interval time.D
 	if err != nil {
 		return nil, fmt.Errorf("funding history: %w", err)
 	}
-	lineAt := func(off int64) int { // the line of the first value at or after off
-		rest := bytes.TrimLeft(b[off:], " \t\r\n,")
-		return 1 + bytes.Count(b[:len(b)-len(rest)], []byte("\n"))
+	line, counted := 1, 0
+	lineAt := func(off int64) int { // the line of the first value at or after off; offsets only grow, so each byte is counted once
+		start := len(b) - len(bytes.TrimLeft(b[off:], " \t\r\n,"))
+		line += bytes.Count(b[counted:start], []byte("\n"))
+		counted = start
+		return line
 	}
 	var rows []row
 	dec := json.NewDecoder(bytes.NewReader(b))

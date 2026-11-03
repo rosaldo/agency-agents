@@ -137,6 +137,15 @@ func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
 			t.Errorf("rate %s: %v, want a refusal naming line 4", rate, err)
 		}
 	}
+	// CRLF and pages over many lines: the line is still the row's own
+	var crlf []string
+	for h := 0; h < 50; h++ {
+		crlf = append(crlf, "[\r\n"+row(h, "0.0001")+"\r\n]")
+	}
+	crlf = append(crlf, "[\r\n"+row(50, "NaN")+"\r\n]")
+	if _, err := ReadFundingHistory(strings.NewReader(strings.Join(crlf, "\r\n")), "BTC/USDC:USDC", cs, iv); err == nil || !strings.Contains(err.Error(), "line 152:") {
+		t.Errorf("CRLF: %v, want a refusal naming line 152", err)
+	}
 	// the coin of a symbol: a HIP-3 market's dex lower-cased, a colon, the ticker
 	hip3 := strings.ReplaceAll(row(0, "0.0001"), "BTC", "xyz:XYZ100")
 	if _, err := ReadFundingHistory(strings.NewReader("["+hip3+"]"), "XYZ-XYZ100/USDC:USDC", cs, iv); err != nil {
