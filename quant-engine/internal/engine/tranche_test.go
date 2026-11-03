@@ -354,3 +354,49 @@ func TestEnterNotSentLeavesItsMarginFree(t *testing.T) {
 		t.Fatalf("trades %+v, orders %d, rejections %q; want BBB entered on the margin AAA did not use", e.Trades(), f.Calls("PlaceOrder"), journalOf(e).rejected())
 	}
 }
+
+// The margin of an Add not sent stays free for the step's next symbol: the
+// Add and BBB's entry each lock about 5 000 of the cash AAA's first tranche
+// left, so BBB fits only if the Add's margin was given back.
+func TestAddNotSentLeavesItsMarginFree(t *testing.T) {
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		switch c := in.Candles[len(in.Candles)-1].Close; {
+		case in.Symbol == "AAA" && c == 105:
+			return enter(0.5, 100) // 10 units, 1 050 of margin
+		case in.Symbol == "AAA" && c == 103 && in.Position != nil:
+			return add(0.5, 101.97) // 50 / 1.03 = 48.5 units, 5 000 at 103
+		case in.Symbol == "BBB" && c == 103 && in.Position == nil:
+			return enter(0.5, 101.97)
+		}
+		return strategy.Decision{}
+	}}
+	c, err := config.Parse([]byte(strings.Replace(scriptedYAML, "[AAA]", "[AAA, BBB]", 1)), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for k, x := range []float64{100, 100, 100, 105, 103} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(k) * time.Hour), Open: x, High: x, Low: x, Close: x, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs, "BBB": cs}})
+	for k := 0; k < 3; k++ {
+		f.Advance()
+	}
+	now := cs[3].Time
+	e := New(c, s, f, exchange.Demo, &events{}, func() time.Time { return now })
+	saves := 0
+	e.OnTrade = func() error {
+		if saves++; saves == 2 { // the Add's
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	steps(t, e, f, 1)
+	now = cs[4].Time
+	steps(t, e, f, 2)
+	rej := journalOf(e).rejected()
+	if _, ok := e.Trades()["BBB"]; !ok || !strings.Contains(rej, "not persisted") || strings.Contains(rej, "margin") {
+		t.Fatalf("trades %+v, rejections %q; want the Add not sent and BBB entered on the margin it did not use", e.Trades(), rej)
+	}
+}
