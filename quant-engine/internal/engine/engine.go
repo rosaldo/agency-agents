@@ -187,6 +187,9 @@ func (e *Engine) Restore(targets map[string]float64, positions []exchange.Positi
 		short[p.Symbol] = p.PSide() == exchange.Short
 	}
 	for k, t := range trades {
+		if t.Tranches == 0 && t.Used > 0 {
+			t.Tranches = 1 // saved before tranches were counted: at least one went out
+		}
 		e.trades[k] = t
 		if cur, ok := e.stops[k]; t.Stop > 0 && (!ok || !short[k] && t.Stop > cur || short[k] && t.Stop < cur) {
 			e.stops[k] = t.Stop
@@ -370,7 +373,9 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	in := strategy.Input{Symbol: sym, Now: last.Time, Candles: cs}
 	if holding {
-		in.Position = &strategy.PositionView{Side: side, Qty: p.Qty, AvgPrice: p.AvgPrice, Stop: p.StopPrice, Target: e.targets[sym]}
+		t := e.trades[sym] // the persisted trade: the same in live, paper and backtest, and after a restart
+		in.Position = &strategy.PositionView{Side: side, Qty: p.Qty, AvgPrice: p.AvgPrice, Stop: p.StopPrice, Target: e.targets[sym],
+			BudgetUsed: t.Used, Tranches: t.Tranches}
 	}
 	if NeedsDerivatives(e.Strategy) {
 		in.Deriv = market.AlignDeriv(cs, e.deriv[sym], e.Cfg.Interval())

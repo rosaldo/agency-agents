@@ -87,7 +87,7 @@ func TestAddSizesFromTheBudgetFixedAtTheFirstTranche(t *testing.T) {
 	if math.Abs(p.Qty-(10+16.666)) > 1e-9 {
 		t.Fatalf("qty after the add %v, want 10 + 16.666 (50 / (103 - 100)); rejections %q", p.Qty, journalOf(e).rejected())
 	}
-	if got := e.Trades()["AAA"]; got != (risk.Trade{Budget: 100, Used: 1, Stop: 100}) {
+	if got := e.Trades()["AAA"]; got != (risk.Trade{Budget: 100, Used: 1, Tranches: 2, Stop: 100}) {
 		t.Fatalf("trade %+v, want budget 100 used 1", got)
 	}
 	if f.Calls("PlaceOrder") != 2 || !strings.Contains(journalOf(e).rejected(), "above the whole trade budget") {
@@ -150,7 +150,7 @@ func TestAddWithoutARecordedBudgetIsRefused(t *testing.T) {
 	}
 	e3 := New(c, s, f, exchange.Demo, &events{}, e.Exec.Now) // a restart with the saved trades keeps the budget
 	e3.Restore(e.Targets(), ps, nil, e.Trades())
-	if got := e3.Trades()["AAA"]; got != (risk.Trade{Budget: 100, Used: 0.5, Stop: 100}) {
+	if got := e3.Trades()["AAA"]; got != (risk.Trade{Budget: 100, Used: 0.5, Tranches: 1, Stop: 100}) {
 		t.Fatalf("restored trade %+v, want budget 100 used 0.5", got)
 	}
 }

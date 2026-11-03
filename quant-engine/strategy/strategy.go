@@ -46,6 +46,12 @@ type PositionView struct {
 	AvgPrice float64
 	Stop     float64 // stop resting on the exchange
 	Target   float64 // 0 = none
+	// BudgetUsed is the fraction of the trade's risk budget its tranches
+	// took so far (the sum of their Fractions), in (0, 1]; Tranches is how
+	// many there were. Both count a tranche once it is sent, even if its
+	// order then fails; 0 for a position entered without a recorded budget.
+	BudgetUsed float64
+	Tranches   int
 }
 
 type Side string

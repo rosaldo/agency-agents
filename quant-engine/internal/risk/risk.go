@@ -140,13 +140,15 @@ type SizeInput struct {
 
 // Trade is the risk budget of one position entered in tranches (graduated
 // entry): fixed at the first tranche as equity x max_risk_per_trade_pct,
-// the fraction of it the tranches used so far, and the stop the last one
-// was sized against (set by the engine). Persisted, so a restart cannot
-// renew the budget nor protect a tranche at a looser stop than its own.
+// the fraction of it the tranches used so far, how many tranches were
+// counted, and the stop the last one was sized against (set by the engine).
+// Persisted, so a restart cannot renew the budget nor protect a tranche at a
+// looser stop than its own.
 type Trade struct {
-	Budget float64 `json:"budget"`
-	Used   float64 `json:"used"`
-	Stop   float64 `json:"stop,omitempty"`
+	Budget   float64 `json:"budget"`
+	Used     float64 `json:"used"`
+	Tranches int     `json:"tranches,omitempty"`
+	Stop     float64 `json:"stop,omitempty"`
 }
 
 // Tranche sizes a tranche of fraction f (0 = 1) of t's budget against
@@ -171,7 +173,7 @@ func (t Trade) Tranche(f float64, in SizeInput) (next Trade, qty float64, why st
 	if qty, why = size(t.Budget*f, in); qty == 0 {
 		return t, 0, why
 	}
-	return Trade{Budget: t.Budget, Used: t.Used + f}, qty, why
+	return Trade{Budget: t.Budget, Used: t.Used + f, Tranches: t.Tranches + 1}, qty, why
 }
 
 // Size is the quantity whose loss at the stop stays within the per-trade risk

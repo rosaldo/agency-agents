@@ -115,7 +115,7 @@ type State struct {
 	Positions  []exchange.Position   `json:"positions"`
 	Targets    map[string]float64    `json:"targets"`
 	StaleStops map[string]string     `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
-	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget and fraction used (graduated entry); absent = none in progress
+	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget, fraction used and tranches (graduated entry); absent = none in progress
 	NewsUntil  map[string]time.Time  `json:"news_until,omitempty"`  // symbol -> end of the block a news catastrophe set; absent = none
 	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L
 	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs

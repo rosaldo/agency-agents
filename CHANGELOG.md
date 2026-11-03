@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.56.0** (2026-11-03) · `feat` — quant-engine: PositionView tells the strategy the budget used and the tranches of the trade, read from the saved trades
 - **v1.55.12** (2026-11-03) · `test` — quant-engine: stream test runs with the default keep-alive now that the fork tears down cleanly
 - **v1.55.11** (2026-11-03) · `build` — quant-engine: depend on ccxt fork v5.0.3, which fixes the websocket client races
 - **v1.55.10** (2026-11-03) · `docs` — quant-engine: comments say why in words instead of internal requirement and review labels; code unchanged

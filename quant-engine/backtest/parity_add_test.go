@@ -80,3 +80,49 @@ func TestBacktestAndLoopAddAlike(t *testing.T) {
 		t.Fatalf("loop fills %q (a resting stop for 7: %v); want %q and a stop for the whole 7", fills, whole, want)
 	}
 }
+
+// The backtest and the loop tell the strategy the same budget used and
+// tranche count on the same candles, Enter then Add then Add, a refused
+// fourth tranche counting nothing.
+func TestBacktestAndLoopCountTheTranchesAlike(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for i, x := range []float64{100, 101, 103, 104, 105, 106, 106} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: x, High: x, Low: x, Close: x, Volume: 10})
+	}
+	type used struct {
+		budget   float64
+		tranches int
+	}
+	script := func(views *[]used) *scripted.Strategy {
+		return &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+			if in.Position == nil {
+				*views = append(*views, used{})
+			} else {
+				*views = append(*views, used{in.Position.BudgetUsed, in.Position.Tranches})
+			}
+			switch h := in.Now.Hour(); {
+			case in.Position == nil && h == 1:
+				return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 90, Fraction: 0.5, Reason: "first"}
+			case in.Position != nil && h >= 2 && h <= 4:
+				return strategy.Decision{Action: strategy.Add, Side: strategy.Long, Fraction: 0.25, Reason: "more"}
+			}
+			return strategy.Decision{}
+		}}
+	}
+	var bv, lv []used
+	if _, err := Run(context.Background(), script(&bv), []byte(parityYAML), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1}); err != nil {
+		t.Fatal(err)
+	}
+	ls := script(&lv)
+	c, err := config.Parse([]byte(parityYAML), ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
+	loop.Run(context.Background(), c, ls, f, exchange.Demo, &loop.FakeTicker{Ex: f, Candles: cs}, filepath.Join(t.TempDir(), ".scripted"))
+	want := []used{{}, {}, {0.5, 1}, {0.75, 2}, {1, 3}, {1, 3}, {1, 3}} // one Decide per candle; the add at 04:00 is refused
+	if !slices.Equal(bv, want) || !slices.Equal(lv, want) {
+		t.Fatalf("budget used / tranches seen:\nbacktest %+v\nloop     %+v\nwant     %+v", bv, lv, want)
+	}
+}

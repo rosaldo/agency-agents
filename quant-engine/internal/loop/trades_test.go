@@ -92,7 +92,7 @@ func TestLoopKeepsTheTradeInTheStateFile(t *testing.T) {
 		}
 	}}
 	Run(context.Background(), c, s, f, exchange.Demo, tick, dir)
-	if held["AAA"] != (risk.Trade{Budget: 100, Used: 0.5, Stop: 100}) {
+	if held["AAA"] != (risk.Trade{Budget: 100, Used: 0.5, Tranches: 1, Stop: 100}) {
 		t.Fatalf("state after the entry holds trades %+v, want AAA budget 100 used 0.5", held)
 	}
 	if st, _ := LoadState(dir, "paper"); len(st.Trades) != 0 || len(st.Positions) != 0 {
@@ -187,4 +187,37 @@ func ownPosition(t *testing.T, f *fake.Fake) exchange.Position {
 		t.Fatalf("positions %+v, want one", ps)
 	}
 	return ps[0]
+}
+
+// A kill -9 right after an Add's fill: the restarted process tells the
+// strategy the budget used and the tranches the state file saved before
+// the order, not a count rebuilt in memory.
+func TestRestartTellsTheStrategyThePersistedTranches(t *testing.T) {
+	f, cs := trancheFake()
+	ex := &crashAfterFill{Fake: f, armedAt: -1}
+	dir := filepath.Join(t.TempDir(), "state")
+	s := scriptOf(func(d strategy.Decision) {
+		if d.Action == strategy.Add {
+			ex.armedAt = f.Calls("PlaceOrder")
+		}
+	}, wait, wait, wait, tranche(strategy.Enter, 100), tranche(strategy.Add, 0))
+	c, _ := config.Parse([]byte(trancheYAML), s)
+	tick := &FakeTicker{Ex: f, Candles: cs}
+	if !runUntilKilled(t, c, s, ex, tick, dir) {
+		t.Fatal("setup: the loop was never killed after the add")
+	}
+	ex.armedAt = -1
+	f.Advance()
+	var seen []strategy.PositionView
+	s2 := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		if in.Position != nil {
+			seen = append(seen, *in.Position)
+		}
+		return strategy.Decision{}
+	}}
+	c2, _ := config.Parse([]byte(trancheYAML), s2)
+	Run(context.Background(), c2, s2, ex, exchange.Demo, tickerFrom(f, cs, tick.i.Load()+1), dir)
+	if len(seen) == 0 || seen[0].BudgetUsed != 1 || seen[0].Tranches != 2 {
+		t.Fatalf("views after the restart %+v, want the budget wholly used in 2 tranches", seen)
+	}
 }
