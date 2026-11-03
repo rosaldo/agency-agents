@@ -356,11 +356,15 @@ func (s *Sim) CancelOrder(_ context.Context, env exchange.Env, clientID string) 
 	if !ok {
 		return st, fmt.Errorf("paper: unknown order %s", clientID)
 	}
+	if st.Status != exchange.Open {
+		return st, nil
+	}
+	// a stop a swap replaced no longer guards the position, but still rests until cancelled
 	if h := s.pos[st.Symbol]; h != nil && h.stopID == clientID {
 		h.stopID, h.stop = "", 0
-		st.Status = exchange.Canceled
-		s.orders[clientID] = st
 	}
+	st.Status = exchange.Canceled
+	s.orders[clientID] = st
 	return st, nil
 }
 

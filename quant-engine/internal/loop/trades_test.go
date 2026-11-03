@@ -92,7 +92,7 @@ func TestLoopKeepsTheTradeInTheStateFile(t *testing.T) {
 		}
 	}}
 	Run(context.Background(), c, s, f, exchange.Demo, tick, dir)
-	if held["AAA"] != (risk.Trade{Budget: 100, Used: 0.5}) {
+	if held["AAA"] != (risk.Trade{Budget: 100, Used: 0.5, Stop: 100}) {
 		t.Fatalf("state after the entry holds trades %+v, want AAA budget 100 used 0.5", held)
 	}
 	if st, _ := LoadState(dir, "paper"); len(st.Trades) != 0 || len(st.Positions) != 0 {

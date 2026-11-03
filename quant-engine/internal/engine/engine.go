@@ -39,11 +39,11 @@ type Engine struct {
 	// (mainnet, testnet) it counts the profile floored at the real one (FR-R1).
 	Simulated bool
 	// OnStale, when set, persists the stale stops at once: a crash right
-	// after a move must not lose the one left behind (QA-T10b-3).
+	// after a move must not lose the one left behind.
 	OnStale func()
 	// OnTrade, when set, persists the trade budgets and fractions used before
 	// each tranche's order: a kill -9 between the fill and the end-of-step save
-	// must not renew the budget (spec §6.2). An error refuses the order.
+	// must not renew the budget. An error refuses the order.
 	OnTrade func() error
 	// OnDeriv, when set, gets each new derivatives snapshot of a swap symbol
 	// (the loop's recorder); snapshots are then read for every strategy.
@@ -136,20 +136,28 @@ func (e *Engine) Targets() map[string]float64 {
 
 // Restore reloads the targets, the positions' stops, the stale stops and
 // the trade budgets saved by a previous run; nil trades (a state from before
-// graduated entries) means no tranche in progress.
+// graduated entries) means no tranche in progress. A trade's stop tighter
+// than the saved position's is the one kept: a kill after an add's fill
+// left the position saved as before it, and the tranche was sized against
+// the add's stop.
 func (e *Engine) Restore(targets map[string]float64, positions []exchange.Position, stale map[string]string, trades map[string]risk.Trade) {
 	for k, v := range targets {
 		e.targets[k] = v
 	}
-	for k, v := range trades {
-		e.trades[k] = v
-	}
 	for k, v := range stale {
 		e.staleStops[k] = v
 	}
+	short := map[string]bool{}
 	for _, p := range positions {
 		if p.StopPrice > 0 {
 			e.stops[p.Symbol] = p.StopPrice
+		}
+		short[p.Symbol] = p.PSide() == exchange.Short
+	}
+	for k, t := range trades {
+		e.trades[k] = t
+		if cur, ok := e.stops[k]; t.Stop > 0 && (!ok || !short[k] && t.Stop > cur || short[k] && t.Stop < cur) {
+			e.stops[k] = t.Stop
 		}
 	}
 }
@@ -363,7 +371,8 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
 		return nil
 	}
-	*free -= margin       // also on a failed entry: it may have filled
+	*free -= margin // also on a failed entry: it may have filled
+	trade.Stop = d.Stop
 	e.trades[sym] = trade // before the order: a fill of unknown fate keeps the budget used
 	if why := e.persistTrades(); why != "" {
 		e.skip(sym, why)
@@ -405,12 +414,15 @@ func (e *Engine) sizeInput(sym string, equity, entry, stop float64, short bool) 
 		SlippagePct: c.SlippagePct, CommissionPct: c.CommissionPct, QtyStep: step, MinQty: minQty}
 }
 
-// add is a further tranche of the position p (graduated entry, spec §6.1):
+// add is a further tranche of the position p (graduated entry):
 // sized from the budget fixed at the trade's first tranche, never the
 // current equity, against the position's stop (or a tighter one the Add
 // brings); free margin, the leverage ceiling and the stop clear of the
 // liquidation are checked on the AGGREGATE position, the drawdown breaker
 // by the executor. It is decided on the same closed candle as an Enter.
+// Once it fills, the executor swaps the position's stop for one covering the
+// whole quantity, and the stop is checked against the exchange's liquidation
+// at the new average price.
 func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d strategy.Decision, last market.Candle, equity float64, free *float64) error {
 	side, short := strategy.Long, p.PSide() == exchange.Short
 	if short {
@@ -479,17 +491,35 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		return nil
 	}
 	*free -= margin
+	next.Stop = stop
 	e.trades[sym] = next // before the order: a fill of unknown fate keeps the fraction used
 	if why := e.persistTrades(); why != "" {
 		e.skip(sym, "add refused: "+why)
 		return nil
 	}
-	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: p.PSide(), Entry: last.Close, Stop: stop, Target: d.Target, Qty: qty}); err != nil {
-		return err
+	stale, err := e.Exec.Add(ctx, sym, last.Time, p, exec.Plan{Side: p.PSide(), Entry: last.Close, Stop: stop, Target: d.Target, Qty: qty})
+	e.keepStale(sym, stale)
+	switch {
+	case errors.Is(err, exec.ErrStopFilled):
+		e.forget(sym)
+		return nil
+	case err != nil:
+		return err // Reconcile covers the whole quantity next step, or flattened and halted already
 	}
 	e.stops[sym] = stop
 	if d.Target > 0 {
 		e.targets[sym] = d.Target
+	}
+	if stale != "" && e.Cfg.Market == "spot" { // the exit sells the whole quantity, the add's included
+		ps, err := e.Ex.Positions(ctx, e.Env)
+		if err != nil {
+			return fmt.Errorf("after add %s: positions: %w", sym, err)
+		}
+		for _, q := range ps {
+			if q.Symbol == sym {
+				return e.exitIfStaleOnSpot(ctx, q, stale, stop, last.Time, "add-stop", "add: old stop not cancelled on spot")
+			}
+		}
 	}
 	return e.guardFilled(ctx, sym)
 }

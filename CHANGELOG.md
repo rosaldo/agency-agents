@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.51.0** (2026-11-02) · `feat` — quant-engine: after an Add fills, the engine swaps the stop for one covering the whole position (stale old stop kept as for a trail; closed at once on spot) and checks it against the liquidation at the new average price; the trade keeps the Add's stop for a restart; the paper simulator cancels a replaced stop
 - **v1.50.0** (2026-11-02) · `feat` — quant-engine: Executor.Add grows a position and swaps its stop for one of the whole quantity, new first; Reconcile covers a stop that closes less than the own quantity, flattening the uncovered part when it cannot
 - **v1.49.3** (2026-10-31) · `docs` — quant-engine: README warns not to use Add on a live account until the stop is resized to the aggregate quantity, and says the trade budget is saved before each tranche's order
 - **v1.49.2** (2026-10-31) · `test` — quant-engine: graduated entry tests for the aggregate leverage ceiling, the loop keeping the trade in the state file, and an Add refused on a stale stop, a blocked symbol or news

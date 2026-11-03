@@ -63,12 +63,7 @@ func (e *Engine) trail(ctx context.Context, p exchange.Position, in strategy.Inp
 		return nil
 	}
 	stale, err := e.Exec.MoveStop(ctx, p, next, candle)
-	if stale != "" {
-		e.staleStops[p.Symbol] = stale
-		if e.OnStale != nil {
-			e.OnStale()
-		}
-	}
+	e.keepStale(p.Symbol, stale)
 	switch {
 	case errors.Is(err, exec.ErrStopFilled):
 		e.forget(p.Symbol)
@@ -77,13 +72,30 @@ func (e *Engine) trail(ctx context.Context, p exchange.Position, in strategy.Inp
 		return err // the old stop stands; the next step tries again
 	}
 	e.stops[p.Symbol] = next
-	if stale != "" && e.Cfg.Market == "spot" {
-		// without reduce-only, the old stop and the new one could both sell
-		q := p
-		q.StopClientID, q.StopPrice = e.Exec.ID(p.Symbol, candle, "trail"), next
-		return e.exit(ctx, q, candle, "trail: old stop not cancelled on spot")
+	return e.exitIfStaleOnSpot(ctx, p, stale, next, candle, "trail", "trail: old stop not cancelled on spot")
+}
+
+// keepStale records the old stop a swap could not cancel and persists it.
+func (e *Engine) keepStale(sym, stale string) {
+	if stale == "" {
+		return
 	}
-	return nil
+	e.staleStops[sym] = stale
+	if e.OnStale != nil {
+		e.OnStale()
+	}
+}
+
+// exitIfStaleOnSpot closes p at once when a swap to the stop at price,
+// placed as purpose, left the old one stale on spot: without reduce-only,
+// the old stop and the new one could both sell.
+func (e *Engine) exitIfStaleOnSpot(ctx context.Context, p exchange.Position, stale string, price float64, candle time.Time, purpose, reason string) error {
+	if stale == "" || e.Cfg.Market != "spot" {
+		return nil
+	}
+	q := p
+	q.StopClientID, q.StopPrice = e.Exec.ID(p.Symbol, candle, purpose), price
+	return e.exit(ctx, q, candle, reason)
 }
 
 // retryStale cancels the stops a move left behind; one that is gone frees
