@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.56.1** (2026-11-03) · `test` — quant-engine: an Add refused by margin, leverage or liquidation counts neither a tranche nor its fraction
 - **v1.56.0** (2026-11-03) · `feat` — quant-engine: PositionView tells the strategy the budget used and the tranches of the trade, read from the saved trades
 - **v1.55.12** (2026-11-03) · `test` — quant-engine: stream test runs with the default keep-alive now that the fork tears down cleanly
 - **v1.55.11** (2026-11-03) · `build` — quant-engine: depend on ccxt fork v5.0.3, which fixes the websocket client races

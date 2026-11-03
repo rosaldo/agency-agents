@@ -171,6 +171,16 @@ func TestAddAboveTheFreeMarginIsRefused(t *testing.T) {
 	if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "margin") {
 		t.Fatalf("orders %d, rejections %q; want a margin refusal", f.Calls("PlaceOrder"), journalOf(e).rejected())
 	}
+	wantFirstTrancheOnly(t, e)
+}
+
+// wantFirstTrancheOnly fails unless the trade still counts only the
+// first tranche: a refused Add counts neither a tranche nor its fraction.
+func wantFirstTrancheOnly(t *testing.T, e *Engine) {
+	t.Helper()
+	if got := e.Trades()["AAA"]; got.Used != 0.5 || got.Tranches != 1 {
+		t.Fatalf("trade %+v after a refused add, want used 0.5 and 1 tranche", got)
+	}
 }
 
 // richCash reports more free cash than the equity backs (the margin check
@@ -190,6 +200,7 @@ func TestAddAboveTheLeverageCeilingIsRefused(t *testing.T) {
 	if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "leverage") {
 		t.Fatalf("orders %d, rejections %q; want a leverage refusal", f.Calls("PlaceOrder"), journalOf(e).rejected())
 	}
+	wantFirstTrancheOnly(t, e)
 }
 
 // Each tranche: the stop must clear the liquidation of the AGGREGATE
@@ -202,6 +213,7 @@ func TestAddWhoseAggregateStopMeetsTheLiquidationIsRefused(t *testing.T) {
 	if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "liquidation") {
 		t.Fatalf("orders %d, rejections %q; want a liquidation refusal", f.Calls("PlaceOrder"), journalOf(e).rejected())
 	}
+	wantFirstTrancheOnly(t, e)
 }
 
 // An exit ends the trade: the next Enter fixes a new budget.
@@ -222,6 +234,7 @@ func TestAddWhoseAggregateNotionalIsAboveTheLeverageCeilingIsRefused(t *testing.
 	if f.Calls("PlaceOrder") != 1 || !strings.Contains(journalOf(e).rejected(), "leverage") {
 		t.Fatalf("orders %d, rejections %q; want a leverage refusal of the aggregate", f.Calls("PlaceOrder"), journalOf(e).rejected())
 	}
+	wantFirstTrancheOnly(t, e)
 }
 
 // blockedOwn reports the engine's own position as blocked (e.g. foreign qty
