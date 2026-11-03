@@ -238,3 +238,17 @@ func TestNewsBlockSurvivesARestart(t *testing.T) {
 			buys, verdicts, hits, feedHits.Load(), cs[4].Time)
 	}
 }
+
+// A stop while the classifier is answering cancels the call; the failure it
+// hands back is no catastrophe: nothing is journaled, no exit is asked.
+func TestAStopDuringAClassificationJournalsNoEmergencyExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := news.Finding{Symbol: "AAA", Headline: "AAA exchange hack", Feed: "f", Err: context.Canceled, Catastrophe: true}
+	var notes, exits int
+	exit := func(context.Context, string, time.Time, string) error { exits++; return nil }
+	handleNews(ctx, exit, 0.9, newsResult{symbol: "AAA", found: []news.Finding{f}}, func(journal.Event) { notes++ }, func(string, string) { notes++ })
+	if notes != 0 || exits != 0 {
+		t.Fatalf("%d journal events, %d exits after the stop; want none", notes, exits)
+	}
+}

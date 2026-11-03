@@ -89,8 +89,13 @@ func (w *newsWorker) results() <-chan newsResult {
 type emergencyExit func(ctx context.Context, sym string, until time.Time, reason string) error
 
 // handleNews journals a result and, on a catastrophe, exits at once and
-// blocks the symbol; on the loop's goroutine.
+// blocks the symbol; on the loop's goroutine. A result that comes during a
+// stop is dropped: a classification the stop cut short is no verdict, and
+// the next run checks the headline again.
 func handleNews(ctx context.Context, exit emergencyExit, threshold float64, r newsResult, note func(journal.Event), record func(kind, reason string)) {
+	if ctx.Err() != nil {
+		return
+	}
 	if r.err != nil {
 		note(journal.Event{Kind: journal.NewsCheckFailed, Symbol: r.symbol,
 			Reason: "the position stays, its stop on the exchange; checked again at the next step: " + r.err.Error()})
