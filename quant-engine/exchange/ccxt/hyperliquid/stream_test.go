@@ -152,13 +152,6 @@ func stream(t *testing.T, ws *httptest.Server, n int, syms ...string) []exchange
 	api := w.(feedClient).Urls["api"].(map[string]any)
 	api["public"], api["private"] = venue.URL, venue.URL
 	api["ws"].(map[string]any)["public"] = "wss" + strings.TrimPrefix(ws.URL, "https")
-	// no keep-alive ping: the replay is over well within one, and a client
-	// left over from an earlier run of the test would ping its closed
-	// server and fail that run with the fork's own teardown race
-	if _, ok := w.(feedClient).Options.Load("ws"); ok {
-		t.Fatal("the fork now sets ws options: merge the keep-alive into them")
-	}
-	w.(feedClient).Options.Store("ws", map[string]any{"keepAlive": int64(0)})
 	a, err := ccxt.New(dialTo(t, venue, syms), ccxt.Options{Venue: Venue, Symbols: syms, Market: "swap",
 		Env: exchange.Real, Book: filepath.Join(t.TempDir(), "book.json"), Feed: w})
 	if err != nil {
