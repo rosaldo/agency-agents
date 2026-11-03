@@ -171,7 +171,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 			}
 			open = &Trade{Side: side, EntryTime: now, Qty: p.Qty, EntryPrice: p.AvgPrice, Stop: p.StopPrice, Target: t}
 		case open != nil && held && p.Qty != open.Qty: // a further tranche: the trade is the aggregate position
-			open.Qty, open.EntryPrice = p.Qty, p.AvgPrice
+			open.Qty, open.EntryPrice, open.Stop = p.Qty, p.AvgPrice, p.StopPrice // R against the stop in force
 		case open != nil && !held:
 			st, _ := ex.Order(en.Exec.ID(sym, now, "exit"))
 			reason := "exit" // the strategy's Exit
