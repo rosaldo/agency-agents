@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.54.2** (2026-11-02) · `test` — quant-engine: engine test: a REST candle newer than the one the stream ended takes no decision (candle_not_final)
 - **v1.54.1** (2026-11-02) · `test` — quant-engine: FeedTicker tests: a boundary after the deadline wakes no extra step, a boundary at the deadline instant is one step, a boundary before the local close waits for it
 - **v1.54.0** (2026-11-02) · `feat` — quant-engine: feed: rest | websocket; loop.FeedTicker steps on the stream or at the boundary plus 5 s, journals feed_degraded/feed_restored, status shows the feed; refused at load without a stream or interval; parity with the backtest (Enter then Add included)
 - **v1.53.0** (2026-11-02) · `feat` — quant-engine: engine candle buffer (only the candles closed since the last step over REST, whole window at start and after a reset) and the candle_not_final check against the candle the stream ended
