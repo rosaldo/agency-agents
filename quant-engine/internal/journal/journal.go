@@ -49,6 +49,10 @@ const (
 	NewsVerdict     = "news_verdict"
 	NewsCheckFailed = "news_check_failed"
 	EmergencyExit   = "emergency_exit"
+	// Retarget: a strategy.Retargeter's target set on the position as filled
+	// (old and new target, average price, quantity), refused, or put off
+	// because the position could not be read after the fill.
+	Retarget = "retarget"
 )
 
 type Event struct {

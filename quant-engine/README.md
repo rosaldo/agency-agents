@@ -41,7 +41,7 @@ The binary name, the state directory (`.<name>/`), the default yml (`<name>.yml`
 my-strategy check                      # validate the yml: {"config":"ok"}
 my-strategy backtest --candles btc.csv --capital 10000
 my-strategy start                      # background loop, paper by default
-my-strategy status                     # one JSON line: mode, P&L, limits, positions and their stops
+my-strategy status                     # one JSON line: mode, P&L, limits, positions, their stops and targets
 my-strategy stop                       # positions stay protected by their exchange stops
 my-strategy stop --flatten             # also close every position at market
 ```
@@ -66,9 +66,10 @@ Graduated entry: `Decision.Fraction` (in (0, 1]; 0 means 1, today's single entry
 
 After each `Add` fills, the executor swaps the position's stop for one covering the whole quantity at the position's stop (or the tighter one the `Add` brought): the new stop is placed first and the old one cancelled after, so no instant leaves the added quantity unprotected. An old stop whose cancel fails is kept as stale and blocks the symbol, as for a trailing move (on spot, where both could sell, the position is closed at once); a new stop that cannot be placed leaves the start of the next step to cover the whole quantity, or to flatten the part the old stop misses and halt. The stop is then checked against the liquidation the exchange reports at the new average price, flattening and halting on a violation. A restart after a kill between an `Add`'s fill and the swap covers the whole quantity at the `Add`'s stop, with the trade budget as it was. The paper simulator goes through the same swap; a backtest trade entered in tranches reports the aggregate quantity and average price.
 
-Three optional interfaces extend a strategy:
+Four optional interfaces extend a strategy:
 
 - **`strategy.Trailer`** moves the stop by any rule the strategy defines (a moving average, ATR, structure). The engine applies an answer only when it tightens the stop, stays on the right side of the price and clear of the liquidation, and swaps the stop on the exchange without leaving the position unprotected. Backtest, paper, testnet and mainnet use the same rule.
+- **`strategy.Retargeter`** sets the exit target on the position as it actually filled: the engine sizes every tranche, so only it knows the real quantity and average price. Once an `Enter`'s or an `Add`'s fill is confirmed, the engine reads the position back from the exchange and calls `Retarget(in)` with the candle's `Input` and `in.Position` as filled (real `Qty` and `AvgPrice`, the stop, the target in force, `BudgetUsed`, `Tranches`). A positive answer replaces the target, 0 keeps it, a negative or non-finite one is refused; each change or refusal is journaled as `retarget`. The target is the engine's own check on each closed candle, never an order on the exchange, so backtest, paper, testnet and mainnet apply it alike; it is saved under `targets` in `state-<level>.json`, survives a restart, and `status` shows it under `targets`. When the position cannot be read after the fill, the `Decision`'s target stands, the failure is journaled, and the call is owed (`retarget_due` in the state, kept across a restart) and made at the symbol's next step, before the decision. A strategy without it behaves exactly as before: the `Decision`'s target, set before the fill.
 - **`strategy.NewsSource`** supplies the news policy: feeds, keywords, aliases and lookback. See [News guard](#news-guard).
 - **`strategy.DerivativesUser`** gets `Input.Deriv`: open interest, funding rate and mark price, one snapshot per candle. The snapshot of a closed candle is the one the engine reads in that candle's own step, after the close and before the decision. A read at or before the close, or in a later step, does not count, and a candle without a snapshot is marked missing. The engine refuses such a strategy at load on a spot market or on an adapter that does not read the data.
 

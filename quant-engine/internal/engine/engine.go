@@ -81,6 +81,9 @@ type Engine struct {
 	blocked    map[string]string     // last journaled block reason per symbol
 	newsUntil  map[string]time.Time  // symbol -> end of the block a news catastrophe set
 	funding    map[string]time.Time
+	// retargetDue: symbols whose Retargeter call is owed because the
+	// position could not be read after the fill (persisted, retried next step)
+	retargetDue map[string]bool
 }
 
 // New wires the executor and the breaker from the config; cfg must have been
@@ -88,7 +91,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{}, trades: map[string]risk.Trade{},
-		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, newsUntil: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, newsUntil: map[string]time.Time{}, retargetDue: map[string]bool{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
@@ -229,6 +232,7 @@ func (e *Engine) forget(sym string) {
 	delete(e.targets, sym)
 	delete(e.stops, sym)
 	delete(e.trades, sym)
+	delete(e.retargetDue, sym)
 }
 
 // ConfigureMarkets applies perp.margin_mode and perp.leverage to every
@@ -352,6 +356,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	holding := p.Qty > 0 // a blocked symbol may come back with nothing held
 	if !holding {
 		delete(e.trades, sym) // no trade in progress while flat
+		delete(e.retargetDue, sym)
 	}
 	if _, known := e.stops[sym]; known && !holding {
 		e.note(journal.ClosedOutside, sym, "the engine's position is gone without an exit of this step "+
@@ -373,9 +378,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	in := strategy.Input{Symbol: sym, Now: last.Time, Candles: cs}
 	if holding {
-		t := e.trades[sym] // the persisted trade: the same in live, paper and backtest, and after a restart
-		in.Position = &strategy.PositionView{Side: side, Qty: p.Qty, AvgPrice: p.AvgPrice, Stop: p.StopPrice, Target: e.targets[sym],
-			BudgetUsed: t.Used, Tranches: t.Tranches}
+		in.Position = e.view(p)
 	}
 	if NeedsDerivatives(e.Strategy) {
 		in.Deriv = market.AlignDeriv(cs, e.deriv[sym], e.Cfg.Interval())
@@ -391,12 +394,16 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 			return nil
 		}
 	}
+	if holding && e.retargetDue[sym] { // owed since a fill whose position could not be read
+		e.applyRetarget(p, in)
+		in.Position = e.view(p)
+	}
 	d := e.Strategy.Decide(in)
 	switch {
 	case d.Action == strategy.Exit && holding:
 		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
 	case d.Action == strategy.Add:
-		return e.add(ctx, sym, p, d, last, equity, free)
+		return e.add(ctx, sym, p, d, in, equity, free)
 	case d.Action == strategy.None && holding:
 		return e.trail(ctx, p, in, last.Close, last.Time)
 	case d.Action == strategy.None && d.Reason != "":
@@ -464,6 +471,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	if d.Target > 0 {
 		e.targets[sym] = d.Target
 	}
+	e.retarget(ctx, sym, in)
 	return e.guardFilled(ctx, sym)
 }
 
@@ -502,7 +510,8 @@ func (e *Engine) sizeInput(sym string, equity, entry, stop float64, short bool) 
 // Once it fills, the executor swaps the position's stop for one covering the
 // whole quantity, and the stop is checked against the exchange's liquidation
 // at the new average price.
-func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d strategy.Decision, last market.Candle, equity float64, free *float64) error {
+func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d strategy.Decision, in strategy.Input, equity float64, free *float64) error {
+	last := in.Candles[len(in.Candles)-1]
 	side, short := strategy.Long, p.PSide() == exchange.Short
 	if short {
 		side = strategy.Short
@@ -604,6 +613,7 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 			}
 		}
 	}
+	e.retarget(ctx, sym, in)
 	return e.guardFilled(ctx, sym)
 }
 

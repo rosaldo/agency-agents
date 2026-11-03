@@ -117,13 +117,16 @@ type State struct {
 	StaleStops map[string]string     `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget, fraction used and tranches (graduated entry); absent = none in progress
 	NewsUntil  map[string]time.Time  `json:"news_until,omitempty"`  // symbol -> end of the block a news catastrophe set; absent = none
-	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L
-	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs
-	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts
-	Feed       string                `json:"feed,omitempty"`        // rest | websocket
-	FeedState  *FeedState            `json:"feed_state,omitempty"`  // websocket only
-	LastEvent  string                `json:"last_event"`
-	StopReason string                `json:"stop_reason"`
+	// RetargetDue: symbols whose strategy.Retargeter call is owed (the position
+	// could not be read after a fill); absent = none
+	RetargetDue []string   `json:"retarget_due,omitempty"`
+	Funding     string     `json:"funding,omitempty"`    // what the adapter leaves out of P&L
+	PaperSim    string     `json:"sim,omitempty"`        // the simulator's profile and costs
+	Sizing      string     `json:"sizing,omitempty"`     // the profile and costs sizing counts
+	Feed        string     `json:"feed,omitempty"`       // rest | websocket
+	FeedState   *FeedState `json:"feed_state,omitempty"` // websocket only
+	LastEvent   string     `json:"last_event"`
+	StopReason  string     `json:"stop_reason"`
 }
 
 var levels = []string{"paper", "testnet", "mainnet"}
@@ -373,13 +376,14 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
 	en.Restore(prev.Targets, prev.Positions, prev.StaleStops, prev.Trades)
 	en.RestoreNews(prev.NewsUntil)
+	en.RestoreRetarget(prev.RetargetDue)
 	var nw *newsWorker // crypto with news_guard required: checked after the entry
 	if g, ok := en.News.(*news.Guard); ok && cfg.AssetClass == "crypto" && cfg.NewsGuard == "required" {
 		nw = startNewsWorker(ctx, g)
 	}
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
-		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), NewsUntil: en.NewsBlocks(), Breaker: prev.Breaker,
+		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), NewsUntil: en.NewsBlocks(), RetargetDue: en.RetargetDue(), Breaker: prev.Breaker,
 		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
@@ -512,7 +516,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	_ = j.Append(journal.Event{Time: tick.Now(), Kind: Stop, Reason: reason})
 	save(func(s *State) {
 		s.Running, s.StopReason, s.LastEvent, s.Targets, s.StaleStops, s.Trades = false, reason, Stop+" "+reason, en.Targets(), en.StaleStops(), en.Trades()
-		s.NewsUntil = en.NewsBlocks()
+		s.NewsUntil, s.RetargetDue = en.NewsBlocks(), en.RetargetDue()
 		if restored {
 			s.Breaker = snapshot(en)
 		}
@@ -573,7 +577,7 @@ func saveAccount(ctx context.Context, en *engine.Engine, ex exchange.Exchange, e
 		ps, _ := ex.Positions(ctx, env)
 		save(func(s *State) {
 			s.Equity, s.Positions, s.Targets, s.StaleStops, s.Trades, s.Breaker = bal.Equity, ps, en.Targets(), en.StaleStops(), en.Trades(), snapshot(en)
-			s.NewsUntil = en.NewsBlocks()
+			s.NewsUntil, s.RetargetDue = en.NewsBlocks(), en.RetargetDue()
 		})
 	}
 }
@@ -609,8 +613,9 @@ type Status struct {
 	DailyRoomPct  float64                `json:"daily_room_pct"`
 	WeeklyRoomPct float64                `json:"weekly_room_pct"`
 	Positions     []exchange.Position    `json:"positions"`
-	Trades        map[string]TradeStatus `json:"trades,omitempty"` // symbol -> the trade in progress (graduated entry)
-	Halt          string                 `json:"halt,omitempty"`   // the breaker's halt: no entry until it lifts
+	Targets       map[string]float64     `json:"targets,omitempty"` // symbol -> exit target of the engine's own position
+	Trades        map[string]TradeStatus `json:"trades,omitempty"`  // symbol -> the trade in progress (graduated entry)
+	Halt          string                 `json:"halt,omitempty"`    // the breaker's halt: no entry until it lifts
 	Funding       string                 `json:"funding,omitempty"`
 	PaperSim      string                 `json:"sim,omitempty"`
 	Sizing        string                 `json:"sizing,omitempty"`
@@ -642,7 +647,7 @@ func ReadStatus(dir string) (Status, error) {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Level: st.Level, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
-		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, Feed: st.Feed, FeedState: st.FeedState, LastEvent: st.LastEvent, StopReason: st.StopReason}
+		Positions: st.Positions, Targets: st.Targets, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, Feed: st.Feed, FeedState: st.FeedState, LastEvent: st.LastEvent, StopReason: st.StopReason}
 	for sym, t := range st.Trades {
 		if s.Trades == nil {
 			s.Trades = map[string]TradeStatus{}

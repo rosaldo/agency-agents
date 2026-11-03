@@ -139,3 +139,17 @@ type OpenInterestUser interface {
 type Trailer interface {
 	Trail(in Input) (stop float64, ok bool)
 }
+
+// Retargeter is optional: a strategy that implements it sets its exit target
+// on the position as it actually filled, which only the engine knows (it
+// sizes every tranche). The engine calls Retarget once an Enter's or an
+// Add's fill is confirmed, with the Input of that candle and in.Position read
+// back from the exchange: real Qty and AvgPrice, the stop in force, the
+// target in force (the Decision's, or the one before), BudgetUsed and
+// Tranches. A positive answer replaces the target; 0 keeps it; a negative or
+// non-finite one is refused and journaled. The target is the engine's check
+// on each closed candle, the same in backtest, paper and live: one set on
+// candle t is checked from t+1 on.
+type Retargeter interface {
+	Retarget(in Input) float64
+}
