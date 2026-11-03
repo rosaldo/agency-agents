@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.4** (2026-11-03) · `test` — quant-engine: a tranche whose save fails sends no order and owes no retarget
 - **v1.58.3** (2026-11-03) · `fix` — quant-engine: a retarget owed for a strategy that no longer implements Retargeter is dropped and journaled instead of panicking; README describes the owed retarget
 - **v1.58.2** (2026-11-03) · `fix` — quant-engine: an owed retarget is made before the step's target check, so the exit is judged on the exact target
 - **v1.58.1** (2026-11-03) · `fix` — quant-engine: the retarget is owed in the save before each tranche's order and cleared once made: an error after an Add's fill or a kill before the end-of-step save still recalculates the target

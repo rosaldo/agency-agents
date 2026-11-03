@@ -377,3 +377,65 @@ func TestOwedRetargetWithoutRetargeterIsDropped(t *testing.T) {
 		t.Fatalf("owed %v, journal %q; want it dropped and journaled", e.RetargetDue(), retargets(e))
 	}
 }
+
+// closeRetarget sets the target 5% above the last close: a rule on the
+// candles, which a call without a fill would move.
+type closeRetarget struct {
+	*scripted.Strategy
+	calls int
+}
+
+func (r *closeRetarget) Retarget(in strategy.Input) float64 {
+	r.calls++
+	return in.Candles[len(in.Candles)-1].Close * 1.05
+}
+
+// A tranche whose save fails sends no order and owes no retarget.
+func TestFailedSaveOwesNoRetarget(t *testing.T) {
+	for _, failAt := range []strategy.Action{strategy.Enter, strategy.Add} {
+		t.Run(map[strategy.Action]string{strategy.Enter: "enter", strategy.Add: "add"}[failAt], func(t *testing.T) {
+			cs := retargetCandles()
+			f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+			var fail bool
+			answers := []strategy.Decision{entryAt(0), addAt(0)}
+			s := &closeRetarget{Strategy: &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+				if len(answers) == 0 {
+					return strategy.Decision{}
+				}
+				d := answers[0]
+				answers = answers[1:]
+				fail = d.Action == failAt
+				return d
+			}}}
+			c, _ := config.Parse([]byte(scriptedYAML), s)
+			for k := 0; k < 3; k++ {
+				f.Advance()
+			}
+			now := cs[3].Time
+			e := New(c, s, f, exchange.Demo, &events{}, func() time.Time { return now })
+			e.OnTrade = func() error {
+				if fail {
+					return errors.New("disk full")
+				}
+				return nil
+			}
+			ctx := context.Background()
+			steps := 1
+			if failAt == strategy.Add {
+				steps = 2
+			}
+			for k := 0; k < steps; k++ {
+				if k > 0 {
+					f.Advance()
+					now = cs[3+k].Time
+				}
+				if err := e.Step(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if want := steps - 1; f.Calls("PlaceOrder") != want || len(e.RetargetDue()) != 0 {
+				t.Fatalf("orders %d owed %v, want %d orders and nothing owed", f.Calls("PlaceOrder"), e.RetargetDue(), want)
+			}
+		})
+	}
+}
