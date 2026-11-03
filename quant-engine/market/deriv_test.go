@@ -130,6 +130,13 @@ func TestReadFundingHistoryBindsTheRateSettledByTheClose(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	// a non-finite rate is refused, naming the line it starts on
+	for _, rate := range []string{"NaN", "+Inf", "-Inf"} {
+		in := "[" + row(0, "0.0001") + "]\n[\n" + row(1, "0.0002") + ",\n" + row(2, rate) + "\n]"
+		if _, err := ReadFundingHistory(strings.NewReader(in), "BTC/USDC:USDC", cs, iv); err == nil || !strings.Contains(err.Error(), "line 4") {
+			t.Errorf("rate %s: %v, want a refusal naming line 4", rate, err)
+		}
+	}
 	// the coin of a symbol: a HIP-3 market's dex lower-cased, a colon, the ticker
 	hip3 := strings.ReplaceAll(row(0, "0.0001"), "BTC", "xyz:XYZ100")
 	if _, err := ReadFundingHistory(strings.NewReader("["+hip3+"]"), "XYZ-XYZ100/USDC:USDC", cs, iv); err != nil {

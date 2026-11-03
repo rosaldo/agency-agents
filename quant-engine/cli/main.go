@@ -209,7 +209,11 @@ func readDeriv(path string, cfg *config.Config, cs []market.Candle) ([]market.De
 		if len(cfg.Symbols) == 0 {
 			return nil, nil
 		}
-		return market.ReadFundingHistory(bytes.NewReader(b), cfg.Symbols[0], cs, cfg.Interval())
+		ds, err := market.ReadFundingHistory(bytes.NewReader(b), cfg.Symbols[0], cs, cfg.Interval())
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return ds, nil
 	}
 	all, err := market.ReadDerivCSV(bytes.NewReader(b))
 	if err != nil {

@@ -1,6 +1,7 @@
 package market
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/csv"
 	"encoding/json"
@@ -148,23 +149,48 @@ func ReadDerivCSVFile(path string) (map[string][]Deriv, error) {
 // the close, with no open interest (HasOpenInterest false) and no mark price.
 // A rate settled after the close waits for the next candle, so none leaks from
 // the future, and a candle closing after the history's last rate gets none:
-// the history must outlast the candles. Every row must be of symbol's coin.
+// the history must outlast the candles. Every row must be of symbol's coin,
+// with a finite rate; an error names the line the row starts on.
 func ReadFundingHistory(r io.Reader, symbol string, cs []Candle, interval time.Duration) ([]Deriv, error) {
 	type row struct {
 		Coin        string `json:"coin"`
 		FundingRate string `json:"fundingRate"`
 		Time        int64  `json:"time"`
+		line        int    // where the row starts in the input, for errors
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("funding history: %w", err)
+	}
+	lineAt := func(off int64) int { // the line of the first value at or after off
+		rest := bytes.TrimLeft(b[off:], " \t\r\n,")
+		return 1 + bytes.Count(b[:len(b)-len(rest)], []byte("\n"))
 	}
 	var rows []row
-	dec := json.NewDecoder(r)
+	dec := json.NewDecoder(bytes.NewReader(b))
 	for {
-		var page []row
-		if err := dec.Decode(&page); err == io.EOF {
+		tok, err := dec.Token()
+		if err == io.EOF {
 			break
-		} else if err != nil {
+		}
+		if err != nil {
 			return nil, fmt.Errorf("funding history: %w", err)
 		}
-		rows = append(rows, page...)
+		if tok != json.Delim('[') {
+			return nil, fmt.Errorf("funding history: want a JSON array per call, got %v", tok)
+		}
+		for dec.More() {
+			at := lineAt(dec.InputOffset())
+			var x row
+			if err := dec.Decode(&x); err != nil {
+				return nil, fmt.Errorf("funding history: line %d: %w", at, err)
+			}
+			x.line = at
+			rows = append(rows, x)
+		}
+		if _, err := dec.Token(); err != nil { // the closing ]
+			return nil, fmt.Errorf("funding history: %w", err)
+		}
 	}
 	slices.SortStableFunc(rows, func(a, b row) int { return cmp.Compare(a.Time, b.Time) })
 	coin := hyperliquidCoin(symbol)
@@ -174,8 +200,8 @@ func ReadFundingHistory(r io.Reader, symbol string, cs []Candle, interval time.D
 			return nil, fmt.Errorf("funding history: a row of coin %s; %s is coin %s", r.Coin, symbol, coin)
 		}
 		var err error
-		if rates[i], err = strconv.ParseFloat(r.FundingRate, 64); err != nil {
-			return nil, fmt.Errorf("funding history: bad rate %q", r.FundingRate)
+		if rates[i], err = strconv.ParseFloat(r.FundingRate, 64); err != nil || math.IsNaN(rates[i]) || math.IsInf(rates[i], 0) {
+			return nil, fmt.Errorf("funding history: line %d: bad rate %q (finite numbers only)", r.line, r.FundingRate)
 		}
 	}
 	var out []Deriv
