@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.51.5** (2026-11-02) · `docs` — quant-engine: README describes the stop swap after each Add (whole quantity, stale old stop, restart cover, liquidation at the average price) in place of the warning against Add on a live account
 - **v1.51.4** (2026-11-02) · `chore` — quant-engine: code comments explain the why without citing internal documents (review, spec and task references removed)
 - **v1.51.3** (2026-11-02) · `fix` — quant-engine: a backtest trade entered in tranches reports the aggregate quantity and average price; parity test of Enter then Add between the backtest and the loop on the fake feed
 - **v1.51.2** (2026-11-02) · `test` — quant-engine: ccxt netting test: an Add's tranches sum in own_qty under one resting stop, and foreign_qty_detected still fires
