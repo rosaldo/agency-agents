@@ -303,3 +303,54 @@ func TestTrancheIsNotSentWhenItsBudgetCannotBePersisted(t *testing.T) {
 	}
 	wantFirstTrancheOnly(t, e)
 }
+
+// An Enter whose trade budget cannot be saved sends no order and counts
+// nothing: no trade is left in progress.
+func TestEnterIsNotSentWhenItsBudgetCannotBePersisted(t *testing.T) {
+	e, f, _ := trancheEngine(t, "", []float64{105, 103}, enter(0.5, 100), add(0.5, 0))
+	e.OnTrade = func() error { return errors.New("disk full") }
+	steps(t, e, f, 1)
+	if f.Calls("PlaceOrder") != 0 || !strings.Contains(journalOf(e).rejected(), "not persisted") {
+		t.Fatalf("orders %d, rejections %q; want the entry not sent", f.Calls("PlaceOrder"), journalOf(e).rejected())
+	}
+	if tr, ok := e.Trades()["AAA"]; ok {
+		t.Fatalf("trade %+v after an entry not sent, want none", tr)
+	}
+}
+
+// The margin of an Enter not sent stays free for the step's next symbol:
+// each entry locks 6 000 of the 10 000 cash, so BBB fits only if AAA's
+// margin was given back.
+func TestEnterNotSentLeavesItsMarginFree(t *testing.T) {
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		if in.Position != nil {
+			return strategy.Decision{}
+		}
+		return enter(0.5, 104.125) // 50 / 0.875 = 57.14 units, 6 000 at 105
+	}}
+	c, err := config.Parse([]byte(strings.Replace(scriptedYAML, "[AAA]", "[AAA, BBB]", 1)), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for k, x := range []float64{100, 100, 100, 105} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(k) * time.Hour), Open: x, High: x, Low: x, Close: x, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs, "BBB": cs}})
+	for k := 0; k < 3; k++ {
+		f.Advance()
+	}
+	e := New(c, s, f, exchange.Demo, &events{}, func() time.Time { return cs[3].Time })
+	saves := 0
+	e.OnTrade = func() error {
+		if saves++; saves == 1 {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	steps(t, e, f, 1)
+	if _, ok := e.Trades()["BBB"]; !ok || f.Calls("PlaceOrder") == 0 || strings.Contains(journalOf(e).rejected(), "margin") {
+		t.Fatalf("trades %+v, orders %d, rejections %q; want BBB entered on the margin AAA did not use", e.Trades(), f.Calls("PlaceOrder"), journalOf(e).rejected())
+	}
+}

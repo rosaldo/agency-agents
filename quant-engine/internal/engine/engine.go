@@ -446,13 +446,17 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
 		return nil
 	}
-	*free -= margin // also on a failed entry: it may have filled
 	trade.Stop = d.Stop
+	prev, had := e.trades[sym]
 	e.trades[sym] = trade // before the order: a fill of unknown fate keeps the budget used
 	if why := e.persistTrades(); why != "" {
+		if delete(e.trades, sym); had { // no order sent: the entry counts nothing
+			e.trades[sym] = prev
+		}
 		e.skip(sym, why)
 		return nil
 	}
+	*free -= margin // also on a failed entry: it may have filled
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		return err
 	}
