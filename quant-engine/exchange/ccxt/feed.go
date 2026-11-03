@@ -108,9 +108,12 @@ func candleOf(r lib.OHLCV) market.Candle {
 }
 
 // tracker turns one symbol's updates into boundaries: the first update of a
-// later candle ends the one before it. An update of an older candle, which
-// the venue may push after the new one began, is ignored: it is no value,
-// and the engine reads the closed candle over REST anyway.
+// later candle ends the one before it. An update of an older candle that
+// arrives on its own, after the new one began, is ignored. One that the fork
+// coalesced into the same watch result as the new candle (its wake-up was
+// lost while the watcher re-armed) is already in the cached row, so Last
+// may show it. Either way Last is status only, never a value: the engine
+// reads the closed candle over REST.
 type tracker struct {
 	cur market.Candle // last update of the newest candle seen
 }
