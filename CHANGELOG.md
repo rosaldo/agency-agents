@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.55.8** (2026-11-03) · `test` — quant-engine: news: a kill at the emergency exit's order finds the news block already on disk, and the restart within the lookback retries the exit and never re-enters, with the stop kept or already cancelled
 - **v1.55.7** (2026-11-03) · `test` — quant-engine: the recorded candle stream test no longer depends on scheduling: the replay keeps the recorded gaps (capped at 250 ms), BTC's last update may be either one the fork can coalesce, the wait ends at the two boundaries, and no keep-alive ping outlives a run; the tracker's comment says when a late update shows
 - **v1.55.6** (2026-11-03) · `docs` — quant-engine: README: the news block survives a restart, 429/529 are retried within the timeout, choice questions are refused at load
 - **v1.55.5** (2026-11-03) · `fix` — quant-engine: news: judged headlines are kept until the end of their lookback, then dropped; one judged again is handed over again
