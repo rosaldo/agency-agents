@@ -535,3 +535,58 @@ func TestEnterNotSentOwesNoRetarget(t *testing.T) {
 		t.Fatalf("owed %v after an entry never sent, want nothing", got)
 	}
 }
+
+// fillUnconfirmed executes the market orders after the first (the Add) on
+// the venue but answers without confirming the fill: the answer lost to a
+// timeout, or a Rejected status with no error (an order that expired after
+// a partial fill).
+type fillUnconfirmed struct {
+	*fake.Fake
+	rejected bool
+	n        int
+}
+
+func (x *fillUnconfirmed) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.OrderRequest) (exchange.OrderState, error) {
+	st, err := x.Fake.PlaceOrder(ctx, env, r)
+	if r.Type != exchange.Market || r.ReduceOnly || err != nil {
+		return st, err
+	}
+	if x.n++; x.n < 2 {
+		return st, nil
+	}
+	if x.rejected {
+		return exchange.OrderState{ClientID: r.ClientID, Symbol: r.Symbol, Status: exchange.Rejected}, nil
+	}
+	return exchange.OrderState{ClientID: r.ClientID, Status: exchange.Open}, context.DeadlineExceeded
+}
+
+// An Add that filled on the venue without a confirmed fill halts and keeps
+// the retarget owed: the target is recalculated on the real position.
+func TestAddWithAnUnconfirmedFillHaltsAndKeepsTheDebt(t *testing.T) {
+	for name, rejected := range map[string]bool{"answer lost": false, "rejected without an error": true} {
+		t.Run(name, func(t *testing.T) {
+			var told []float64
+			s := &retargeting{Strategy: answering(&told, entryAt(0), addAt(0)), pct: 2}
+			cs := retargetCandles()
+			f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+			c, _ := config.Parse([]byte(scriptedYAML), s)
+			for k := 0; k < 3; k++ {
+				f.Advance()
+			}
+			now := cs[3].Time
+			e := New(c, s, &fillUnconfirmed{Fake: f, rejected: rejected}, exchange.Demo, &events{}, func() time.Time { return now })
+			if err := e.Step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			f.Advance()
+			now = cs[4].Time
+			err := e.Step(context.Background())
+			if p := ownPos(t, f); !IsHalt(err) || math.Abs(p.Qty-(10+16.666)) > 1e-9 {
+				t.Fatalf("setup: step error %v, qty %v; want a halt with the add filled (26.666)", err, p.Qty)
+			}
+			if got := e.RetargetDue(); !slices.Equal(got, []string{"AAA"}) {
+				t.Fatalf("owed %v after a fill that was not confirmed, want AAA", got)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.6** (2026-11-03) · `test` — quant-engine: an Add filled on the venue without a confirmed fill (answer lost, or rejected without an error) halts and keeps the retarget owed
 - **v1.58.5** (2026-11-03) · `fix` — quant-engine: an Enter or Add that filled nothing (never sent, or rejected by the exchange) puts the owed retarget back as it was, so no Retarget is called without a fill
 - **v1.58.4** (2026-11-03) · `test` — quant-engine: a tranche whose save fails sends no order and owes no retarget
 - **v1.58.3** (2026-11-03) · `fix` — quant-engine: a retarget owed for a strategy that no longer implements Retargeter is dropped and journaled instead of panicking; README describes the owed retarget
