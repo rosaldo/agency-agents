@@ -110,7 +110,8 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		if err := engine.CheckDerivatives(c, s, ex); err != nil {
 			return Result{}, fmt.Errorf("backtest: %w", err)
 		}
-		if err := derivCovers(in.Candles, in.Deriv, c.Interval(), sym); err != nil {
+		oi, ok := s.(strategy.OpenInterestUser)
+		if err := derivCovers(in.Candles, in.Deriv, c.Interval(), sym, ok && oi.NeedsOpenInterest()); err != nil {
 			return Result{}, err
 		}
 		// replayed, never read: the binding is the recording's (market.AlignDeriv), with no wall-clock deadline
@@ -207,12 +208,13 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 }
 
 // derivCovers refuses snapshots that do not span the candles, counting only
-// those read in their candle's step: the strategy never runs as if its
-// filter passed, and the venue keeps no open interest history to fill in.
-func derivCovers(cs []market.Candle, ds []market.Deriv, interval time.Duration, sym string) error {
+// those read in their candle's step, and, when needOI, only those with open
+// interest: the strategy never runs as if its filter passed, and the venue
+// keeps no open interest history to fill in.
+func derivCovers(cs []market.Candle, ds []market.Deriv, interval time.Duration, sym string, needOI bool) error {
 	var from, to time.Time
 	for _, d := range ds {
-		if !d.InStep(d.Candle, interval) {
+		if !d.InStep(d.Candle, interval) || needOI && !d.HasOpenInterest {
 			continue
 		}
 		if from.IsZero() || d.Candle.Before(from) {
@@ -226,13 +228,16 @@ func derivCovers(cs []market.Candle, ds []market.Deriv, interval time.Duration, 
 	if !from.IsZero() && !from.After(first) && !to.Before(last) {
 		return nil
 	}
-	have := "has none for " + sym
+	need, have := "derivatives data (open interest, funding)", "has none for "+sym
+	if needOI {
+		need, have = "open interest", "has no open interest for "+sym+" (a funding-only history carries none)"
+	}
 	if !from.IsZero() {
 		have = fmt.Sprintf("covers %s to %s for %s", from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339), sym)
 	}
-	return fmt.Errorf("backtest: the strategy needs derivatives data (open interest, funding) for every candle from %s to %s; the data %s. "+
+	return fmt.Errorf("backtest: the strategy needs %s for every candle from %s to %s; the data %s. "+
 		"Open interest exists only in our own recording (deriv-<level>.csv): replay candles inside it",
-		first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339), have)
+		need, first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339), have)
 }
 
 func summarize(c *cfgpkg.Config, in Input, res Result, curve []float64) Summary {

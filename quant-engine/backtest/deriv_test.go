@@ -22,6 +22,11 @@ type derivUser struct{ *scripted.Strategy }
 
 func (derivUser) NeedsDerivatives() bool { return true }
 
+// oiUser also declares that it decides on open interest.
+type oiUser struct{ derivUser }
+
+func (oiUser) NeedsOpenInterest() bool { return true }
+
 const derivYAML = parityYAML + "market: swap\n"
 
 // oiFalls enters long when open interest fell from the previous candle to
@@ -153,6 +158,48 @@ func TestBacktestRefusesADerivativesUserWithoutDataForThePeriod(t *testing.T) {
 			_, err := Run(context.Background(), s, []byte(tc.yml), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1, Deriv: tc.ds})
 			if err == nil || !strings.Contains(err.Error(), tc.want) || len(s.Log) != 0 {
 				t.Fatalf("err = %v after %d decisions, want a refusal saying %q", err, len(s.Log), tc.want)
+			}
+		})
+	}
+}
+
+// A strategy that declares it decides on open interest is refused unless
+// snapshots WITH open interest span every candle: a funding-only history no
+// longer replays as a filter that never passes. Without the declaration the
+// same history still runs.
+func TestBacktestRefusesAnOpenInterestUserWithoutOpenInterest(t *testing.T) {
+	cs := parityCandles()
+	var full, funding, part []market.Deriv
+	for i, k := range cs {
+		d := market.Deriv{Time: k.Time.Add(time.Hour + 5*time.Second), Candle: k.Time, OpenInterest: 1, HasOpenInterest: true}
+		full = append(full, d)
+		f := d
+		f.OpenInterest, f.HasOpenInterest = 0, false
+		funding = append(funding, f)
+		if i < 6 {
+			part = append(part, d)
+		} else {
+			part = append(part, f)
+		}
+	}
+	none := func(strategy.Input) strategy.Decision { return strategy.Decision{} }
+	for name, tc := range map[string]struct {
+		s    strategy.Strategy
+		ds   []market.Deriv
+		want string // "" = runs
+	}{
+		"funding only":        {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, funding, "has no open interest for AAA"},
+		"open interest ends":  {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, part, "needs open interest for every candle"},
+		"open interest spans": {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, full, ""},
+		"undeclared, funding": {derivUser{&scripted.Strategy{Decider: none}}, funding, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Run(context.Background(), tc.s, []byte(derivYAML), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1, Deriv: tc.ds})
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("err = %v, want the backtest to run", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("err = %v, want a refusal saying %q", err, tc.want)
 			}
 		})
 	}

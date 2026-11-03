@@ -121,6 +121,14 @@ type DerivativesUser interface {
 	NeedsDerivatives() bool
 }
 
+// OpenInterestUser is optional, for a DerivativesUser: one whose
+// NeedsOpenInterest is true decides on open interest, so a backtest refuses
+// snapshots without it for any candle of the period (a funding-only history
+// has none) instead of replaying a filter that can never pass.
+type OpenInterestUser interface {
+	NeedsOpenInterest() bool
+}
+
 // Trailer is optional: a strategy that implements it moves its own stop by
 // any rule it likes (moving average, ATR, structure...). The engine calls
 // Trail once per step for every open position it holds, after Decide
