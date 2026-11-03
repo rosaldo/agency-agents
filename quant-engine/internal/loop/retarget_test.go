@@ -46,14 +46,19 @@ func TestRetargetedTargetSurvivesARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var midRun State
 	tick := &FakeTicker{Ex: f, Candles: cs, OnStep: func(i int) {
-		if i == 4 { // after the Add
+		if i == 4 { // after the Add's step, as a kill -9 now would leave it
+			midRun, _ = LoadState(dir, "paper")
 			_ = RequestStop(dir, false)
 		}
 	}}
 	Run(context.Background(), c, s, f, exchange.Demo, tick, dir)
 	p := ownPosition(t, f)
 	want := p.AvgPrice * 1.02
+	if midRun.Targets["AAA"] != want || len(midRun.RetargetDue) != 0 {
+		t.Fatalf("state after the Add's step: target %v owed %v, want %v and the debt cleared", midRun.Targets["AAA"], midRun.RetargetDue, want)
+	}
 	st, _ := LoadState(dir, "paper")
 	if st.Targets["AAA"] != want {
 		t.Fatalf("saved target %v, want %v (2%% above the filled average %v)", st.Targets["AAA"], want, p.AvgPrice)
@@ -115,6 +120,40 @@ func TestOwedRetargetSurvivesARestart(t *testing.T) {
 	s2 := retargetTwoPct{scriptOf(nil)}
 	c2, _ := config.Parse([]byte(trancheYAML), s2)
 	f.Advance()
+	tick2 := tickerFrom(f, cs, tick.i.Load()+1)
+	tick2.OnStep = func(int) { _ = RequestStop(dir, false) }
+	Run(context.Background(), c2, s2, ex, exchange.Demo, tick2, dir)
+	st, _ = LoadState(dir, "paper")
+	if want := ownPosition(t, f).AvgPrice * 1.02; math.Abs(st.Targets["AAA"]-want) > 1e-12 || len(st.RetargetDue) != 0 {
+		t.Fatalf("after the restart: target %v owed %v, want %v and nothing owed", st.Targets["AAA"], st.RetargetDue, want)
+	}
+}
+
+// A kill -9 right after an Add's fill, before the end-of-step save: the
+// retarget was owed in the save before the order, so the restarted process
+// makes it on the position as filled.
+func TestKillAfterAnAddFillStillRetargets(t *testing.T) {
+	f, cs := retargetFake()
+	ex := &crashAfterFill{Fake: f, armedAt: -1}
+	dir := filepath.Join(t.TempDir(), "state")
+	s := retargetTwoPct{scriptOf(func(d strategy.Decision) {
+		if d.Action == strategy.Add {
+			ex.armedAt = f.Calls("PlaceOrder")
+		}
+	}, wait, wait, wait, withTarget(tranche(strategy.Enter, 100), 999), withTarget(tranche(strategy.Add, 0), 999))}
+	c, _ := config.Parse([]byte(trancheYAML), s)
+	tick := &FakeTicker{Ex: f, Candles: cs}
+	if !runUntilKilled(t, c, s, ex, tick, dir) {
+		t.Fatal("setup: the loop was never killed after the add")
+	}
+	ex.armedAt = -1
+	st, _ := LoadState(dir, "paper")
+	if !slices.Equal(st.RetargetDue, []string{"AAA"}) {
+		t.Fatalf("state at the kill owes %v, want AAA", st.RetargetDue)
+	}
+	f.Advance()
+	s2 := retargetTwoPct{scriptOf(nil)}
+	c2, _ := config.Parse([]byte(trancheYAML), s2)
 	tick2 := tickerFrom(f, cs, tick.i.Load()+1)
 	tick2.OnStep = func(int) { _ = RequestStop(dir, false) }
 	Run(context.Background(), c2, s2, ex, exchange.Demo, tick2, dir)

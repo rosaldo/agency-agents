@@ -292,3 +292,53 @@ func TestRetargetBacktestAndPaperAgree(t *testing.T) {
 		t.Fatalf("backtest target %v (avg %v), paper %v (avg %v); want equal", bt, btAvg, pp, ppAvg)
 	}
 }
+
+// stopDown refuses the next down stop placements.
+type stopDown struct {
+	*fake.Fake
+	down int
+}
+
+func (x *stopDown) PlaceStop(ctx context.Context, env exchange.Env, id, sym string, side exchange.Side, qty, px float64) (exchange.OrderState, error) {
+	if x.down > 0 {
+		x.down--
+		return exchange.OrderState{}, exchange.ErrRefused
+	}
+	return x.Fake.PlaceStop(ctx, env, id, sym, side, qty, px)
+}
+
+// An Add that filled but whose stop swap failed returns an error without a
+// halt: the retarget stays owed and the next step makes it on the position
+// as filled.
+func TestRetargetOwedWhenTheAddsStopSwapFails(t *testing.T) {
+	var told []float64
+	s := &retargeting{Strategy: answering(&told, entryAt(0), addAt(0)), pct: 2}
+	cs := retargetCandles()
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, SlippagePct: 0.1, Candles: map[string][]market.Candle{"AAA": cs}})
+	c, _ := config.Parse([]byte(scriptedYAML), s)
+	for k := 0; k < 3; k++ {
+		f.Advance()
+	}
+	now := cs[3].Time
+	x := &stopDown{Fake: f}
+	e := New(c, s, x, exchange.Demo, &events{}, func() time.Time { return now })
+	ctx := context.Background()
+	if err := e.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.Advance()
+	now = cs[4].Time
+	x.down = 3 // every attempt of the swap's new stop
+	if err := e.Step(ctx); err == nil || IsHalt(err) {
+		t.Fatalf("setup: add step error %v, want a non-halt error after the fill", err)
+	}
+	if got := e.RetargetDue(); !slices.Equal(got, []string{"AAA"}) {
+		t.Fatalf("owed %v after the failed swap, want AAA", got)
+	}
+	f.Advance()
+	now = cs[5].Time
+	_ = e.Step(ctx)
+	if p := ownPos(t, f); e.Targets()["AAA"] != p.AvgPrice*1.02 || len(e.RetargetDue()) != 0 {
+		t.Fatalf("target %v owed %v, want %v (2%% above the filled average %v) and nothing owed", e.Targets()["AAA"], e.RetargetDue(), p.AvgPrice*1.02, p.AvgPrice)
+	}
+}

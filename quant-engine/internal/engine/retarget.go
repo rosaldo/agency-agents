@@ -17,9 +17,11 @@ import (
 // target is the engine's own check on each closed candle (TargetHit); no
 // order rests on the exchange for it, so it applies the same way in
 // backtest, paper and live, and is saved in the state with the other
-// targets. A position that cannot be read after the fill is journaled and
-// the call is owed (persisted): it is made at the symbol's next step, on the
-// position read then, before the decision.
+// targets. The call is owed from before the tranche's order, in the save
+// that precedes it (OnTrade), and paid once made: a fill whose position
+// cannot be read, an error after the fill, or a kill before the end-of-step
+// save all leave it owed, and the symbol's next step (after a restart too)
+// makes it on the position read then, before its target check.
 
 // view is what the strategy is told about p, the engine's own position.
 func (e *Engine) view(p exchange.Position) *strategy.PositionView {
@@ -40,7 +42,7 @@ func (e *Engine) retarget(ctx context.Context, sym string, in strategy.Input) {
 	}
 	ps, err := e.Ex.Positions(ctx, e.Env)
 	if err != nil {
-		e.retargetDue[sym] = true
+		e.retargetDue[sym] = true // already owed since before the order; kept
 		e.note(journal.Retarget, sym, fmt.Sprintf("position unreadable after the fill (%v); target %.8g kept, retarget at the next step", err, e.targets[sym]))
 		return
 	}
@@ -69,6 +71,17 @@ func (e *Engine) applyRetarget(p exchange.Position, in strategy.Input) {
 	}
 	e.targets[sym] = next
 	e.note(journal.Retarget, sym, fmt.Sprintf("target %.8g -> %.8g on avg price %.8g qty %.8g", cur, next, p.AvgPrice, p.Qty))
+}
+
+// oweRetarget marks sym's retarget owed before a tranche's order, so the
+// save that precedes the order carries it; the returned func undoes it when
+// no order is sent. A strategy without Retargeter owes nothing.
+func (e *Engine) oweRetarget(sym string) (undo func()) {
+	if _, ok := e.Strategy.(strategy.Retargeter); !ok || e.retargetDue[sym] {
+		return func() {}
+	}
+	e.retargetDue[sym] = true
+	return func() { delete(e.retargetDue, sym) }
 }
 
 // RestoreRetarget reloads the symbols whose retarget a previous run owed;

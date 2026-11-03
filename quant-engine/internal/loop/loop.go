@@ -428,7 +428,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		mu.Lock()
 		defer mu.Unlock()
 		next := st // a refused tranche never reaches st, so no later save writes it
-		next.Trades, next.Heartbeat = en.Trades(), time.Now()
+		next.Trades, next.RetargetDue, next.Heartbeat = en.Trades(), en.RetargetDue(), time.Now()
 		if err := SaveState(dir, next); err != nil {
 			return err
 		}

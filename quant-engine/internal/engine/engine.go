@@ -456,7 +456,9 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	trade.Stop = d.Stop
 	prev, had := e.trades[sym]
 	e.trades[sym] = trade // before the order: a fill of unknown fate keeps the budget used
+	unowe := e.oweRetarget(sym)
 	if why := e.persistTrades(); why != "" {
+		unowe()
 		if delete(e.trades, sym); had { // no order sent: the entry counts nothing
 			e.trades[sym] = prev
 		}
@@ -582,7 +584,9 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 	}
 	next.Stop = stop
 	e.trades[sym] = next // before the order: a fill of unknown fate keeps the fraction used
+	unowe := e.oweRetarget(sym)
 	if why := e.persistTrades(); why != "" {
+		unowe()
 		e.trades[sym] = trade // no order sent: the add counts nothing
 		e.skip(sym, "add refused: "+why)
 		return nil
