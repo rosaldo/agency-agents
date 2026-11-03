@@ -223,6 +223,26 @@ func TestFailureOfTheCallersDeadlineIsNotKept(t *testing.T) {
 	}
 }
 
+// A judged headline is kept until the end of its lookback, then dropped: an
+// undated one the feed still serves is judged again after it.
+func TestJudgedHeadlinesAreDroppedAfterTheLookback(t *testing.T) {
+	const title = "Exchange hack drains BTC reserves"
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `<rss><channel><item><title>`+title+`</title></item></channel></rss>`)
+	}))
+	defer feed.Close()
+	j := &jev{answer: answer(0.1)}
+	g := guard(feed.URL, client(j.server(t).URL, testKey))
+	for _, h := range []int{0, 23, 25} {
+		if _, err := g.Check(context.Background(), "BTC/USDC:USDC", at.Add(time.Duration(h)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if j.calls.Load() != 2 {
+		t.Fatalf("%d calls; want one within the lookback and one after it", j.calls.Load())
+	}
+}
+
 // A headline is classified once: the same one in a later check reuses the
 // verdict; a headline without the asset or a keyword is never sent.
 func TestHeadlineIsClassifiedOnce(t *testing.T) {

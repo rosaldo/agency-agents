@@ -252,3 +252,45 @@ func TestAStopDuringAClassificationJournalsNoEmergencyExit(t *testing.T) {
 		t.Fatalf("%d journal events, %d exits after the stop; want none", notes, exits)
 	}
 }
+
+// Past the lookback the same undated headline, still served, is judged
+// again and handed over again: the entry taken after the block gets its
+// emergency exit too.
+func TestAHeadlineJudgedAgainAfterTheLookbackExitsAgain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `<rss><channel><item><title>AAA exchange hack</title></item></channel></rss>`)
+	}))
+	defer srv.Close()
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for _, h := range []int{0, 1, 25, 26} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(h) * time.Hour), Open: 100, High: 100, Low: 100, Close: 100, Volume: 10})
+	}
+	s := newsStrategy{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		if in.Position != nil {
+			return strategy.Decision{}
+		}
+		return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 90}
+	}}, srv.URL}
+	c, err := config.Parse([]byte(newsYAML), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+	dir := filepath.Join(t.TempDir(), ".scripted")
+	if r := Run(context.Background(), c, s, f, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, Delay: 500 * time.Millisecond}, dir); r != "candles exhausted" {
+		t.Fatalf("run ended: %s", r)
+	}
+	var buys, exits []time.Time
+	for _, e := range journalOf(t, dir) {
+		switch {
+		case e.Kind == journal.Filled && e.Side == "buy":
+			buys = append(buys, e.Time)
+		case e.Kind == journal.EmergencyExit:
+			exits = append(exits, e.Time)
+		}
+	}
+	if len(buys) != 2 || len(exits) != 2 || !exits[1].Equal(cs[2].Time) {
+		t.Fatalf("buys at %v, emergency exits at %v; want an entry and its exit at %v and again at %v", buys, exits, cs[0].Time, cs[2].Time)
+	}
+}

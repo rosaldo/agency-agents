@@ -63,9 +63,7 @@ type Guard struct {
 	Timeout    time.Duration // per classification; 0 = 10s
 
 	mu   sync.Mutex
-	seen map[string]Finding // feed + text -> judged once
-	// shortcut: seen keeps every headline ever matched; a few per day in
-	// practice, prune by Until if a run ever holds months of them
+	seen map[string]Finding // feed + text -> judged once, until its Until (then dropped: an undated one still served is judged again)
 }
 
 // Check runs the pre-filter for symbol at at and judges every headline it
@@ -89,7 +87,7 @@ func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
 	g.mu.Lock()
 	f, ok := g.seen[key]
 	g.mu.Unlock()
-	if ok {
+	if ok && f.Until.After(at) {
 		return f
 	}
 	f = Finding{Headline: h.Text, Feed: h.Feed, At: at, Catastrophe: true}
@@ -114,6 +112,11 @@ func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
 	g.mu.Lock()
 	if g.seen == nil {
 		g.seen = map[string]Finding{}
+	}
+	for k, old := range g.seen {
+		if !old.Until.After(at) {
+			delete(g.seen, k)
+		}
 	}
 	g.seen[key] = f
 	g.mu.Unlock()

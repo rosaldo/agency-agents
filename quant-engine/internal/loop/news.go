@@ -34,7 +34,7 @@ type newsWorker struct {
 func startNewsWorker(ctx context.Context, g *news.Guard) *newsWorker {
 	w := &newsWorker{guard: g, ask: make(chan newsAsk, 1), out: make(chan newsResult, 16)}
 	go func() {
-		handed := map[string]bool{} // symbol + feed + headline
+		handed := map[string]time.Time{} // symbol + feed + headline -> the Until of the finding handed over
 		for {
 			var a newsAsk
 			select {
@@ -42,12 +42,18 @@ func startNewsWorker(ctx context.Context, g *news.Guard) *newsWorker {
 			case <-ctx.Done():
 				return
 			}
+			for k, until := range handed {
+				if !until.After(a.at) {
+					delete(handed, k) // past its lookback: a headline judged again is handed over again
+				}
+			}
 			for _, sym := range a.symbols {
 				fs, err := g.Check(ctx, sym, a.at)
 				r := newsResult{symbol: sym, err: err}
 				for _, f := range fs {
-					if k := sym + "\n" + f.Feed + "\n" + f.Headline; !handed[k] {
-						handed[k] = true
+					k := sym + "\n" + f.Feed + "\n" + f.Headline
+					if _, ok := handed[k]; !ok {
+						handed[k] = f.Until
 						r.found = append(r.found, f)
 					}
 				}
