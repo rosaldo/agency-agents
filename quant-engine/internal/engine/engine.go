@@ -373,29 +373,23 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	if _, news := e.newsUntil[sym]; holding && news { // an emergency exit that failed: again, before anything else
 		return e.exit(ctx, p, last.Time, "emergency exit (news catastrophe), retried")
 	}
+	owed := holding && e.retargetDue[sym]
+	var in strategy.Input
+	if owed { // paid before the target check: the exit is judged on the exact target
+		if in, err = e.input(ctx, sym, cs, n, want); err != nil || in.Candles == nil {
+			return err
+		}
+		e.applyRetarget(p, in)
+	}
 	if holding && TargetHit(side, last.Close, e.targets[sym]) {
 		return e.exit(ctx, p, last.Time, "target") // the exchange stop guards it if this fails
 	}
-	in := strategy.Input{Symbol: sym, Now: last.Time, Candles: cs}
+	if !owed {
+		if in, err = e.input(ctx, sym, cs, n, want); err != nil || in.Candles == nil {
+			return err
+		}
+	}
 	if holding {
-		in.Position = e.view(p)
-	}
-	if NeedsDerivatives(e.Strategy) {
-		in.Deriv = market.AlignDeriv(cs, e.deriv[sym], e.Cfg.Interval())
-	}
-	for _, aux := range e.Strategy.Inputs() {
-		if in.Aux == nil {
-			in.Aux = map[string][]market.Candle{}
-		}
-		if in.Aux[aux], err = e.candles(ctx, aux, n, want); err != nil {
-			return fmt.Errorf("step: candles %s: %w", aux, err)
-		}
-		if a := in.Aux[aux]; len(a) > 0 && e.notFinal(sym, aux, a[len(a)-1], want) {
-			return nil
-		}
-	}
-	if holding && e.retargetDue[sym] { // owed since a fill whose position could not be read
-		e.applyRetarget(p, in)
 		in.Position = e.view(p)
 	}
 	d := e.Strategy.Decide(in)
@@ -475,6 +469,29 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	e.retarget(ctx, sym, in)
 	return e.guardFilled(ctx, sym)
+}
+
+// input is the strategy's Input on sym's window cs, without the position;
+// a zero Input (no error) means an auxiliary candle is not final: no decision.
+func (e *Engine) input(ctx context.Context, sym string, cs []market.Candle, n int, want time.Time) (strategy.Input, error) {
+	in := strategy.Input{Symbol: sym, Now: cs[len(cs)-1].Time, Candles: cs}
+	if NeedsDerivatives(e.Strategy) {
+		in.Deriv = market.AlignDeriv(cs, e.deriv[sym], e.Cfg.Interval())
+	}
+	for _, aux := range e.Strategy.Inputs() {
+		if in.Aux == nil {
+			in.Aux = map[string][]market.Candle{}
+		}
+		a, err := e.candles(ctx, aux, n, want)
+		if err != nil {
+			return strategy.Input{}, fmt.Errorf("step: candles %s: %w", aux, err)
+		}
+		if len(a) > 0 && e.notFinal(sym, aux, a[len(a)-1], want) {
+			return strategy.Input{}, nil
+		}
+		in.Aux[aux] = a
+	}
+	return in, nil
 }
 
 // persistTrades saves the trades through OnTrade; a failure is the reason

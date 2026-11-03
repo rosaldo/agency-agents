@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.2** (2026-11-03) · `fix` — quant-engine: an owed retarget is made before the step's target check, so the exit is judged on the exact target
 - **v1.58.1** (2026-11-03) · `fix` — quant-engine: the retarget is owed in the save before each tranche's order and cleared once made: an error after an Add's fill or a kill before the end-of-step save still recalculates the target
 - **v1.58.0** (2026-11-03) · `feat` — quant-engine: strategy.Retargeter sets the exit target on the position as filled (real average price and quantity) after an Enter or Add; saved, restored, owed across a failed read, shown in status
 - **v1.57.5** (2026-11-03) · `perf` — quant-engine: the funding history finds each row's line in one pass

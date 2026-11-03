@@ -342,3 +342,21 @@ func TestRetargetOwedWhenTheAddsStopSwapFails(t *testing.T) {
 		t.Fatalf("target %v owed %v, want %v (2%% above the filled average %v) and nothing owed", e.Targets()["AAA"], e.RetargetDue(), p.AvgPrice*1.02, p.AvgPrice)
 	}
 }
+
+// An owed retarget is made before the step's target check: the Decision's
+// 103 is reached at 104, but the exact target (10% above the fill) is not.
+func TestOwedRetargetIsMadeBeforeTheTargetCheck(t *testing.T) {
+	var told []float64
+	s := &retargeting{Strategy: answering(&told, strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 95, Target: 103, Fraction: 0.5}), pct: 10}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for k, x := range []float64{100, 100, 100, 100, 104, 104, 104} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(k) * time.Hour), Open: x, High: x, Low: x, Close: x, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+	e := retargetRun(t, s, &failPositionsAfterFill{Fake: f}, f, cs, 2, nil)
+	p := ownPos(t, f)
+	if e.Targets()["AAA"] != p.AvgPrice*1.10 {
+		t.Fatalf("target %v, want %v", e.Targets()["AAA"], p.AvgPrice*1.10)
+	}
+}
