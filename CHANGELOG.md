@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.50.0** (2026-11-02) · `feat` — quant-engine: Executor.Add grows a position and swaps its stop for one of the whole quantity, new first; Reconcile covers a stop that closes less than the own quantity, flattening the uncovered part when it cannot
 - **v1.49.3** (2026-10-31) · `docs` — quant-engine: README warns not to use Add on a live account until the stop is resized to the aggregate quantity, and says the trade budget is saved before each tranche's order
 - **v1.49.2** (2026-10-31) · `test` — quant-engine: graduated entry tests for the aggregate leverage ceiling, the loop keeping the trade in the state file, and an Add refused on a stale stop, a blocked symbol or news
 - **v1.49.1** (2026-10-31) · `fix` — quant-engine: the trade budget and fraction used are saved to state-<level>.json before each tranche's order (OnTrade), so a kill -9 between a fill and the end of the step cannot renew the budget; a failed save sends no order and is journaled
