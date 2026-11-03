@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
@@ -28,7 +29,14 @@ type Client struct {
 	Key    config.Secret // empty: every call fails, naming KeyVar
 	KeyVar string        // the environment variable the key comes from
 	HTTP   *http.Client
+	// Backoff is the wait before retrying a 429 (rate limited) or a 529
+	// (overloaded), doubled at each retry, at most retries times and never
+	// past ctx's deadline: a classification stays within its timeout.
+	// 0 = 250ms.
+	Backoff time.Duration
 }
+
+const retries = 3
 
 type question struct {
 	Type         string            `json:"type"`
@@ -60,22 +68,27 @@ func (c *Client) Classify(ctx context.Context, state string, q news.Question) (n
 	if err != nil {
 		return news.Verdict{}, fmt.Errorf("typesafe: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
-	if err != nil {
-		return news.Verdict{}, fmt.Errorf("typesafe: %w", err)
+	wait := c.Backoff
+	if wait <= 0 {
+		wait = 250 * time.Millisecond
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Key.Reveal())
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if ue := (*neturl.Error)(nil); errors.As(err, &ue) {
-		err = fmt.Errorf("%s: %w", ue.Op, ue.Err) // the URL is ours; nothing of the request is repeated
+	resp, err := c.post(ctx, body)
+	for try := 0; err == nil && retryable(resp.StatusCode) && try < retries && fits(ctx, wait); try++ {
+		resp.Body.Close()
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return news.Verdict{}, fmt.Errorf("typesafe: HTTP %d", resp.StatusCode)
+		}
+		wait *= 2
+		resp, err = c.post(ctx, body)
 	}
 	if err != nil {
 		return news.Verdict{}, fmt.Errorf("typesafe: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return news.Verdict{}, fmt.Errorf("typesafe: HTTP %d", resp.StatusCode) // 429 rate limit, 529 overloaded, ...
+		return news.Verdict{}, fmt.Errorf("typesafe: HTTP %d", resp.StatusCode) // 429 or 529 after the retries, 401, ...
 	}
 	var r response
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r); err != nil {
@@ -86,4 +99,27 @@ func (c *Client) Classify(ctx context.Context, state string, q news.Question) (n
 		return news.Verdict{}, errors.New("typesafe: the answer has no noul probability for the question")
 	}
 	return news.Verdict{Model: r.Model, Yes: *a.Noul}, nil
+}
+
+func (c *Client) post(ctx context.Context, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Key.Reveal())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if ue := (*neturl.Error)(nil); errors.As(err, &ue) {
+		err = fmt.Errorf("%s: %w", ue.Op, ue.Err) // the URL is ours; nothing of the request is repeated
+	}
+	return resp, err
+}
+
+// retryable is a status the API asks to retry with exponential backoff.
+func retryable(status int) bool { return status == http.StatusTooManyRequests || status == 529 }
+
+// fits says a wait leaves ctx time for one more request.
+func fits(ctx context.Context, wait time.Duration) bool {
+	d, ok := ctx.Deadline()
+	return !ok || time.Until(d) > wait
 }

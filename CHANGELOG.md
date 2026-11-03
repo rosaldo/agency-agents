@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.55.2** (2026-11-03) · `fix` — quant-engine: typesafe: a 429 or 529 is retried with exponential backoff (3 retries from 250ms) within the classification's timeout; past them it stays a failure
 - **v1.55.1** (2026-11-03) · `fix` — quant-engine: the news block persists in the state file: a restart within the lookback neither enters the symbol again nor judges the headline again
 - **v1.55.0** (2026-11-02) · `feat` — quant-engine: news after the entry on crypto, before it on equity, with a classifier: news.Guard (keyword pre-filter, then news.Classifier once per headline), news/typesafe (Jev noul question, key from <STRATEGY>_TYPESAFE_API_KEY); the loop's worker and select give an emergency exit in the same cycle and block the symbol for the lookback; journal news_hit, news_verdict (model), news_check_failed, emergency_exit; backtest enters and never exits on news
 - **v1.54.4** (2026-11-02) · `fix` — quant-engine: hyperliquid candle stream: markets and the stream client set up once before the watchers (concurrent first watches raced inside the fork); the recorded candle messages tested through the fork's parser over a loopback wss stream

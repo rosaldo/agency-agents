@@ -38,6 +38,7 @@ func feedServer(t *testing.T, title string, status int) *httptest.Server {
 // key) and answers with answer, or HTTP status, after delay.
 type jev struct {
 	status int
+	fail   int32 // > 0: only the first fail calls answer status
 	answer string
 	delay  time.Duration
 	calls  atomic.Int32
@@ -47,7 +48,7 @@ type jev struct {
 func (j *jev) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		j.calls.Add(1)
+		n := j.calls.Add(1)
 		var req struct {
 			State     string
 			Model     string
@@ -69,7 +70,7 @@ func (j *jev) server(t *testing.T) *httptest.Server {
 			j.bad.Store("state " + req.State) // the headline alone
 		}
 		time.Sleep(j.delay)
-		if j.status != 0 {
+		if j.status != 0 && (j.fail == 0 || n <= j.fail) {
 			http.Error(w, "no", j.status)
 			return
 		}
@@ -164,6 +165,30 @@ func TestFailureTable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A 429 or a 529 is retried with exponential backoff within the
+// classification's timeout: a passing one gets the verdict (noise: no exit);
+// one that lasts past the retries is a failure, so a catastrophe.
+func TestRateLimitIsRetriedWithinTheTimeout(t *testing.T) {
+	const title = "Exchange hack drains BTC reserves"
+	for _, status := range []int{429, 529} {
+		passing := &jev{status: status, fail: 2, answer: answer(0.1)}
+		c := client(passing.server(t).URL, testKey)
+		c.Backoff = 10 * time.Millisecond
+		fs, err := guard(feedServer(t, title, 0).URL, c).Check(context.Background(), "BTC/USDC:USDC", at)
+		if err != nil || len(fs) != 1 || fs[0].Catastrophe || !fs[0].Classified || passing.calls.Load() != 3 {
+			t.Fatalf("HTTP %d twice, then noise: findings %+v %v, %d calls; want the verdict after two retries, no catastrophe", status, fs, err, passing.calls.Load())
+		}
+		lasting := &jev{status: status, answer: answer(0.1)}
+		c = client(lasting.server(t).URL, testKey)
+		c.Backoff = 10 * time.Millisecond
+		start := time.Now()
+		fs, err = guard(feedServer(t, title, 0).URL, c).Check(context.Background(), "BTC/USDC:USDC", at)
+		if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil || lasting.calls.Load() != 4 || time.Since(start) > time.Second {
+			t.Fatalf("HTTP %d throughout: findings %+v %v, %d calls in %v; want a catastrophe after 3 retries, within the timeout", status, fs, err, lasting.calls.Load(), time.Since(start))
+		}
 	}
 }
 
