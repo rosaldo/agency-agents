@@ -3,10 +3,12 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -242,5 +244,56 @@ func TestRestartTellsTheStrategyThePersistedTranches(t *testing.T) {
 	Run(context.Background(), c2, s2, ex, exchange.Demo, tickerFrom(f, cs, tick.i.Load()+1), dir)
 	if len(seen) == 0 || seen[0].BudgetUsed != 1 || seen[0].Tranches != 2 {
 		t.Fatalf("views after the restart %+v, want the budget wholly used in 2 tranches", seen)
+	}
+}
+
+// failingBalance is an exchange whose balance cannot be read once fail is
+// set, so the end-of-step save never refreshes the trades from the engine.
+type failingBalance struct {
+	*fake.Fake
+	fail *atomic.Bool
+}
+
+func (b failingBalance) Balance(ctx context.Context, env exchange.Env) (exchange.Balance, error) {
+	if b.fail.Load() {
+		return exchange.Balance{}, errors.New("balance unavailable")
+	}
+	return b.Fake.Balance(ctx, env)
+}
+
+// A tranche refused because the state could not be written is not counted
+// by a later save that succeeds: a restart sees only the tranches whose
+// state was written before their order.
+func TestATrancheWhoseSaveFailedIsNotCountedByALaterSave(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through directory permissions")
+	}
+	f, cs := trancheFake()
+	dir := filepath.Join(t.TempDir(), "state")
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	var fail atomic.Bool
+	s := scriptOf(func(d strategy.Decision) {
+		if d.Action == strategy.Add {
+			_ = os.Chmod(dir, 0o500) // the Add's state cannot be written
+			fail.Store(true)
+		}
+	}, wait, wait, wait, tranche(strategy.Enter, 100), tranche(strategy.Add, 0))
+	c, _ := config.Parse([]byte(trancheYAML), s)
+	var restart State
+	tick := &FakeTicker{Ex: f, Candles: cs, OnStep: func(i int) {
+		switch i {
+		case 4: // after the refused Add: the disk is writable again
+			_ = os.Chmod(dir, 0o700)
+		case 5: // a later save went through: what a restart would load
+			restart, _ = LoadState(dir, "paper")
+		}
+	}}
+	Run(context.Background(), c, s, failingBalance{f, &fail}, exchange.Demo, tick, dir)
+	b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
+	if !strings.Contains(string(b), "trade budget not persisted") || !strings.Contains(string(b), "balance unavailable") {
+		t.Fatalf("setup: want the Add refused and a later save; journal:\n%s", b)
+	}
+	if got := restart.Trades["AAA"]; got.Used != 0.5 || got.Tranches != 1 {
+		t.Fatalf("state after a later save holds %+v, want only the entry (used 0.5, 1 tranche)", got)
 	}
 }

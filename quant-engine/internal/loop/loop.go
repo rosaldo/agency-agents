@@ -423,8 +423,13 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	en.OnTrade = func() error { // before each tranche's order, unlike save: a failed write refuses it
 		mu.Lock()
 		defer mu.Unlock()
-		st.Trades, st.Heartbeat = en.Trades(), time.Now()
-		return SaveState(dir, st)
+		next := st // a refused tranche never reaches st, so no later save writes it
+		next.Trades, next.Heartbeat = en.Trades(), time.Now()
+		if err := SaveState(dir, next); err != nil {
+			return err
+		}
+		st = next
+		return nil
 	}
 	if derivOff != "" {
 		record(journal.Derivatives, derivOff)

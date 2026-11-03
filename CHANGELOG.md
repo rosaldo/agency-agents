@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.57.3** (2026-11-03) · `fix` — quant-engine: a tranche whose state could not be written is never written by a later save
 - **v1.57.2** (2026-11-03) · `fix` — quant-engine: the funding history refuses a non-finite rate, naming the file and the line
 - **v1.57.1** (2026-11-03) · `fix` — quant-engine: an Enter whose trade budget cannot be saved sends no order, counts nothing and keeps its margin free
 - **v1.57.0** (2026-11-03) · `feat` — quant-engine: a strategy can declare it needs open interest, and the backtest refuses data without it for the period
