@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,5 +169,72 @@ func TestTheClassifierKeyStaysOutOfTheJournal(t *testing.T) {
 	}
 	if strings.Contains(string(b), key) || !strings.Contains(string(b), "HTTP 401") {
 		t.Fatalf("journal %s; want the failure without the key", b)
+	}
+}
+
+// The block a news catastrophe set survives a restart: stopped right after
+// the emergency exit and started again within the lookback, the loop neither
+// enters the symbol again nor judges the headline again; once the lookback
+// is over it may enter again.
+func TestNewsBlockSurvivesARestart(t *testing.T) {
+	var feedHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		feedHits.Add(1)
+		_, _ = io.WriteString(w, `<rss><channel><item><title>AAA exchange hack</title></item></channel></rss>`)
+	}))
+	defer srv.Close()
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for _, h := range []int{0, 1, 2, 3, 25} { // the last one past the 24h lookback
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(h) * time.Hour), Open: 100, High: 100, Low: 100, Close: 100, Volume: 10})
+	}
+	s := newsStrategy{&scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		if in.Position != nil {
+			return strategy.Decision{}
+		}
+		return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 90}
+	}}, srv.URL}
+	c, err := config.Parse([]byte(newsYAML), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+	dir := filepath.Join(t.TempDir(), ".scripted")
+	// a state from before the news blocks: no news_until, loads as none
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath(dir, "paper"), []byte(`{"running":false,"level":"paper","targets":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tick := &FakeTicker{Ex: f, Candles: cs, Delay: 500 * time.Millisecond}
+	tick.OnStep = func(i int) {
+		if i == 1 {
+			_ = RequestStop(dir, false)
+		}
+	}
+	Run(context.Background(), c, s, f, exchange.Demo, tick, dir)
+	st, err := LoadState(dir, "paper")
+	if err != nil || !st.NewsUntil["AAA"].After(cs[3].Time) {
+		t.Fatalf("state after stop: news_until %v (%v); want the old state loaded, the entry exited and the block saved", st.NewsUntil, err)
+	}
+	before, hits := len(journalOf(t, dir)), feedHits.Load()
+	tick.OnStep = nil
+	if r := Run(context.Background(), c, s, f, exchange.Demo, tick, dir); r != "candles exhausted" {
+		t.Fatalf("restart ended: %s", r)
+	}
+	var buys []time.Time
+	verdicts := 0
+	for _, e := range journalOf(t, dir)[before:] {
+		switch {
+		case e.Kind == journal.Filled && e.Side == "buy":
+			buys = append(buys, e.Time)
+		case e.Kind == journal.NewsVerdict && e.Time.Before(cs[4].Time):
+			verdicts++
+		}
+	}
+	if len(buys) != 1 || !buys[0].Equal(cs[4].Time) || verdicts != 0 {
+		t.Fatalf("after the restart: buys at %v, headlines judged within the lookback %d (feed read %d times before, %d after); want no entry until %v, then one, and no judgment",
+			buys, verdicts, hits, feedHits.Load(), cs[4].Time)
 	}
 }

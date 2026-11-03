@@ -49,6 +49,10 @@ type Engine struct {
 	// OnStale, when set, persists the stale stops at once: a crash right
 	// after a move must not lose the one left behind.
 	OnStale func()
+	// OnNewsBlock, when set, persists the news blocks at once, before the
+	// emergency exit's order: a restart within the lookback must not enter
+	// the symbol again.
+	OnNewsBlock func()
 	// OnTrade, when set, persists the trade budgets and fractions used before
 	// each tranche's order: a kill -9 between the fill and the end-of-step save
 	// must not renew the budget. An error refuses the order.
@@ -187,6 +191,24 @@ func (e *Engine) Restore(targets map[string]float64, positions []exchange.Positi
 			e.stops[k] = t.Stop
 		}
 	}
+}
+
+// RestoreNews reloads the news blocks saved by a previous run (symbol -> end
+// of the block); nil (a state from before them) means none. An expired one
+// is dropped at its symbol's next step.
+func (e *Engine) RestoreNews(until map[string]time.Time) {
+	for k, v := range until {
+		e.newsUntil[k] = v
+	}
+}
+
+// NewsBlocks returns a copy of the news blocks: symbol -> end of the block.
+func (e *Engine) NewsBlocks() map[string]time.Time {
+	out := make(map[string]time.Time, len(e.newsUntil))
+	for k, v := range e.newsUntil {
+		out[k] = v
+	}
+	return out
 }
 
 // Trades returns a copy of the open trades' budgets and used fractions.
@@ -618,6 +640,9 @@ func (e *Engine) keepRestingStop(ctx context.Context, sym string) {
 func (e *Engine) EmergencyExit(ctx context.Context, sym string, until time.Time, reason string) error {
 	if until.After(e.newsUntil[sym]) {
 		e.newsUntil[sym] = until
+	}
+	if e.OnNewsBlock != nil {
+		e.OnNewsBlock()
 	}
 	e.note(journal.EmergencyExit, sym, reason+"; no entry until "+e.newsUntil[sym].UTC().Format(time.RFC3339))
 	ps, err := e.Ex.Positions(ctx, e.Env)

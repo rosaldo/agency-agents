@@ -116,6 +116,7 @@ type State struct {
 	Targets    map[string]float64    `json:"targets"`
 	StaleStops map[string]string     `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget and fraction used (graduated entry); absent = none in progress
+	NewsUntil  map[string]time.Time  `json:"news_until,omitempty"`  // symbol -> end of the block a news catastrophe set; absent = none
 	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
 	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs
 	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
@@ -371,13 +372,14 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
 	en.Restore(prev.Targets, prev.Positions, prev.StaleStops, prev.Trades)
+	en.RestoreNews(prev.NewsUntil)
 	var nw *newsWorker // crypto with news_guard required: checked after the entry
 	if g, ok := en.News.(*news.Guard); ok && cfg.AssetClass == "crypto" && cfg.NewsGuard == "required" {
 		nw = startNewsWorker(ctx, g)
 	}
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
-		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), Breaker: prev.Breaker,
+		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), NewsUntil: en.NewsBlocks(), Breaker: prev.Breaker,
 		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
@@ -403,6 +405,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
+	en.OnNewsBlock = func() { save(func(s *State) { s.NewsUntil = en.NewsBlocks() }) }
 	onNews := func(r newsResult) {
 		note := func(ev journal.Event) {
 			ev.Time = tick.Now()
@@ -499,6 +502,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	_ = j.Append(journal.Event{Time: tick.Now(), Kind: Stop, Reason: reason})
 	save(func(s *State) {
 		s.Running, s.StopReason, s.LastEvent, s.Targets, s.StaleStops, s.Trades = false, reason, Stop+" "+reason, en.Targets(), en.StaleStops(), en.Trades()
+		s.NewsUntil = en.NewsBlocks()
 		if restored {
 			s.Breaker = snapshot(en)
 		}
@@ -559,6 +563,7 @@ func saveAccount(ctx context.Context, en *engine.Engine, ex exchange.Exchange, e
 		ps, _ := ex.Positions(ctx, env)
 		save(func(s *State) {
 			s.Equity, s.Positions, s.Targets, s.StaleStops, s.Trades, s.Breaker = bal.Equity, ps, en.Targets(), en.StaleStops(), en.Trades(), snapshot(en)
+			s.NewsUntil = en.NewsBlocks()
 		})
 	}
 }
