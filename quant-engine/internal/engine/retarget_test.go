@@ -390,6 +390,81 @@ func (r *closeRetarget) Retarget(in strategy.Input) float64 {
 	return in.Candles[len(in.Candles)-1].Close * 1.05
 }
 
+// rejectAdd rejects every market order after the first (the Add and its
+// resends) at the exchange.
+type rejectAdd struct {
+	*fake.Fake
+	n int
+}
+
+func (x *rejectAdd) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.OrderRequest) (exchange.OrderState, error) {
+	if r.Type == exchange.Market && !r.ReduceOnly {
+		if x.n++; x.n >= 2 {
+			return exchange.OrderState{ClientID: r.ClientID, Symbol: r.Symbol, Status: exchange.Rejected}, exchange.ErrRefused
+		}
+	}
+	return x.Fake.PlaceOrder(ctx, env, r)
+}
+
+// An Add that filled nothing on an open position (never sent: the balance
+// is unreadable; or rejected by the exchange) owes no retarget: on the next
+// candle Retarget is not called and the target does not move.
+func TestAddThatFilledNothingOwesNoRetarget(t *testing.T) {
+	for _, name := range []string{"not sent", "rejected"} {
+		t.Run(name, func(t *testing.T) {
+			cs := retargetCandles()
+			f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+			answers := []strategy.Decision{entryAt(0), addAt(0)}
+			s := &closeRetarget{Strategy: &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+				if len(answers) == 0 {
+					return strategy.Decision{}
+				}
+				d := answers[0]
+				if answers = answers[1:]; d.Action == strategy.Add && name == "not sent" {
+					f.FailNext("Balance", errors.New("balance unavailable"), false) // the executor's read before the order
+				}
+				return d
+			}}}
+			var ex exchange.Exchange = f
+			if name == "rejected" {
+				ex = &rejectAdd{Fake: f}
+			}
+			c, _ := config.Parse([]byte(scriptedYAML), s)
+			for k := 0; k < 3; k++ {
+				f.Advance()
+			}
+			now := cs[3].Time
+			e := New(c, s, ex, exchange.Demo, &events{}, func() time.Time { return now })
+			var afterAdd []string
+			var target float64
+			for k := 0; k < 3; k++ {
+				if k > 0 {
+					f.Advance()
+					now = cs[3+k].Time
+				}
+				err := e.Step(context.Background())
+				switch {
+				case k == 1 && (err == nil || IsHalt(err)):
+					t.Fatalf("setup: the add step returned %v, want a non-halt error", err)
+				case k != 1 && err != nil:
+					t.Fatal(err)
+				case k == 0:
+					target = e.Targets()["AAA"]
+				case k == 1:
+					afterAdd = e.RetargetDue()
+				}
+			}
+			if p := ownPos(t, f); math.Abs(p.Qty-10) > 1e-9 {
+				t.Fatalf("setup: qty %v, want only the entry's 10", p.Qty)
+			}
+			if s.calls != 1 || e.Targets()["AAA"] != target || len(afterAdd) != 0 {
+				t.Fatalf("Retarget calls %d, target %v (was %v), owed after the add %v; want 1 call, the target unmoved, nothing owed",
+					s.calls, e.Targets()["AAA"], target, afterAdd)
+			}
+		})
+	}
+}
+
 // A tranche whose save fails sends no order and owes no retarget.
 func TestFailedSaveOwesNoRetarget(t *testing.T) {
 	for _, failAt := range []strategy.Action{strategy.Enter, strategy.Add} {
@@ -437,5 +512,26 @@ func TestFailedSaveOwesNoRetarget(t *testing.T) {
 				t.Fatalf("orders %d owed %v, want %d orders and nothing owed", f.Calls("PlaceOrder"), e.RetargetDue(), want)
 			}
 		})
+	}
+}
+
+// An Enter never sent (the balance is unreadable) leaves nothing owed.
+func TestEnterNotSentOwesNoRetarget(t *testing.T) {
+	cs := retargetCandles()
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+	s := &closeRetarget{Strategy: &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
+		f.FailNext("Balance", errors.New("balance unavailable"), false) // the executor's read before the order
+		return entryAt(0)
+	}}}
+	c, _ := config.Parse([]byte(scriptedYAML), s)
+	for k := 0; k < 3; k++ {
+		f.Advance()
+	}
+	e := New(c, s, f, exchange.Demo, &events{}, func() time.Time { return cs[3].Time })
+	if err := e.Step(context.Background()); err == nil || f.Calls("PlaceOrder") != 0 {
+		t.Fatalf("setup: step error %v, orders %d; want the entry refused before sending", err, f.Calls("PlaceOrder"))
+	}
+	if got := e.RetargetDue(); len(got) != 0 {
+		t.Fatalf("owed %v after an entry never sent, want nothing", got)
 	}
 }

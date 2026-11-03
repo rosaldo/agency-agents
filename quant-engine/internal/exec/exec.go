@@ -66,6 +66,20 @@ type Plan struct {
 	Entry, Stop, Target, Qty float64
 }
 
+// nothingFilled wraps the error of an order that filled nothing for sure:
+// refused before it was sent, or rejected by the exchange. Its text is the
+// wrapped error's.
+type nothingFilled struct{ error }
+
+func (n nothingFilled) Unwrap() error { return n.error }
+
+// NothingFilled reports an Enter or Add error after which no quantity was
+// added: the order was never sent, or the exchange rejected it.
+func NothingFilled(err error) bool {
+	var n nothingFilled
+	return errors.As(err, &n)
+}
+
 // ClientID derives an idempotent 16-byte order digest from strategy name,
 // symbol, candle and purpose, so a resend after a lost response can never
 // open a second order.
@@ -112,7 +126,7 @@ func (e *Executor) Enter(ctx context.Context, symbol string, candle time.Time, p
 	req, st, err := e.open(ctx, symbol, candle, "entry", side, plan, e.Ex.Capabilities().AttachedStop)
 	switch {
 	case req.ClientID == "": // refused before sending
-		return err
+		return nothingFilled{err}
 	case err != nil || st.Status != exchange.Filled:
 		return e.unconfirmed(ctx, req, st, err, plan.Stop)
 	case req.AttachedStop > 0:
@@ -133,7 +147,7 @@ func (e *Executor) Add(ctx context.Context, symbol string, candle time.Time, p e
 	req, st, err := e.open(ctx, symbol, candle, "add", p.PSide(), plan, false)
 	switch {
 	case req.ClientID == "":
-		return "", err
+		return "", nothingFilled{err}
 	case err != nil || st.Status != exchange.Filled:
 		return "", e.unconfirmed(ctx, req, st, err, plan.Stop)
 	}
@@ -194,7 +208,7 @@ func (e *Executor) unconfirmed(ctx context.Context, req exchange.OrderRequest, s
 	}
 	rerr := e.Reconcile(pctx, func(exchange.Position) float64 { return stop })
 	if st.Status == exchange.Rejected && err != nil {
-		return errors.Join(fmt.Errorf("order %s rejected: %w", req.ClientID, err), rerr)
+		return errors.Join(nothingFilled{fmt.Errorf("order %s rejected: %w", req.ClientID, err)}, rerr)
 	}
 	herr := fmt.Errorf("%w: order %s not confirmed filled (status %q, %v)", ErrHalt, req.ClientID, st.Status, err)
 	e.record(journal.Event{Kind: journal.Halt, Symbol: req.Symbol, Reason: herr.Error()})

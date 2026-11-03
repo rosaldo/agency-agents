@@ -461,6 +461,9 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	*free -= margin // also on a failed entry: it may have filled
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
+		if exec.NothingFilled(err) { // no fill: nothing to retarget
+			unowe()
+		}
 		return err
 	}
 	e.stops[sym] = d.Stop
@@ -616,6 +619,9 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		e.forget(sym)
 		return nil
 	case err != nil:
+		if exec.NothingFilled(err) { // no fill: nothing to retarget
+			unowe()
+		}
 		e.keepRestingStop(ctx, sym)
 		return err // Reconcile covers the whole quantity next step, or flattened and halted already
 	}

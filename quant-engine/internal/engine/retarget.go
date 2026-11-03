@@ -79,8 +79,10 @@ func (e *Engine) applyRetarget(p exchange.Position, in strategy.Input) {
 }
 
 // oweRetarget marks sym's retarget owed before a tranche's order, so the
-// save that precedes the order carries it; the returned func undoes it when
-// no order is sent. A strategy without Retargeter owes nothing.
+// save that precedes the order carries it; the returned func puts it back as
+// it was when nothing filled (the save failed, the order was never sent or
+// the exchange rejected it), so no Retarget is called without a fill. A
+// strategy without Retargeter owes nothing.
 func (e *Engine) oweRetarget(sym string) (undo func()) {
 	if _, ok := e.Strategy.(strategy.Retargeter); !ok || e.retargetDue[sym] {
 		return func() {}
