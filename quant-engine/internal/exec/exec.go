@@ -241,7 +241,9 @@ func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, side excha
 
 // Reconcile runs before any decision: every position without a stop on the
 // exchange gets one at stopFor(position), or is flattened when that stop is
-// unknown (0) or does not fit on the losing side of the market. A stop that
+// unknown (0) or the venue refuses it. The side of the market is not checked
+// here: a stop already crossed by the price is flattened only because the
+// venue (or the paper simulator) refuses to rest it. A stop that
 // closes more than the own quantity (the account netted it down, FR-P8) is
 // resized to it, new stop first; one that closes less (an add filled and its
 // swap never ran) is covered.
