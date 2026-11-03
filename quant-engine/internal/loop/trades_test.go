@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -44,6 +45,28 @@ func TestStateWithoutTradesLoadsAsNoTrancheInProgress(t *testing.T) {
 	back, err := LoadState(dir, "paper")
 	if err != nil || back.Trades["AAA"] != (risk.Trade{Budget: 100, Used: 0.5}) {
 		t.Fatalf("round trip %+v (%v), want budget 100 used 0.5", back.Trades, err)
+	}
+}
+
+// status shows each trade in progress as saved: budget, budget_used,
+// tranches and stop.
+func TestStatusShowsTheSavedTrades(t *testing.T) {
+	dir := t.TempDir()
+	st := State{Mode: "paper", Level: "paper", Trades: map[string]risk.Trade{"AAA": {Budget: 100, Used: 0.75, Tranches: 2, Stop: 98}}}
+	if err := SaveState(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"trades":{"AAA":{"budget":100,"budget_used":0.75,"tranches":2,"stop":98}}`
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("status %s, want %s", b, want)
 	}
 }
 

@@ -593,25 +593,36 @@ func guard(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exc
 
 // Status is the one-line answer of the status command.
 type Status struct {
-	Alive         bool                `json:"alive"`
-	Mode          string              `json:"mode,omitempty"`
-	Level         string              `json:"level,omitempty"`
-	Pid           int                 `json:"pid,omitempty"`
-	Equity        float64             `json:"equity"`
-	DayPnL        float64             `json:"day_pnl"`
-	WeekPnL       float64             `json:"week_pnl"`
-	Limits        Limits              `json:"limits"`
-	DailyRoomPct  float64             `json:"daily_room_pct"`
-	WeeklyRoomPct float64             `json:"weekly_room_pct"`
-	Positions     []exchange.Position `json:"positions"`
-	Halt          string              `json:"halt,omitempty"` // the breaker's halt: no entry until it lifts
-	Funding       string              `json:"funding,omitempty"`
-	PaperSim      string              `json:"sim,omitempty"`
-	Sizing        string              `json:"sizing,omitempty"`
-	Feed          string              `json:"feed,omitempty"`
-	FeedState     *FeedState          `json:"feed_state,omitempty"`
-	LastEvent     string              `json:"last_event,omitempty"`
-	StopReason    string              `json:"stop_reason,omitempty"`
+	Alive         bool                   `json:"alive"`
+	Mode          string                 `json:"mode,omitempty"`
+	Level         string                 `json:"level,omitempty"`
+	Pid           int                    `json:"pid,omitempty"`
+	Equity        float64                `json:"equity"`
+	DayPnL        float64                `json:"day_pnl"`
+	WeekPnL       float64                `json:"week_pnl"`
+	Limits        Limits                 `json:"limits"`
+	DailyRoomPct  float64                `json:"daily_room_pct"`
+	WeeklyRoomPct float64                `json:"weekly_room_pct"`
+	Positions     []exchange.Position    `json:"positions"`
+	Trades        map[string]TradeStatus `json:"trades,omitempty"` // symbol -> the trade in progress (graduated entry)
+	Halt          string                 `json:"halt,omitempty"`   // the breaker's halt: no entry until it lifts
+	Funding       string                 `json:"funding,omitempty"`
+	PaperSim      string                 `json:"sim,omitempty"`
+	Sizing        string                 `json:"sizing,omitempty"`
+	Feed          string                 `json:"feed,omitempty"`
+	FeedState     *FeedState             `json:"feed_state,omitempty"`
+	LastEvent     string                 `json:"last_event,omitempty"`
+	StopReason    string                 `json:"stop_reason,omitempty"`
+}
+
+// TradeStatus is a trade in progress as status shows it: the risk budget
+// fixed at its first tranche, the fraction of it used, the tranches so far
+// and the position's stop.
+type TradeStatus struct {
+	Budget     float64 `json:"budget"`
+	BudgetUsed float64 `json:"budget_used"`
+	Tranches   int     `json:"tranches"`
+	Stop       float64 `json:"stop,omitempty"`
 }
 
 func ReadStatus(dir string) (Status, error) {
@@ -627,6 +638,12 @@ func ReadStatus(dir string) (Status, error) {
 	}
 	s := Status{Alive: st.Alive(), Mode: st.Mode, Level: st.Level, Pid: st.Pid, Equity: st.Equity, Limits: st.Limits,
 		Positions: st.Positions, Halt: st.Breaker.Halt, Funding: st.Funding, PaperSim: st.PaperSim, Sizing: st.Sizing, Feed: st.Feed, FeedState: st.FeedState, LastEvent: st.LastEvent, StopReason: st.StopReason}
+	for sym, t := range st.Trades {
+		if s.Trades == nil {
+			s.Trades = map[string]TradeStatus{}
+		}
+		s.Trades[sym] = TradeStatus{Budget: t.Budget, BudgetUsed: t.Used, Tranches: t.Tranches, Stop: t.Stop}
+	}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen
 		s.DailyRoomPct = st.Limits.MaxDailyDrawdownPct + s.DayPnL/b.DayOpen*100
