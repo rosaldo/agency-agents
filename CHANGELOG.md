@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.54.1** (2026-11-02) · `test` — quant-engine: FeedTicker tests: a boundary after the deadline wakes no extra step, a boundary at the deadline instant is one step, a boundary before the local close waits for it
 - **v1.54.0** (2026-11-02) · `feat` — quant-engine: feed: rest | websocket; loop.FeedTicker steps on the stream or at the boundary plus 5 s, journals feed_degraded/feed_restored, status shows the feed; refused at load without a stream or interval; parity with the backtest (Enter then Add included)
 - **v1.53.0** (2026-11-02) · `feat` — quant-engine: engine candle buffer (only the candles closed since the last step over REST, whole window at start and after a reset) and the candle_not_final check against the candle the stream ended
 - **v1.52.0** (2026-11-02) · `feat` — quant-engine: exchange.CandleFeed port, the boundary signal of a candle stream; ccxt adapter on the fork's WatchOHLCV (late updates of an old candle ignored, link down/up with reconnection) and the Hyperliquid stream with a 20 s ping
