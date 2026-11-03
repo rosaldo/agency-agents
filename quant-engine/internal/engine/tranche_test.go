@@ -253,7 +253,7 @@ func TestAddOnABlockedSymbolIsRefused(t *testing.T) {
 		"blocked":    {func(e *Engine, f *fake.Fake) { e.Ex, e.Exec.Ex = blockedOwn{f}, blockedOwn{f} }, "foreign qty detected"},
 		"news": {func(e *Engine, _ *fake.Fake) {
 			cfg := *e.Cfg
-			cfg.NewsGuard, e.Cfg, e.News = "required", &cfg, notClear{}
+			cfg.NewsGuard, cfg.AssetClass, e.Cfg, e.News = "required", "equity", &cfg, notClear{} // checked before the entry on an equity
 		}, "news check not clear"},
 	}
 	for name, tc := range cases {

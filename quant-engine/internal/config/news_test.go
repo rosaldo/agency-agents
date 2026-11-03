@@ -79,3 +79,44 @@ func TestNewsPolicyFeedsWithoutKeywordsRefused(t *testing.T) {
 		t.Fatalf("feeds without keywords: %v", err)
 	}
 }
+
+func classified(c *strategy.NewsClassifier) strategy.Strategy {
+	return withNews{example.New(), strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}, Keywords: []string{"hack"}, Classifier: c}}
+}
+
+// The classifier's question, criteria, type, threshold and model enter the
+// hash; one the engine cannot ask is refused at load.
+func TestNewsClassifierIsHashedAndValidated(t *testing.T) {
+	base := strategy.NewsClassifier{Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9,
+		Criteria: map[string]string{"true": "at risk", "false": "noise"}}
+	h := hashFor(t, validYAML, classified(&base))
+	if hashFor(t, validYAML, classified(nil)) == h {
+		t.Error("the classifier did not change the hash")
+	}
+	for name, change := range map[string]func(*strategy.NewsClassifier){
+		"model":     func(c *strategy.NewsClassifier) { c.Model = "jev-1.14.0" },
+		"question":  func(c *strategy.NewsClassifier) { c.Question = "Other?" },
+		"threshold": func(c *strategy.NewsClassifier) { c.Threshold = 0.85 },
+		"criteria":  func(c *strategy.NewsClassifier) { c.Criteria = map[string]string{"true": "other"} },
+	} {
+		c := base
+		change(&c)
+		if hashFor(t, validYAML, classified(&c)) == h {
+			t.Errorf("%s did not change the hash", name)
+		}
+	}
+	for name, change := range map[string]func(*strategy.NewsClassifier){
+		"choice type":      func(c *strategy.NewsClassifier) { c.Type = "choice" },
+		"no question":      func(c *strategy.NewsClassifier) { c.Question = " " },
+		"no model":         func(c *strategy.NewsClassifier) { c.Model = "" },
+		"threshold 0":      func(c *strategy.NewsClassifier) { c.Threshold = 0 },
+		"threshold > 1":    func(c *strategy.NewsClassifier) { c.Threshold = 1.5 },
+		"unknown criteria": func(c *strategy.NewsClassifier) { c.Criteria = map[string]string{"maybe": "x"} },
+	} {
+		c := base
+		change(&c)
+		if _, err := Parse([]byte(validYAML), classified(&c)); err == nil || !strings.Contains(err.Error(), "news classifier") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

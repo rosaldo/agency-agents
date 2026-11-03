@@ -114,8 +114,12 @@ func TestStrategyFeedsWireTheRSSChecker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, ok := New(c, s, nil, exchange.Demo, nil, time.Now).News.(*news.RSS)
-	if !ok || len(r.Keywords) != 1 || r.Keywords[0] != "halt" || r.Lookback != 24*time.Hour {
+	g, ok := New(c, s, nil, exchange.Demo, nil, time.Now).News.(*news.Guard)
+	if !ok || g.Classifier != nil {
+		t.Fatalf("the strategy's news policy did not wire the news guard (keywords alone): %+v", g)
+	}
+	r := g.RSS
+	if len(r.Keywords) != 1 || r.Keywords[0] != "halt" || r.Lookback != 24*time.Hour {
 		t.Fatalf("the strategy's news policy did not wire the RSS checker: %+v", r)
 	}
 }

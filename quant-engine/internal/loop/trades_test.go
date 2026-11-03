@@ -170,7 +170,7 @@ func TestKillAfterAnAddFillKeepsTheFractionUsed(t *testing.T) {
 	f.Advance() // the restart comes a candle later
 	s2 := script(false, tranche(strategy.Add, 0))
 	c2, _ := config.Parse([]byte(trancheYAML), s2)
-	Run(context.Background(), c2, s2, ex, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, i: tick.i + 1}, dir)
+	Run(context.Background(), c2, s2, ex, exchange.Demo, tickerFrom(f, cs, tick.i.Load()+1), dir)
 	p := ownPosition(t, f)
 	if loss := p.Qty * (p.AvgPrice - 100); loss > 100+1e-6 {
 		t.Fatalf("loss at the stop %.4f (qty %v avg %v) is above the trade budget 100: the restart renewed the fraction used", loss, p.Qty, p.AvgPrice)

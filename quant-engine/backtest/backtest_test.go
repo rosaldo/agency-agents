@@ -174,3 +174,29 @@ func TestBacktestSizesWithTheActiveProfile(t *testing.T) {
 		t.Fatalf("qty optimistic %v, real %v; want optimistic larger", qty["optimistic"], qty["real"])
 	}
 }
+
+type withFeeds struct{ strategy.Strategy }
+
+func (withFeeds) NewsPolicy() strategy.NewsPolicy {
+	return strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}, Keywords: []string{"hack"}}
+}
+
+// With news_guard required a crypto backtest enters as live does (the check
+// comes after the entry) and never exits on news; an equity takes no entry.
+// The summary says which.
+func TestBacktestWithRequiredNews(t *testing.T) {
+	cs, err := market.ReadCSVFile("../testdata/backtest_one_trade.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for class, trades := range map[string]int{"crypto\nnews_guard: required": 1, "equity": 0} {
+		y := strings.Replace(cfgYAML, "asset_class: crypto", "asset_class: "+class, 1)
+		res, err := Run(context.Background(), withFeeds{example.New()}, []byte(y), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Trades) != trades || !strings.Contains(res.Summary.News, "replayable") {
+			t.Fatalf("%s: trades %d, news %q; want %d trades and the limitation stated", class, len(res.Trades), res.Summary.News, trades)
+		}
+	}
+}

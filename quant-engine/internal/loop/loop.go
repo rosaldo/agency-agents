@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
@@ -20,6 +21,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/engine"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
@@ -64,19 +66,20 @@ func (r RealTicker) Next(ctx context.Context) error {
 }
 
 // FakeTicker replays the fake exchange's candles, one per Next, at Delay.
+// Now may be read while Next waits (a news verdict handled meanwhile).
 type FakeTicker struct {
 	Ex      *fake.Fake
 	Candles []market.Candle
 	Delay   time.Duration
 	OnStep  func(i int) // test hook, called after the step on candle i
-	i       int
+	i       atomic.Int64
 }
 
-func (f *FakeTicker) Now() time.Time { return f.Candles[f.i].Time }
+func (f *FakeTicker) Now() time.Time { return f.Candles[f.i.Load()].Time }
 
 func (f *FakeTicker) Next(ctx context.Context) error {
 	if f.OnStep != nil {
-		f.OnStep(f.i)
+		f.OnStep(int(f.i.Load()))
 	}
 	select {
 	case <-time.After(f.Delay):
@@ -86,7 +89,7 @@ func (f *FakeTicker) Next(ctx context.Context) error {
 	if !f.Ex.Advance() {
 		return io.EOF
 	}
-	f.i++
+	f.i.Add(1)
 	return nil
 }
 
@@ -368,6 +371,10 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
 	en.Restore(prev.Targets, prev.Positions, prev.StaleStops, prev.Trades)
+	var nw *newsWorker // crypto with news_guard required: checked after the entry
+	if g, ok := en.News.(*news.Guard); ok && cfg.AssetClass == "crypto" && cfg.NewsGuard == "required" {
+		nw = startNewsWorker(ctx, g)
+	}
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
 		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), Breaker: prev.Breaker,
@@ -396,6 +403,15 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
+	onNews := func(r newsResult) {
+		note := func(ev journal.Event) {
+			ev.Time = tick.Now()
+			_ = j.Append(ev)
+			save(func(s *State) { s.LastEvent = ev.Kind + " " + ev.Reason })
+		}
+		handleNews(ctx, en.EmergencyExit, nw.guard.Threshold, r, note, record)
+		saveAccount(ctx, en, ex, env, save)
+	}
 	en.OnTrade = func() error { // before each tranche's order, unlike save: a failed write refuses it
 		mu.Lock()
 		defer mu.Unlock()
@@ -454,7 +470,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			record(journal.Limit, note)
 		}
 		restored = true
-		reason = run(ctx, en, ex, env, tick, dir, record, save)
+		reason = run(ctx, en, ex, env, tick, dir, record, save, nw, onNews)
 	}
 	cancel()
 	<-beatDone
@@ -494,7 +510,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 }
 
 func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string,
-	record func(kind, reason string), save func(func(*State))) string {
+	record func(kind, reason string), save func(func(*State)), nw *newsWorker, onNews func(newsResult)) string {
 	ended := func() string { return endedReason(dir) }
 	if err := en.ConfigureMarkets(ctx); err != nil { // FR-P3: before any order, reconcile included
 		if ctx.Err() != nil {
@@ -530,7 +546,8 @@ func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env excha
 			record(Error, err.Error())
 		}
 		saveAccount(ctx, en, ex, env, save)
-		if err := tick.Next(ctx); errors.Is(err, io.EOF) {
+		nw.check(en.Holding(), tick.Now())
+		if err := next(ctx, tick, nw.results(), onNews); errors.Is(err, io.EOF) {
 			return "candles exhausted"
 		}
 	}

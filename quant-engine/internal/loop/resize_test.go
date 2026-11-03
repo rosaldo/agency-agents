@@ -74,7 +74,7 @@ func TestKillBetweenAnAddFillAndTheStopSwap(t *testing.T) {
 	f.Advance() // the restart comes a candle later
 	s2 := scriptOf(nil, tranche(strategy.Add, 0))
 	c2, _ := config.Parse([]byte(trancheYAML), s2)
-	Run(context.Background(), c2, s2, ex, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, i: tick.i + 1}, dir)
+	Run(context.Background(), c2, s2, ex, exchange.Demo, tickerFrom(f, cs, tick.i.Load()+1), dir)
 	p := ownPosition(t, f)
 	if p.StopQty != p.Qty || p.StopPrice != 101 {
 		t.Fatalf("position after the start %+v; want one stop for all of it at the add's 101", p)
@@ -113,7 +113,7 @@ func TestKillAfterTheFirstTrancheFillKeepsItsFraction(t *testing.T) {
 	f.Advance()
 	s2 := scriptOf(nil, strategy.Decision{Action: strategy.Add, Side: strategy.Long, Fraction: 1})
 	c2, _ := config.Parse([]byte(trancheYAML), s2)
-	Run(context.Background(), c2, s2, ex, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, i: tick.i + 1}, dir)
+	Run(context.Background(), c2, s2, ex, exchange.Demo, tickerFrom(f, cs, tick.i.Load()+1), dir)
 	p := ownPosition(t, f)
 	b, _ := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
 	if loss := p.Qty * (p.AvgPrice - 100); loss > 100+1e-6 || !strings.Contains(string(b), "add refused") {

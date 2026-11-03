@@ -145,6 +145,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		if len(p.Feeds) > 0 && len(p.Keywords) == 0 { // no keyword matches nothing: the guard would always clear
 			return nil, fmt.Errorf("config: strategy %s: news policy has feeds but no keywords", s.Name())
 		}
+		if err := checkClassifier(p.Classifier); err != nil {
+			return nil, fmt.Errorf("config: strategy %s: news classifier: %w", s.Name(), err)
+		}
 		c.news = &p
 	}
 	return &c, nil
@@ -247,3 +250,26 @@ func (c *Config) validate() error {
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// checkClassifier refuses a news classifier the engine cannot ask: a noul
+// question only, with its text, a model and a threshold in (0, 1].
+func checkClassifier(c *strategy.NewsClassifier) error {
+	switch {
+	case c == nil:
+		return nil
+	case c.Type != "noul":
+		return fmt.Errorf("type %q is not supported (noul only)", c.Type)
+	case strings.TrimSpace(c.Question) == "":
+		return errors.New("no question")
+	case c.Model == "":
+		return errors.New("no model")
+	case !(c.Threshold > 0 && c.Threshold <= 1):
+		return fmt.Errorf("threshold %v is outside (0, 1]", c.Threshold)
+	}
+	for k := range c.Criteria {
+		if k != "true" && k != "false" {
+			return fmt.Errorf("criteria key %q: a noul question takes true and false", k)
+		}
+	}
+	return nil
+}

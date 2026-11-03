@@ -92,6 +92,20 @@ type NewsPolicy struct {
 	Keywords []string            // no engine default list
 	Aliases  map[string][]string // base asset -> extra names
 	Lookback time.Duration
+	// Classifier judges each headline the keywords matched; nil means every
+	// match is a catastrophe (keywords alone).
+	Classifier *NewsClassifier `json:",omitempty"`
+}
+
+// NewsClassifier is the question a classifier (TypeSafe's Jev) answers about
+// one headline. Type is "noul": a yes/no question whose yes means a
+// catastrophe for the asset; a yes at or above Threshold is one.
+type NewsClassifier struct {
+	Model     string            // e.g. "jev-latest" or a pinned version
+	Type      string            // "noul"
+	Question  string            // the instructions
+	Criteria  map[string]string // optional: "true" and "false", what a yes and a no mean
+	Threshold float64           // in (0, 1]
 }
 
 // DerivativesUser is optional: a strategy whose NeedsDerivatives is true gets

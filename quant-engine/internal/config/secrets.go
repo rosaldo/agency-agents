@@ -27,6 +27,13 @@ func EnvPrefix(name, venue string, testnet bool) string {
 	return strings.ToUpper(strings.ReplaceAll(p, "-", "_")) + "_"
 }
 
+// NewsKeyVar is the variable holding the news classifier's API key of a
+// strategy: <STRATEGY>_TYPESAFE_API_KEY, e.g. EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY.
+// It has no venue: one key serves every venue and network.
+func NewsKeyVar(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_TYPESAFE_API_KEY"
+}
+
 // LoadCredentials reads <PREFIX><SUFFIX> for every required and optional
 // suffix, with the testnet or the mainnet prefix. A required variable that is
 // unset fails; errors name variables, never values. The two networks keep

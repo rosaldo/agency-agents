@@ -44,30 +44,49 @@ type headline struct {
 	when string
 }
 
+// Hit is a recent headline naming the asset with a keyword.
+type Hit struct {
+	Text string    // the headline (its title)
+	Feed string    // the feed URL without its query and fragment
+	When time.Time // zero when undated
+}
+
 // Clear reports whether no recent headline in any feed names symbol's base
 // asset with a keyword. Any feed that cannot be read or parsed is an error,
 // which the engine treats as not clear.
 func (r *RSS) Clear(ctx context.Context, symbol string, at time.Time) (bool, string, error) {
+	hs, err := r.Hits(ctx, symbol, at)
+	if err != nil || len(hs) == 0 {
+		return err == nil, "", err
+	}
+	return false, fmt.Sprintf("%q (%s)", hs[0].Text, hs[0].Feed), nil
+}
+
+// Hits lists the recent headlines of every feed that name symbol's base
+// asset with a keyword. Any feed that cannot be read or parsed is an error.
+func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, error) {
 	base := strings.ToLower(strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0])
 	names := []string{base}
 	for _, a := range r.Aliases[strings.ToUpper(base)] {
 		names = append(names, strings.ToLower(a))
 	}
+	var out []Hit
 	for _, url := range r.Feeds {
 		hs, err := r.fetch(ctx, url)
 		if err != nil {
-			return false, "", err
+			return nil, err
 		}
 		for _, h := range hs {
-			if t, ok := parseTime(h.when); ok && t.Before(at.Add(-r.Lookback)) {
+			t, dated := parseTime(h.when)
+			if dated && t.Before(at.Add(-r.Lookback)) {
 				continue // undated headlines count as recent: fail closed
 			}
 			if mentions(h.text, names) && mentions(h.text, r.Keywords) {
-				return false, fmt.Sprintf("%q (%s)", firstLine(h.text), redact(url)), nil
+				out = append(out, Hit{Text: firstLine(h.text), Feed: redact(url), When: t})
 			}
 		}
 	}
-	return true, "", nil
+	return out, nil
 }
 
 // redact drops a feed URL's query and fragment, where access tokens live.

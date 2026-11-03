@@ -189,3 +189,10 @@ func TestMissingOrCorruptStateIsFailClosed(t *testing.T) {
 		}
 	}
 }
+
+// tickerFrom is a FakeTicker resuming at candle i (a restart).
+func tickerFrom(f *fake.Fake, cs []market.Candle, i int64) *FakeTicker {
+	t := &FakeTicker{Ex: f, Candles: cs}
+	t.i.Store(i)
+	return t
+}

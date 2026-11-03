@@ -142,6 +142,9 @@ func (a App) Run(args []string, stdout io.Writer) error {
 	}
 	switch args[0] {
 	case "check":
+		if n := cfg.NewsPolicy(); n != nil && n.Classifier != nil && os.Getenv(config.NewsKeyVar(cfg.StrategyName())) == "" {
+			return fmt.Errorf("news classifier: environment variable %s is not set", config.NewsKeyVar(cfg.StrategyName()))
+		}
 		_, err := fmt.Fprintln(stdout, `{"config":"ok"}`)
 		return err
 	case "backtest":

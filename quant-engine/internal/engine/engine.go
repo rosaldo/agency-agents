@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/news/typesafe"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/ownbook"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
@@ -30,10 +32,16 @@ type Engine struct {
 	Env      exchange.Env
 	Exec     *exec.Executor
 	Risk     *risk.Breaker
-	// News is the pre-entry check used when news_guard is required; nil means
-	// no checker is configured, so such entries are refused.
+	// News is the check used when news_guard is required: before an entry on
+	// an equity, after it on a crypto (the loop's worker, which needs a
+	// *news.Guard). nil means no checker is configured, so such entries are
+	// refused.
 	News        NewsChecker
 	NewsTimeout time.Duration // 0 = 10s
+	// PastNews says the candles are of the past (backtest): headlines are not
+	// replayable, so a crypto entry is taken and never exited on news, and an
+	// equity entry is never taken.
+	PastNews bool
 	// Simulated says the fills are simulated (paper simulator, backtest):
 	// sizing then counts the active sim profile as it is; with real fills
 	// (mainnet, testnet) it counts the profile floored at the real one (FR-R1).
@@ -66,6 +74,7 @@ type Engine struct {
 	staleStops map[string]string     // symbol -> old stop a trail could not cancel (FR-P9)
 	trades     map[string]risk.Trade // symbol -> budget fixed at the first tranche and fraction used (graduated entry)
 	blocked    map[string]string     // last journaled block reason per symbol
+	newsUntil  map[string]time.Time  // symbol -> end of the block a news catastrophe set
 	funding    map[string]time.Time
 }
 
@@ -74,7 +83,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{}, trades: map[string]risk.Trade{},
-		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, newsUntil: map[string]time.Time{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
@@ -85,8 +94,16 @@ func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exch
 		if lookback <= 0 {
 			lookback = 24 * time.Hour
 		}
-		e.News = &news.RSS{Feeds: n.Feeds, Keywords: kw, Aliases: n.Aliases,
-			Lookback: lookback, Client: &http.Client{Timeout: 10 * time.Second}}
+		g := &news.Guard{RSS: &news.RSS{Feeds: n.Feeds, Keywords: kw, Aliases: n.Aliases,
+			Lookback: lookback, Client: &http.Client{Timeout: 10 * time.Second}}}
+		if c := n.Classifier; c != nil {
+			v := config.NewsKeyVar(cfg.StrategyName())
+			g.Classifier = &typesafe.Client{URL: typesafe.Endpoint, Key: config.Secret(os.Getenv(v)), KeyVar: v,
+				HTTP: &http.Client{Timeout: 10 * time.Second}}
+			g.Question = news.Question{Type: c.Type, Instructions: c.Question, Criteria: c.Criteria, Model: c.Model}
+			g.Threshold = c.Threshold
+		}
+		e.News = g
 	}
 	return e
 }
@@ -98,13 +115,17 @@ type NewsChecker interface {
 }
 
 // newsBlocks applies news_guard fail-closed: no checker, an error, a timeout
-// or a not-clear verdict all keep the engine out.
+// or a not-clear verdict all keep the engine out. A crypto is checked after
+// its entry instead (the loop's worker), and only needs the checker.
 func (e *Engine) newsBlocks(ctx context.Context, symbol string, at time.Time) string {
-	if e.Cfg.NewsGuard != "required" {
+	crypto := e.Cfg.AssetClass == "crypto"
+	switch {
+	case e.Cfg.NewsGuard != "required", crypto && e.PastNews:
 		return ""
-	}
-	if e.News == nil {
+	case e.News == nil:
 		return "news_guard is required and no news checker is configured"
+	case crypto:
+		return ""
 	}
 	timeout := e.NewsTimeout
 	if timeout <= 0 {
@@ -315,6 +336,12 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	if p.PSide() == exchange.Short {
 		side = strategy.Short
 	}
+	if until, ok := e.newsUntil[sym]; ok && !e.Exec.Now().Before(until) {
+		delete(e.newsUntil, sym)
+	}
+	if _, news := e.newsUntil[sym]; holding && news { // an emergency exit that failed: again, before anything else
+		return e.exit(ctx, p, last.Time, "emergency exit (news catastrophe), retried")
+	}
 	if holding && TargetHit(side, last.Close, e.targets[sym]) {
 		return e.exit(ctx, p, last.Time, "target") // the exchange stop guards it if this fails
 	}
@@ -363,6 +390,10 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	}
 	if p.Blocked != "" {
 		e.skip(sym, "symbol blocked: "+p.Blocked)
+		return nil
+	}
+	if until, ok := e.newsUntil[sym]; ok {
+		e.skip(sym, "symbol blocked by a news catastrophe until "+until.UTC().Format(time.RFC3339))
 		return nil
 	}
 	if id := e.staleStops[sym]; id != "" {
@@ -469,6 +500,8 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		why = "symbol blocked: " + p.Blocked
 	case e.staleStops[sym] != "":
 		why = "symbol blocked: old stop " + e.staleStops[sym] + " not cancelled yet"
+	case !e.newsUntil[sym].IsZero():
+		why = "symbol blocked by a news catastrophe until " + e.newsUntil[sym].UTC().Format(time.RFC3339)
 	}
 	if why == "" {
 		why = e.newsBlocks(ctx, sym, last.Time)
@@ -576,6 +609,38 @@ func (e *Engine) keepRestingStop(ctx context.Context, sym string) {
 			e.stops[sym] = p.StopPrice
 		}
 	}
+}
+
+// EmergencyExit is a news catastrophe on sym: no entry on it until until,
+// and its position, if the engine holds one, closed at market now (stop
+// cancelled first, reduce-only: Exec.Exit). A failed exit is retried at the
+// next step, before any decision; the stop on the exchange guards meanwhile.
+func (e *Engine) EmergencyExit(ctx context.Context, sym string, until time.Time, reason string) error {
+	if until.After(e.newsUntil[sym]) {
+		e.newsUntil[sym] = until
+	}
+	e.note(journal.EmergencyExit, sym, reason+"; no entry until "+e.newsUntil[sym].UTC().Format(time.RFC3339))
+	ps, err := e.Ex.Positions(ctx, e.Env)
+	if err != nil {
+		return fmt.Errorf("emergency exit: positions: %w", err)
+	}
+	for _, p := range ps {
+		if p.Symbol == sym && p.Qty > 0 {
+			return e.exit(ctx, p, e.Exec.Now(), "emergency exit: "+reason)
+		}
+	}
+	return nil
+}
+
+// Holding lists the symbols the engine holds a position of its own on.
+func (e *Engine) Holding() []string {
+	var out []string
+	for _, sym := range e.Cfg.Symbols {
+		if _, ok := e.stops[sym]; ok {
+			out = append(out, sym)
+		}
+	}
+	return out
 }
 
 // exit closes p at market; on failure its target and stop are kept for the

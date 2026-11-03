@@ -41,6 +41,14 @@ const (
 	// steps at the boundary plus the grace, as with feed: rest) or came back.
 	FeedDegraded = "feed_degraded"
 	FeedRestored = "feed_restored"
+	// NewsHit: a recent headline names the asset with a keyword (crypto,
+	// after the entry); NewsVerdict: how it was judged, with the classifier's
+	// model; NewsCheckFailed: a feed was unreadable, the position stays;
+	// EmergencyExit: a catastrophe closes the position and blocks the symbol.
+	NewsHit         = "news_hit"
+	NewsVerdict     = "news_verdict"
+	NewsCheckFailed = "news_check_failed"
+	EmergencyExit   = "emergency_exit"
 )
 
 type Event struct {
@@ -55,6 +63,7 @@ type Event struct {
 	Qty        float64   `json:"qty,omitempty"`
 	Price      float64   `json:"price,omitempty"`
 	Amount     float64   `json:"amount,omitempty"` // funding, in the settle currency
+	Model      string    `json:"model,omitempty"`  // news_verdict: the classifier's model that answered
 	Reason     string    `json:"reason,omitempty"`
 }
 

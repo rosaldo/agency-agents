@@ -66,8 +66,10 @@ type Summary struct {
 	Halt                string  `json:"halt,omitempty"`
 	// CandlesWithoutDerivatives counts the candles a DerivativesUser got no
 	// snapshot for (recorded gaps); nil for any other strategy.
-	CandlesWithoutDerivatives *int   `json:"candles_without_derivatives,omitempty"`
-	Status                    string `json:"status"`
+	CandlesWithoutDerivatives *int `json:"candles_without_derivatives,omitempty"`
+	// News says what the backtest cannot do with news_guard required.
+	News   string `json:"news,omitempty"`
+	Status string `json:"status"`
 }
 
 type Result struct {
@@ -115,8 +117,8 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		en.SeedDeriv(map[string][]market.Deriv{sym: in.Deriv})
 		en.DerivReplay = true
 	}
-	en.Simulated = true // simulated fills: the active profile sizes as it is (FR-R1)
-	en.News = nil       // past headlines are not replayable: with news_guard required the backtest takes no entry
+	en.Simulated = true              // simulated fills: the active profile sizes as it is (FR-R1)
+	en.News, en.PastNews = nil, true // past headlines are not replayable: see Summary.News
 
 	var (
 		res          Result
@@ -240,6 +242,12 @@ func summarize(c *cfgpkg.Config, in Input, res Result, curve []float64) Summary 
 		CommissionPct: c.SimCosts()[c.Symbols[0]].CommissionPct, SlippagePct: c.SimCosts()[c.Symbols[0]].SlippagePct, SimProfile: c.Sim.Profile,
 		ConfigurationsTried: 1, Trades: len(res.Trades), StartEquity: in.Capital, EndEquity: curve[len(curve)-1],
 		Halt: res.Summary.Halt, Status: "not validated",
+	}
+	if c.NewsGuard == "required" {
+		s.News = map[string]string{
+			"crypto": "entered and never exited on news: past headlines are not replayable, so no emergency exit is simulated",
+			"equity": "no entry taken: news is checked before an equity entry and past headlines are not replayable",
+		}[c.AssetClass]
 	}
 	var wins, losses, winSum, lossSum, rSum float64
 	for _, t := range res.Trades {

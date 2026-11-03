@@ -346,3 +346,25 @@ func TestBacktestDeriv(t *testing.T) {
 		t.Fatalf("funding of another coin: %v, want a refusal naming it", err)
 	}
 }
+
+type withClassifier struct{ strategy.Strategy }
+
+func (withClassifier) NewsPolicy() strategy.NewsPolicy {
+	return strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}, Keywords: []string{"hack"},
+		Classifier: &strategy.NewsClassifier{Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9}}
+}
+
+// check fails while the classifier's key variable is unset, naming it.
+func TestCheckWantsTheClassifierKey(t *testing.T) {
+	_, path := writeConfig(t)
+	app := App{Strategy: withClassifier{renamed{example.New()}}, Version: "test"}
+	var out bytes.Buffer
+	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", "")
+	if err := app.Run([]string{"check", "--config", path}, &out); err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_TYPESAFE_API_KEY") {
+		t.Fatalf("check without the key: %v", err)
+	}
+	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", "set")
+	if err := app.Run([]string{"check", "--config", path}, &out); err != nil {
+		t.Fatalf("check with the key: %v", err)
+	}
+}
