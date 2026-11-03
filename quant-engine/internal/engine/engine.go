@@ -464,7 +464,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 }
 
 // persistTrades saves the trades through OnTrade; a failure is the reason
-// the order is not sent (the fraction stays counted: conservative).
+// the order is not sent.
 func (e *Engine) persistTrades() string {
 	if e.OnTrade == nil {
 		return ""
@@ -567,13 +567,14 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		e.skip(sym, "add refused: "+why)
 		return nil
 	}
-	*free -= margin
 	next.Stop = stop
 	e.trades[sym] = next // before the order: a fill of unknown fate keeps the fraction used
 	if why := e.persistTrades(); why != "" {
+		e.trades[sym] = trade // no order sent: the add counts nothing
 		e.skip(sym, "add refused: "+why)
 		return nil
 	}
+	*free -= margin
 	stale, err := e.Exec.Add(ctx, sym, last.Time, p, exec.Plan{Side: p.PSide(), Entry: last.Close, Stop: stop, Target: d.Target, Qty: qty})
 	e.keepStale(sym, stale)
 	switch {
