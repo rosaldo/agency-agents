@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.53.0** (2026-11-02) · `feat` — quant-engine: engine candle buffer (only the candles closed since the last step over REST, whole window at start and after a reset) and the candle_not_final check against the candle the stream ended
 - **v1.52.0** (2026-11-02) · `feat` — quant-engine: exchange.CandleFeed port, the boundary signal of a candle stream; ccxt adapter on the fork's WatchOHLCV (late updates of an old candle ignored, link down/up with reconnection) and the Hyperliquid stream with a 20 s ping
 - **v1.51.9** (2026-11-02) · `test` — quant-engine: ccxt swap test: an Add whose stop cannot be placed, with foreign quantity on the account, flattens only the added part, reduce-only
 - **v1.51.8** (2026-11-02) · `docs` — quant-engine: the Reconcile doc says the market side is not checked there; a crossed stop is flattened because the venue refuses it

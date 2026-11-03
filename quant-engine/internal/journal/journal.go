@@ -34,6 +34,13 @@ const (
 	// Derivatives: a gap or recovery of the derivatives snapshots, or the
 	// recorder switched off, with the reason.
 	Derivatives = "derivatives"
+	// CandleNotFinal: with feed: websocket, REST's last closed candle is not
+	// the one the stream said ended; the symbol takes no decision that step.
+	CandleNotFinal = "candle_not_final"
+	// FeedDegraded / FeedRestored: the candle stream dropped (the loop then
+	// steps at the boundary plus the grace, as with feed: rest) or came back.
+	FeedDegraded = "feed_degraded"
+	FeedRestored = "feed_restored"
 )
 
 type Event struct {

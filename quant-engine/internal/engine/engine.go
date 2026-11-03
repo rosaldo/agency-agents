@@ -51,6 +51,12 @@ type Engine struct {
 	// DerivReplay says the snapshots were seeded from a recording (backtest):
 	// none is read, since a read's deadline is wall-clock time.
 	DerivReplay bool
+	// ClosedCandle, when set (feed: websocket), is the open time of the candle
+	// the stream said ended, which this step decides on: a symbol whose REST
+	// candle is another one takes no decision (journal.CandleNotFinal). Zero
+	// = no expectation. Buffer, when set, keeps the windows between steps.
+	ClosedCandle func() time.Time
+	Buffer       *CandleBuffer
 
 	deriv      map[string][]market.Deriv // snapshots read, oldest first; the last one always kept
 	derivDown  map[string]bool           // symbol -> snapshot reads failing (one journal note per streak)
@@ -278,11 +284,18 @@ func (e *Engine) Step(ctx context.Context) error {
 func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64) error {
 	delete(e.closed, sym)
 	n := max(e.Strategy.Warmup(), 1)
-	cs, err := e.Ex.Candles(ctx, e.Env, sym, e.Cfg.Interval(), n)
+	var want time.Time
+	if e.ClosedCandle != nil {
+		want = e.ClosedCandle()
+	}
+	cs, err := e.candles(ctx, sym, n, want)
 	if err != nil || len(cs) == 0 {
 		return fmt.Errorf("step: candles %s: %v", sym, err)
 	}
 	last := cs[len(cs)-1]
+	if e.notFinal(sym, sym, last, want) {
+		return nil
+	}
 	e.closed[sym] = last.Time
 	if NeedsDerivatives(e.Strategy) {
 		e.readDeriv(ctx, sym, last.Time) // after the close, before the decision: the snapshot of this candle
@@ -316,8 +329,11 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		if in.Aux == nil {
 			in.Aux = map[string][]market.Candle{}
 		}
-		if in.Aux[aux], err = e.Ex.Candles(ctx, e.Env, aux, e.Cfg.Interval(), n); err != nil {
+		if in.Aux[aux], err = e.candles(ctx, aux, n, want); err != nil {
 			return fmt.Errorf("step: candles %s: %w", aux, err)
+		}
+		if a := in.Aux[aux]; len(a) > 0 && e.notFinal(sym, aux, a[len(a)-1], want) {
+			return nil
 		}
 	}
 	d := e.Strategy.Decide(in)
@@ -523,6 +539,27 @@ func (e *Engine) add(ctx context.Context, sym string, p exchange.Position, d str
 		}
 	}
 	return e.guardFilled(ctx, sym)
+}
+
+// candles reads sym's last n closed candles, through the buffer when there
+// is one and the step knows which candle it expects.
+func (e *Engine) candles(ctx context.Context, sym string, n int, want time.Time) ([]market.Candle, error) {
+	if e.Buffer != nil && !want.IsZero() {
+		return e.Buffer.read(ctx, e.Ex, e.Env, sym, e.Cfg.Interval(), n, want)
+	}
+	return e.Ex.Candles(ctx, e.Env, sym, e.Cfg.Interval(), n)
+}
+
+// notFinal journals and reports a REST candle of src that is not the one
+// the stream said ended (want): sym then takes no decision this step. Its
+// stop still rests on the exchange, and Reconcile ran already.
+func (e *Engine) notFinal(sym, src string, last market.Candle, want time.Time) bool {
+	if want.IsZero() || last.Time.Equal(want) {
+		return false
+	}
+	e.note(journal.CandleNotFinal, sym, fmt.Sprintf("the last closed candle of %s over REST opens at %s, the stream ended the one at %s; no decision this step",
+		src, last.Time.UTC().Format(time.RFC3339), want.UTC().Format(time.RFC3339)))
+	return true
 }
 
 // keepRestingStop takes sym's stop price from the exchange after a failed
