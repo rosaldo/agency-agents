@@ -10,7 +10,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
 )
 
-// QA-T10b-1: the old stop filled in part while the trail swapped it: the new
+// The old stop filled in part while the trail swapped it: the new
 // stop, sized for the whole position, is replaced by one for what is left
 // (new first), so it never closes more than the own quantity.
 func TestMoveStopAfterAPartialFillOfTheOldStopCoversTheRest(t *testing.T) {
@@ -43,7 +43,7 @@ func TestMoveStopAfterAPartialFillOfTheOldStopCoversTheRest(t *testing.T) {
 	assertProtected(t, f)
 }
 
-// QA-T10b-2 (2b): a new stop of unknown fate whose cancel fails is stale only
+// A new stop of unknown fate whose cancel fails is stale only
 // when the answer says it rests; one the venue does not know is not.
 func TestUnknownNewStopIsStaleOnlyWhenItRests(t *testing.T) {
 	for _, rests := range []bool{true, false} {
@@ -98,7 +98,7 @@ func TestReconcileResizesAStopLargerThanTheOwnQuantity(t *testing.T) {
 	}
 }
 
-// QA-T11 M5: resize puts the new stop first; when it fails, the larger old
+// Resize puts the new stop first; when it fails, the larger old
 // stop is never cancelled and keeps protecting.
 func TestResizeKeepsTheOldStopWhenTheNewOneFails(t *testing.T) {
 	f, s, e, p := entered(t)

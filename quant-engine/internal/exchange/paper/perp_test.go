@@ -36,7 +36,7 @@ func order(t *testing.T, s *Sim, id string, side exchange.Side, qty float64) {
 	}
 }
 
-// T12: a short locks notional/leverage of margin, reports leverage, margin
+// A short locks notional/leverage of margin, reports leverage, margin
 // mode and an estimated liquidation, and its buy stop fills above the price.
 func TestPaperPerpShortWithLeverage(t *testing.T) {
 	data, s := perp(t, market.Candle{Open: 102, High: 106, Low: 101, Close: 105})
@@ -69,7 +69,7 @@ func TestPaperPerpShortWithLeverage(t *testing.T) {
 	}
 }
 
-// T12: a long's stop fills before its liquidation; a gap through the
+// A long's stop fills before its liquidation; a gap through the
 // liquidation liquidates it instead, losing the margin, stop cancelled.
 func TestPaperPerpLiquidation(t *testing.T) {
 	for _, c := range []struct {
@@ -145,7 +145,7 @@ func (venue) LiquidationDistance(symbol string, _ exchange.PositionSide, _, _ fl
 	return 0.3, symbol == "AAA"
 }
 
-// QA T12 T1: the simulator estimates liquidation with the venue's formula
+// The simulator estimates liquidation with the venue's formula
 // when the data adapter has one (not the 1/leverage fallback of 50/150).
 func TestPaperPerpUsesTheVenueLiquidationFormula(t *testing.T) {
 	for _, c := range []struct {
@@ -164,7 +164,7 @@ func TestPaperPerpUsesTheVenueLiquidationFormula(t *testing.T) {
 	}
 }
 
-// QA T12 T2: a short's stop gapped over fills at the open, not at the stop.
+// A short's stop gapped over fills at the open, not at the stop.
 func TestPaperPerpShortStopGap(t *testing.T) {
 	data, s := perp(t, market.Candle{Open: 110, High: 112, Low: 109, Close: 111})
 	order(t, s, "e", exchange.Sell, 10)

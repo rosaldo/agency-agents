@@ -122,7 +122,7 @@ func dial(cred map[string]string, sandbox bool, symbols []string) (ccxt.Client, 
 // reads positions of one dex at a time); a HIP-3 market whose dex differs
 // from the one its symbol names; a HIP-3 dex whose collateral is not USDC
 // (the fork reports every perp balance as USDC, so margin in USDH, USDT0 or
-// USDE would be misread; how that margin is debited is unverified, T17).
+// USDE would be misread; how that margin is debited is unverified).
 func check(markets map[string]lib.MarketInterface) error {
 	dexes := map[string]bool{}
 	var collateral []error

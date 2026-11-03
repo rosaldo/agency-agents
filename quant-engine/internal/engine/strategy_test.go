@@ -55,7 +55,7 @@ func scriptedEngine(t *testing.T, extra string, decide func(strategy.Input) stra
 	return New(c, s, f, exchange.Demo, j, func() time.Time { return cs[3].Time }), f, j, s
 }
 
-// §6: an entry without a stop, with the stop on the wrong side or on a side
+// An entry without a stop, with the stop on the wrong side or on a side
 // the config forbids is refused and journaled; nothing is sent.
 func TestBadEntriesAreRefusedAndJournaled(t *testing.T) {
 	cases := []struct {
@@ -87,7 +87,7 @@ func TestBadEntriesAreRefusedAndJournaled(t *testing.T) {
 	}
 }
 
-// §6: with a position open, the strategy is asked again; Exit leaves at
+// With a position open, the strategy is asked again; Exit leaves at
 // market (stop cancelled first) and Enter is refused (one position per symbol).
 func TestStrategyExitLeavesAtMarket(t *testing.T) {
 	enter := strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 100}
@@ -127,7 +127,7 @@ func TestStrategyExitLeavesAtMarket(t *testing.T) {
 	}
 }
 
-// §6: the target exit is side-aware: long when the close reaches it from
+// The target exit is side-aware: long when the close reaches it from
 // below, short when it reaches it from above.
 func TestTargetHitIsSideAware(t *testing.T) {
 	cases := []struct {
@@ -150,7 +150,7 @@ func TestTargetHitIsSideAware(t *testing.T) {
 	}
 }
 
-// §6: flat, a None that carries a Reason is a signal the strategy dropped
+// Flat, a None that carries a Reason is a signal the strategy dropped
 // itself; it is journaled with that reason. A None without a Reason (no
 // signal at all) writes nothing, so the journal is not flooded every candle.
 func TestNoneWithAReasonIsJournaled(t *testing.T) {
@@ -178,7 +178,7 @@ func TestNoneWithAReasonIsJournaled(t *testing.T) {
 	}
 }
 
-// §6: holding, a None with a Reason is not a dropped signal: nothing is
+// Holding, a None with a Reason is not a dropped signal: nothing is
 // journaled and the trail still runs (the frozen engine never skipped while holding).
 func TestNoneWithAReasonWhileHoldingStillTrails(t *testing.T) {
 	e, f, j, s := trailEngine(t, "", fake.Options{}, strategy.Long, 90, []float64{100, 100}, answers(95))

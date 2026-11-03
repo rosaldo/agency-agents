@@ -98,7 +98,7 @@ func TestSizeCountsSlippageOnBothLegs(t *testing.T) {
 }
 
 // A short mirrors the long: it sells the entry and buys back at the stop,
-// costs against both legs (Task 9).
+// costs against both legs.
 func TestSizeIsSideAware(t *testing.T) {
 	// a = 0.1%: sell 104.895 (105*0.999), buy back at 109.3092 (109.2*1.001):
 	// 4.4142 + 0.2142042 commission = 4.6284042 per unit; 100 / 4.6284042 = 21.6

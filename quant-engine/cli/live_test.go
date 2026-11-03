@@ -90,7 +90,7 @@ func TestLiveWrongAnswerIsRefused(t *testing.T) {
 	}
 }
 
-// T12: the one confirmation also shows the perp limits.
+// The one confirmation also shows the perp limits.
 func TestLiveConfirmationShowsThePerpLimits(t *testing.T) {
 	cfgPath, dir := liveSetup(t, "market: swap\nperp: {leverage: 2, margin_mode: cross}\n") // risk defaults: max_leverage 3, buffer 0.5
 	tty := useTTY(t, strings.NewReader("no\n"))

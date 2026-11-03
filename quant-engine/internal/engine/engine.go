@@ -534,7 +534,7 @@ func (e *Engine) exit(ctx context.Context, p exchange.Position, candle time.Time
 	return nil
 }
 
-// validateEntry enforces the engine's rules on an Enter (§6): a protective
+// validateEntry enforces the engine's rules on an Enter: a protective
 // stop on the losing side of the entry, and a side the config allows.
 func (e *Engine) validateEntry(d strategy.Decision, entry float64) error {
 	switch {

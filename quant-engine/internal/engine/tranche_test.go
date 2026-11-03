@@ -72,7 +72,7 @@ func add(f float64, stop float64) strategy.Decision {
 	return strategy.Decision{Action: strategy.Add, Side: strategy.Long, Stop: stop, Fraction: f}
 }
 
-// §6.2: Enter takes f x budget, each Add g x the budget fixed at the first
+// Enter takes f x budget, each Add g x the budget fixed at the first
 // tranche (not the current equity), against the position's stop; fractions
 // above 1 are refused and journaled.
 func TestAddSizesFromTheBudgetFixedAtTheFirstTranche(t *testing.T) {
@@ -95,7 +95,7 @@ func TestAddSizesFromTheBudgetFixedAtTheFirstTranche(t *testing.T) {
 	}
 }
 
-// §6.2: an Add while flat, on the other side, with a looser stop, or on a
+// An Add while flat, on the other side, with a looser stop, or on a
 // position whose trade budget is unknown is refused, journaled, never sent.
 func TestBadAddsAreRefusedAndJournaled(t *testing.T) {
 	short := add(0.5, 0)
@@ -213,7 +213,7 @@ func TestExitEndsTheTrade(t *testing.T) {
 	}
 }
 
-// QA-T4 M2: the ceiling is on the AGGREGATE notional: the tranche alone
+// The ceiling is on the AGGREGATE notional: the tranche alone
 // (90.909 x 103 = 9 363.6) fits 10 000 x 1, the position after it does not.
 func TestAddWhoseAggregateNotionalIsAboveTheLeverageCeilingIsRefused(t *testing.T) {
 	e, f, _ := trancheEngine(t, "", []float64{105, 103}, enter(0.5, 100), add(0.5, 102.45)) // 50 / 0.55 = 90.909 units
@@ -242,7 +242,7 @@ func (notClear) Clear(context.Context, string, time.Time) (bool, string, error) 
 	return false, "exchange hack", nil
 }
 
-// QA-T4 M7–M9: an Add on a symbol with a stale stop, a blocked symbol or a
+// An Add on a symbol with a stale stop, a blocked symbol or a
 // not-clear news check is refused, journaled, never sent.
 func TestAddOnABlockedSymbolIsRefused(t *testing.T) {
 	cases := map[string]struct {
@@ -272,7 +272,7 @@ func TestAddOnABlockedSymbolIsRefused(t *testing.T) {
 	}
 }
 
-// Spec §6.2: when the trade budget cannot be persisted before a tranche's
+// When the trade budget cannot be persisted before a tranche's
 // order, the order is not sent and the reason is journaled; the fraction
 // stays counted (conservative).
 func TestTrancheIsNotSentWhenItsBudgetCannotBePersisted(t *testing.T) {

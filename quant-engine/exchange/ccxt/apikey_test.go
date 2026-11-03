@@ -17,7 +17,7 @@ type noSandbox struct {
 func (*noSandbox) SetSandboxMode(any) { panic(lib.NotSupported("x does not have a sandbox URL")) }
 func (n *noSandbox) SetApiKey(any)    { n.keyed = true }
 
-// QA T12 NIT: a venue without sandbox fails the testnet Dial with an error,
+// A venue without sandbox fails the testnet Dial with an error,
 // not a panic, and never receives the credential.
 func TestDialWithoutSandboxIsAnError(t *testing.T) {
 	x := &noSandbox{}

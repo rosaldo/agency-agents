@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.51.4** (2026-11-02) · `chore` — quant-engine: code comments explain the why without citing internal documents (review, spec and task references removed)
 - **v1.51.3** (2026-11-02) · `fix` — quant-engine: a backtest trade entered in tranches reports the aggregate quantity and average price; parity test of Enter then Add between the backtest and the loop on the fake feed
 - **v1.51.2** (2026-11-02) · `test` — quant-engine: ccxt netting test: an Add's tranches sum in own_qty under one resting stop, and foreign_qty_detected still fires
 - **v1.51.1** (2026-11-02) · `test` — quant-engine: loop tests for a kill between an Add's fill and the stop swap (the start covers the whole quantity at the Add's stop, budget kept), a kill after the first tranche's fill, and a state file that cannot be written refusing the tranche

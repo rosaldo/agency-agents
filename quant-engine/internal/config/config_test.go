@@ -150,8 +150,8 @@ func TestEquityAndSwapDefaults(t *testing.T) {
 	}
 }
 
-// specYAML is the §9 example of the spec, with the edits a real run needs:
-// asset_class (absent from §9, required by D10), the user's confirmation,
+// specYAML is the documented example config, with the edits a real run needs:
+// asset_class (absent from the example, required), the user's confirmation,
 // the example strategy's block in place of the comment, and sim (with its
 // liquidity_class) in place of costs and paper_sim: the profile is the single
 // source of costs, for paper, backtest and sizing.

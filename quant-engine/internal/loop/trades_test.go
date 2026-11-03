@@ -66,7 +66,7 @@ func tranche(a strategy.Action, stop float64) strategy.Decision {
 	return strategy.Decision{Action: a, Side: strategy.Long, Stop: stop, Fraction: 0.5}
 }
 
-// QA-T4 M6: the loop writes the trade budget to state-<level>.json once the
+// The loop writes the trade budget to state-<level>.json once the
 // first tranche is sent, and drops it once the position is closed.
 func TestLoopKeepsTheTradeInTheStateFile(t *testing.T) {
 	f, cs := trancheFake()
@@ -132,7 +132,7 @@ func runUntilKilled(t *testing.T, c *config.Config, s strategy.Strategy, ex exch
 	return false
 }
 
-// Spec §6.2: a kill -9 between an Add's fill and the end-of-step save must
+// A kill -9 between an Add's fill and the end-of-step save must
 // not renew the budget: after the restart the next Add is refused, and the
 // position's loss at the stop stays within the trade budget (1% of 10 000).
 func TestKillAfterAnAddFillKeepsTheFractionUsed(t *testing.T) {

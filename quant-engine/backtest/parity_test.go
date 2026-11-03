@@ -52,7 +52,7 @@ symbols: [AAA]
 risk: {confirmed_by_user: true}
 `
 
-// Task 7: backtest and loop call the same Decide through the same engine
+// Backtest and loop call the same Decide through the same engine
 // step: the same candles give the same strategy calls and the same orders.
 func TestBacktestAndLoopDecideAlike(t *testing.T) {
 	cs := parityCandles()

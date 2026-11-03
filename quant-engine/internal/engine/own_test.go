@@ -149,7 +149,7 @@ func TestFundingIsJournaled(t *testing.T) {
 	}
 }
 
-// QA-T10b-3 (d): the stale stops are retried by Reconcile, which the guard
+// The stale stops are retried by Reconcile, which the guard
 // after a halt runs every candle.
 func TestReconcileRetriesTheStaleStops(t *testing.T) {
 	e, f, j, _ := scriptedEngine(t, "", enterAlways)

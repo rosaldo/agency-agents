@@ -28,7 +28,7 @@ func (x laggedQuote) Quote(ctx context.Context, env exchange.Env, symbol string)
 	return q, err
 }
 
-// T12: paper without a sandbox runs the simulator on a swap: a short at
+// Paper without a sandbox runs the simulator on a swap: a short at
 // leverage 2 with its stop and estimated liquidation; the journal keeps the
 // signal's price and the fill's; status says funding is not modelled, and
 // status and journal show the simulator's profile (FR-P10).

@@ -137,7 +137,7 @@ func TestTheYmlMustNameTheBinarysVenue(t *testing.T) {
 	}
 }
 
-// §9: live reads only mainnet credentials, paper only testnet ones (and
+// Live reads only mainnet credentials, paper only testnet ones (and
 // trades the sandbox with them); paper without them uses public data.
 func TestCredentialsFollowTheMode(t *testing.T) {
 	var got dialed
@@ -214,7 +214,7 @@ func TestNamesAndConfigureComeFromTheStrategy(t *testing.T) {
 	}
 }
 
-// T12/O4: paper with testnet credentials trades the sandbox and dials
+// Paper with testnet credentials trades the sandbox and dials
 // mainnet's public data (no credentials) for the signal's candles.
 func TestTestnetDemoDialsMainnetForCandles(t *testing.T) {
 	var calls []dialed

@@ -154,7 +154,7 @@ func TestNettingOppositeSideIsLeftUntouchedAndRefused(t *testing.T) {
 	}
 }
 
-// QA-T11 B1: a reading that does not show the engine's fresh fill yet
+// A reading that does not show the engine's fresh fill yet
 // (empty, or short of it) cuts nothing: own and its stop stay, entries wait.
 // Readings close together never confirm; a later one that agrees with own
 // clears the wait.
@@ -183,7 +183,7 @@ func TestLateAccountReadingKeepsTheOwnAndItsStop(t *testing.T) {
 	}
 }
 
-// QA-T11 N1: a later reading with other numbers (own, kept) than the pending
+// A later reading with other numbers (own, kept) than the pending
 // one confirms nothing: it starts the wait again, own and its stop stay.
 func TestChangedReadingRestartsTheWait(t *testing.T) {
 	c, a, _ := enteredSwap(t)
@@ -198,7 +198,7 @@ func TestChangedReadingRestartsTheWait(t *testing.T) {
 	}
 }
 
-// QA-T11 M4: an unreadable account fails closed: every symbol blocked, own
+// An unreadable account fails closed: every symbol blocked, own
 // and its stop untouched.
 func TestUnreadableAccountBlocksAndKeepsTheStop(t *testing.T) {
 	c, a, _ := enteredSwap(t)
@@ -209,7 +209,7 @@ func TestUnreadableAccountBlocksAndKeepsTheStop(t *testing.T) {
 	}
 }
 
-// QA-T11 M7: a leverage other than the yml's blocks only a symbol the engine
+// A leverage other than the yml's blocks only a symbol the engine
 // holds; the user's position on a hedged account does not.
 func TestLeverageMismatchBlocksOnlyAnOwnHolding(t *testing.T) {
 	c := newSwapStub()
@@ -393,7 +393,7 @@ func (c *lostStop) CancelOrder(id string, opts ...lib.CancelOrderOptions) (lib.O
 	return o, nil
 }
 
-// QA-T10b-2: a trail stop of unknown fate whose cancel fails is resolved by
+// A trail stop of unknown fate whose cancel fails is resolved by
 // a lookup by client order ID before it can become stale: found resting, it
 // is stale (retried); not on the exchange, it is not, and no block follows.
 func TestUnknownStopIsLookedUpBeforeItTurnsStale(t *testing.T) {
@@ -441,7 +441,7 @@ func TestFundingIsReadFromTheVenue(t *testing.T) {
 	}
 }
 
-// QA-T11 M6: a stop of unknown fate the lookup did not find is taken as
+// A stop of unknown fate the lookup did not find is taken as
 // absent only when the cancel answers "not found"; a cancel that fails
 // otherwise (network) leaves it unknown and stale, retried.
 func TestUnknownStopIsAbsentOnlyOnNotFound(t *testing.T) {

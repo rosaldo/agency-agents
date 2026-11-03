@@ -61,7 +61,7 @@ func (x *snapAfterStale) Balance(ctx context.Context, env exchange.Env) (exchang
 	return x.failCancels.Balance(ctx, env)
 }
 
-// QA-T10b-3 (c): the stale stop a move leaves is in state.json at once,
+// The stale stop a move leaves is in state.json at once,
 // before the step's own save: a kill -9 right after the move keeps it.
 func TestStaleStopIsSavedRightAfterTheMove(t *testing.T) {
 	c, s, _, fc, tick, dir := trailRun(t)

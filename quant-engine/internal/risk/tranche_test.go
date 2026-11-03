@@ -43,7 +43,7 @@ type tranche struct {
 	refused                string // "" = taken
 }
 
-// §6.1: whatever the fractions, the prices, a stop tightened between
+// Whatever the fractions, the prices, a stop tightened between
 // tranches or the equity when a tranche comes, the loss of the AGGREGATE
 // position at its stop stays within the budget fixed at the first tranche.
 func TestAggregateLossAtTheStopStaysWithinTheTradeBudget(t *testing.T) {

@@ -131,7 +131,7 @@ func TestTrailOnTheWrongSideIsRefused(t *testing.T) {
 // FR-P9 (c): a move whose stop does not clear the liquidation (FR-P4) is
 // refused and journaled, nothing sent. Through Step a tighter stop of a
 // position that passed guardLiquidation always clears it; trail checks again
-// with the T10 rule, here on a position that does not.
+// with the trailing rule, here on a position that does not.
 func TestTrailThatBreaksTheLiquidationBufferIsRefused(t *testing.T) {
 	e, f, j, s := trailEngine(t, "market: swap\nperp: {allow_short: true, leverage: 2}\n",
 		fake.Options{Shorts: true, ReportsLiquidation: true}, strategy.Long, 90, []float64{100, 100}, answers(84))
@@ -191,7 +191,7 @@ func TestStaleStopBlocksTheSymbolUntilCancelled(t *testing.T) {
 	}
 }
 
-// FR-P9 (d) on spot (§9.14): with an old stop not cancelled two stops could
+// FR-P9 (d) on spot: with an old stop not cancelled two stops could
 // sell beyond the own quantity: the position is closed at once and the
 // symbol takes no entry until the old stop is gone.
 func TestStaleStopOnSpotClosesAndBlocks(t *testing.T) {
