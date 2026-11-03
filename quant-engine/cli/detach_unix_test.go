@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Review 2 N5: the live loop must stay in start's foreground process group;
+// The live loop must stay in start's foreground process group;
 // in a group of its own, reading the terminal stops it with SIGTTIN.
 // End to end: scripts/live-via-pty.sh in the review probes.
 func TestLiveLoopKeepsTheForegroundGroup(t *testing.T) {

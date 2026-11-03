@@ -53,7 +53,7 @@ func TestRiskNeverExceedsTheBudget(t *testing.T) {
 	}
 }
 
-// FR-R1: the round-trip commission (entry and stop fill) counts against the
+// The round-trip commission (entry and stop fill) counts against the
 // budget, on the notional.
 func TestSizeCountsRoundTripFees(t *testing.T) {
 	// per unit: 2 + (50+48) x 0.1% = 2.098; 100 / 2.098 = 47.66
@@ -87,7 +87,7 @@ func worstLoss(in SizeInput) float64 {
 	return buy - sell + (buy+sell)*in.CommissionPct/100
 }
 
-// FR-R1 hard cap: slippage counts on both legs, entry and stop.
+// Hard cap: slippage counts on both legs, entry and stop.
 func TestSizeCountsSlippageOnBothLegs(t *testing.T) {
 	// a = 0.1%: buy 105.105, stop fill 100.6992, commission 0.1% on both:
 	// 4.4058 + 0.2058042 = 4.6116042 per unit; 100 / 4.6116042 = 21.68

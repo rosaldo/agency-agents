@@ -108,7 +108,7 @@ func TestStartRefusesLive(t *testing.T) {
 	}
 }
 
-// Review M3: one loop per state directory, held by an exclusive lock.
+// One loop per state directory, held by an exclusive lock.
 func TestSecondLoopIsImpossible(t *testing.T) {
 	t.Setenv("TEST_STRATEGY_TEST_MAIN", "1")
 	work, cfgPath := writeConfig(t)

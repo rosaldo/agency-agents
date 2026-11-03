@@ -19,7 +19,7 @@ import (
 )
 
 // laggedQuote trades 1 above the candles: the demo's fills (testnet, or
-// the simulator's quote) differ from the candles the signal reads (O4).
+// the simulator's quote) differ from the candles the signal reads.
 type laggedQuote struct{ *fake.Fake }
 
 func (x laggedQuote) Quote(ctx context.Context, env exchange.Env, symbol string) (exchange.Quote, error) {
@@ -31,7 +31,7 @@ func (x laggedQuote) Quote(ctx context.Context, env exchange.Env, symbol string)
 // Paper without a sandbox runs the simulator on a swap: a short at
 // leverage 2 with its stop and estimated liquidation; the journal keeps the
 // signal's price and the fill's; status says funding is not modelled, and
-// status and journal show the simulator's profile (FR-P10).
+// status and journal show the simulator's profile.
 func TestPaperPerpRunOnTheSimulator(t *testing.T) {
 	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
 		if in.Position == nil && len(in.Candles) == 2 {
@@ -149,7 +149,7 @@ func (x crashQuote) Quote(ctx context.Context, env exchange.Env, symbol string) 
 	return q, err
 }
 
-// N1: a stop the simulator sees hit by the final read at shutdown fills after
+// A stop the simulator sees hit by the final read at shutdown fills after
 // the pessimistic delay (1.5 s), and state.json keeps that fill: the read
 // waits for the delay instead of timing out and leaving the old position.
 func TestShutdownSnapshotWaitsForTheProfileDelay(t *testing.T) {

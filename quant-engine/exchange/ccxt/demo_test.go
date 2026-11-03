@@ -10,7 +10,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
 )
 
-// O4: the testnet demo trades the sandbox client and reads the signal's
+// The testnet demo trades the sandbox client and reads the signal's
 // candles from the mainnet one; real stays refused.
 func TestTestnetDemoReadsMainnetCandles(t *testing.T) {
 	ts := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC).UnixMilli()

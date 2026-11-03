@@ -22,7 +22,7 @@ func TestNewsGuardDefaultsByAssetClass(t *testing.T) {
 	if err != nil || c.NewsGuard != "required" {
 		t.Fatalf("explicit news_guard: %+v %v", c, err)
 	}
-	// D10: an equity cannot opt out of the news check
+	// an equity cannot opt out of the news check
 	if _, err := Parse([]byte(strings.Replace(validYAML, "asset_class: crypto", "asset_class: equity\nnews_guard: none", 1)), example.New()); err == nil {
 		t.Fatal("equity with news_guard none accepted")
 	}

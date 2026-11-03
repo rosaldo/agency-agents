@@ -39,7 +39,7 @@ func runMode(t *testing.T, level, dir string) (string, *fake.Fake) {
 	return Run(context.Background(), c, s, f, env, &FakeTicker{Ex: f, Candles: cs}, dir), f
 }
 
-// Review 2 N4: paper and mainnet keep separate state; a paper run in the same
+// Paper and mainnet keep separate state; a paper run in the same
 // directory never lifts the mainnet halt of the day.
 func TestPaperRunKeepsTheLiveHalt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
@@ -56,7 +56,7 @@ func TestPaperRunKeepsTheLiveHalt(t *testing.T) {
 	}
 }
 
-// Review 2 N7: a valid but emptied state file is refused like a missing one.
+// A valid but emptied state file is refused like a missing one.
 func TestEmptiedStateIsFailClosed(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
 	if first, _ := runMode(t, "mainnet", dir); !strings.Contains(first, "drawdown") {
@@ -69,7 +69,7 @@ func TestEmptiedStateIsFailClosed(t *testing.T) {
 	}
 }
 
-// QA t12d: paper and testnet in the same --dir keep their own state and
+// Paper and testnet in the same --dir keep their own state and
 // book: the testnet's halt and positions never reach paper, nor the reverse.
 func TestPaperAndTestnetDoNotShareState(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".example-sma-cross")
@@ -157,7 +157,7 @@ func (l *lateFill) Positions(ctx context.Context, env exchange.Env) ([]exchange.
 	return l.Fake.Positions(ctx, env)
 }
 
-// Review 2 (B2 residue): after the halt for an unconfirmed entry the loop
+// After the halt for an unconfirmed entry the loop
 // keeps guarding: a fill that lands later still gets its stop, and nothing
 // new is bought.
 func TestFillAfterAnUnconfirmedHaltGetsAStop(t *testing.T) {
@@ -180,7 +180,7 @@ func (n noStops) PlaceStop(context.Context, exchange.Env, string, string, exchan
 	return exchange.OrderState{Status: exchange.Rejected}, errors.New("stop refused")
 }
 
-// Review minor 2 (integration): a failed-stop halt survives a restart the same day.
+// A failed-stop halt survives a restart the same day.
 func TestFailedStopHaltSurvivesARestart(t *testing.T) {
 	c, s, f, tick, dir := setup(t, "loop_two_days.csv", 0)
 	if first := Run(context.Background(), c, s, noStops{f}, exchange.Demo, tick, dir); !strings.Contains(first, "halt") {
@@ -206,7 +206,7 @@ func (d *dropsStop) PlaceStop(ctx context.Context, env exchange.Env, id, sym str
 	return d.Fake.PlaceStop(ctx, env, id, sym, side, qty, px)
 }
 
-// Re-review 3, R3: during the guard after a halt, status shows the halt
+// During the guard after a halt, status shows the halt
 // (last_event and breaker) and the current positions and equity, not the
 // position the halt already closed.
 func TestStatusDuringTheGuardShowsTheHalt(t *testing.T) {
@@ -241,7 +241,7 @@ func TestStatusDuringTheGuardShowsTheHalt(t *testing.T) {
 	}
 }
 
-// QA t12e (M10): a journal from before the split (mode live, no level) is
+// A journal from before the split (mode live, no level) is
 // mainnet history: without its state, mainnet is refused, never started on
 // fresh drawdown bases; paper is not.
 func TestOldLiveJournalIsMainnetHistory(t *testing.T) {
@@ -259,7 +259,7 @@ func TestOldLiveJournalIsMainnetHistory(t *testing.T) {
 	}
 }
 
-// QA t12e: what the engine writes and shows names the levels paper, testnet
+// What the engine writes and shows names the levels paper, testnet
 // and mainnet, never live or real: journal, state files, status and the
 // refusals it builds with fmt.
 func TestExposedLevelsAreNeverLiveOrReal(t *testing.T) {

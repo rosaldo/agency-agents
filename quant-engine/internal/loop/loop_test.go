@@ -169,7 +169,7 @@ func TestHaltSurvivesARestartTheSameDay(t *testing.T) {
 	}
 }
 
-// Review M1: a lost or corrupt state.json never lifts a halt: the loop
+// A lost or corrupt state.json never lifts a halt: the loop
 // refuses to trade until it is dealt with explicitly.
 func TestMissingOrCorruptStateIsFailClosed(t *testing.T) {
 	for _, mut := range []string{"delete", "corrupt"} {

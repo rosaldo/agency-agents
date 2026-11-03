@@ -24,7 +24,7 @@ func simCosts(t *testing.T, block string) (*Config, error) {
 	return Parse([]byte(simYAML+block), example.New())
 }
 
-// FR-P10: the profile defaults to real, and each profile carries the
+// The profile defaults to real, and each profile carries the
 // built-in numbers (venue latency and taker fee, liquidity class slippage;
 // HIP-3 markets their own fee).
 func TestPaperSimProfilesCarryTheBuiltInNumbers(t *testing.T) {
@@ -188,7 +188,7 @@ func TestSimMissingClassIsRequired(t *testing.T) {
 	}
 }
 
-// FR-R1: real fills (live, testnet) are sized with, field by field, the
+// Real fills (live, testnet) are sized with, field by field, the
 // larger of the active profile (overrides included) and the built-in real
 // profile, so the fee never falls below the venue's contract; the simulator
 // charges the active profile as it is.

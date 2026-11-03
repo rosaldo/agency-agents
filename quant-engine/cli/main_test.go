@@ -110,7 +110,7 @@ func writeYML(t *testing.T, body string) string {
 	return path
 }
 
-// D9: the yml's exchange must be the venue compiled into the binary; D10: an
+// The yml's exchange must be the venue compiled into the binary, and an
 // equity needs a venue that lists equities.
 func TestTheYmlMustNameTheBinarysVenue(t *testing.T) {
 	var got dialed
@@ -173,7 +173,7 @@ func TestCredentialsFollowTheMode(t *testing.T) {
 	}
 }
 
-// FR-P10: the simulator gets the yml's profile and its costs.
+// The simulator gets the yml's profile and its costs.
 func TestTheSimulatorChargesTheYmlProfile(t *testing.T) {
 	app := testApp()
 	app.Venue = testVenue("hyperliquid", false, &dialed{})

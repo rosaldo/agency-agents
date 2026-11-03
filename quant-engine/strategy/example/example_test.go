@@ -69,7 +69,7 @@ func TestConfigureDefaultsAndRefusals(t *testing.T) {
 	}
 }
 
-// D11: the neutral trailing rule is the average of the last trail_period
+// The neutral trailing rule is the average of the last trail_period
 // closes; 0 disables it; the warmup covers the longer window.
 func TestTrailIsTheMovingAverage(t *testing.T) {
 	s := configured(t, "{period: 3, stop_pct: 4, trail_period: 4}")

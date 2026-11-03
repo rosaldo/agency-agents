@@ -25,8 +25,8 @@ import (
 var _ ccxt.Client = (*client)(nil) // compile time: the venue satisfies the adapter
 
 // Venue is Hyperliquid: the master wallet address and an agent (API) wallet
-// key without withdrawal rights (V3); client order IDs are 128-bit hex with
-// 0x (V9); HIP-3 dexes list equities.
+// key without withdrawal rights, so a leaked key cannot move funds out; client
+// order IDs are 128-bit hex with 0x; HIP-3 dexes list equities.
 var Venue = ccxt.Venue{
 	ID:          "hyperliquid",
 	Credentials: []string{"WALLET_ADDRESS", "PRIVATE_KEY"},
@@ -34,7 +34,7 @@ var Venue = ccxt.Venue{
 	ClientID:    func(d [16]byte) string { return "0x" + hex.EncodeToString(d[:]) },
 	Equity:      true,
 	Check:       check,
-	// liquidationPrice comes from the clearinghouse's liquidationPx (V2)
+	// liquidationPrice comes from the clearinghouse's liquidationPx
 	ReportsLiquidation: true,
 	MaintenanceMargin:  maintenanceMargin,
 	DialFeed:           dialFeed,

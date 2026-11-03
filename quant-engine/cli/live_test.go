@@ -145,7 +145,7 @@ func TestLiveWithoutDemoDaysStillNeedsTheValidation(t *testing.T) {
 	}
 }
 
-// Review B1: forging a hand-off file and variable must not run live without
+// Forging a hand-off file and variable must not run live without
 // the terminal, the demo period or the validation.
 func TestForgedHandOffCannotRunLive(t *testing.T) {
 	_, cfgPath := writeConfig(t)

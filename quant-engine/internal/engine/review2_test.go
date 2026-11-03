@@ -17,7 +17,7 @@ type bigLot struct{ *fake.Fake }
 
 func (bigLot) Lot(string) (step, min float64) { return 1, 1e9 }
 
-// Review minor 1 (integration): the engine sizes with the market's own lot.
+// The engine sizes with the market's own lot.
 func TestEntryUsesTheMarketLot(t *testing.T) {
 	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "crypto", 1))
 	cs, _ := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")
@@ -47,7 +47,7 @@ func (c cancelRefused) CancelOrder(ctx context.Context, env exchange.Env, id str
 	return c.Fake.CancelOrder(ctx, env, id)
 }
 
-// Review minor 3 (integration): a target exit that fails keeps the target.
+// A target exit that fails keeps the target.
 func TestTargetKeptWhenTheExitFails(t *testing.T) {
 	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "crypto", 1))
 	cs, _ := market.ReadCSVFile("../../testdata/backtest_one_trade.csv")

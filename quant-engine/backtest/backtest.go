@@ -117,7 +117,7 @@ func run(ctx context.Context, c *cfgpkg.Config, s strategy.Strategy, in Input) (
 		en.SeedDeriv(map[string][]market.Deriv{sym: in.Deriv})
 		en.DerivReplay = true
 	}
-	en.Simulated = true              // simulated fills: the active profile sizes as it is (FR-R1)
+	en.Simulated = true              // simulated fills: the active profile sizes as it is, never floored at the real one
 	en.News, en.PastNews = nil, true // past headlines are not replayable: see Summary.News
 
 	var (

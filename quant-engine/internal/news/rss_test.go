@@ -80,7 +80,7 @@ func TestKeywordsMatchWholeWords(t *testing.T) {
 	}
 }
 
-// Review minor 5: a feed URL's query (where tokens live) never reaches an
+// A feed URL's query (where tokens live) never reaches an
 // error or a reason, which end up in the journal.
 func TestFeedQueryIsRedacted(t *testing.T) {
 	srv := server(t)

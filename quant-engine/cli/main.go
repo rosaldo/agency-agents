@@ -311,7 +311,7 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", v.ID, err)
 	}
-	var candles ccxtx.Client // O4: the testnet demo trades the sandbox on mainnet's candles
+	var candles ccxtx.Client // the testnet demo trades the sandbox on mainnet's candles
 	if sandbox {
 		if candles, err = v.Dial(nil, false, symbols); err != nil {
 			return nil, nil, fmt.Errorf("%s mainnet candles: %w", v.ID, err)
@@ -345,7 +345,7 @@ func (a App) newCCXT(cfg *config.Config, fk fakeFlags, dir string) (exchange.Exc
 // RealTicker always, FeedTicker when the stream says nothing.
 const grace = 5 * time.Second
 
-// simProfile is the yml's sim profile the simulator charges (FR-P10).
+// simProfile is the yml's sim profile the simulator charges: latency, fee and slippage.
 func simProfile(cfg *config.Config) paper.Profile {
 	return paper.Profile{Name: cfg.Sim.Profile, Costs: cfg.SimCosts()}
 }

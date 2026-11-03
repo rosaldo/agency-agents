@@ -149,7 +149,7 @@ func TestBacktestProfilesOrderTheResult(t *testing.T) {
 
 // The backtest's fills are simulated: sizing counts the active profile as it
 // is, without the real-fills floor, so optimistic with a zero fee buys more
-// than real (FR-R1).
+// than real.
 func TestBacktestSizesWithTheActiveProfile(t *testing.T) {
 	cs, err := market.ReadCSVFile("../testdata/backtest_one_trade.csv")
 	if err != nil {

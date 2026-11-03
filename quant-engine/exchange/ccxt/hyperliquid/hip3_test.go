@@ -22,7 +22,7 @@ func fetchMarkets(t *testing.T, c ccxt.Client) map[string]any {
 	return m
 }
 
-// D10: HIP-3 perp dexes load only when the yml trades one, and then exactly
+// HIP-3 perp dexes load only when the yml trades one, and then exactly
 // the dexes of its symbols (never the first 10 of perpDexs in silence).
 func TestDialScopesTheHip3Dexes(t *testing.T) {
 	c, _ := Venue.Dial(nil, false, []string{"BTC/USDC:USDC"})

@@ -39,7 +39,7 @@ func refuseOldCostKeys(b []byte) error {
 // Sim is the single source of trading costs: one named profile picks the
 // order delay, the slippage and the taker fee that the paper simulator (paper
 // without a testnet account) and the backtest charge, and that sizing counts
-// in the risk of a trade (FR-R1). `profiles:` overrides the built-in numbers
+// in the risk of a trade. `profiles:` overrides the built-in numbers
 // of a profile field by field. The backtest has only candles, so it charges
 // the slippage and the fee but cannot model the delay.
 type Sim struct {
@@ -219,5 +219,5 @@ func (c *Config) SimCosts() map[string]SimCosts { return c.sim }
 // SizingCosts are the costs sizing counts when fills are real (mainnet,
 // testnet): field by field the larger of the active profile and the built-in
 // real one, so a favourable profile or a low override never shrinks the risk
-// of a real trade and the fee never falls below the venue's (FR-R1).
+// of a real trade and the fee never falls below the venue's.
 func (c *Config) SizingCosts() map[string]SimCosts { return c.sizing }

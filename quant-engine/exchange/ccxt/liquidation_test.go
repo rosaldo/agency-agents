@@ -32,7 +32,7 @@ func liqAdapter(t *testing.T, v Venue) *Adapter {
 	return a
 }
 
-// FR-P4: with the venue's maintenance margin rate the adapter estimates the
+// With the venue's maintenance margin rate the adapter estimates the
 // isolated liquidation distance (long (1/L-mm)/(1-mm), short (1/L-mm)/(1+mm));
 // leverage above the market's maximum gives 0; without a rate, no estimate.
 func TestLiquidationDistanceFromTheMaintenanceMargin(t *testing.T) {

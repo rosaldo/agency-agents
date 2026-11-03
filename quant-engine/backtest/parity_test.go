@@ -114,7 +114,7 @@ func enterOnRise(in strategy.Input) strategy.Decision {
 	return strategy.Decision{}
 }
 
-// FR-P9 parity: the same Trail on the same candles moves the same stops in
+// Trailing parity: the same Trail on the same candles moves the same stops in
 // the backtest and in the loop (each Decide sees the stop), and the stop
 // moved at 110 (107) is the one the drop fills, on the next candle.
 func TestBacktestAndLoopTrailAlike(t *testing.T) {

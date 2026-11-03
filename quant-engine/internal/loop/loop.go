@@ -117,9 +117,9 @@ type State struct {
 	StaleStops map[string]string     `json:"stale_stops,omitempty"` // symbol -> old stop a trail could not cancel yet
 	Trades     map[string]risk.Trade `json:"trades,omitempty"`      // symbol -> trade budget and fraction used (graduated entry); absent = none in progress
 	NewsUntil  map[string]time.Time  `json:"news_until,omitempty"`  // symbol -> end of the block a news catastrophe set; absent = none
-	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L (FR-P5)
+	Funding    string                `json:"funding,omitempty"`     // what the adapter leaves out of P&L
 	PaperSim   string                `json:"sim,omitempty"`         // the simulator's profile and costs
-	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts (FR-R1)
+	Sizing     string                `json:"sizing,omitempty"`      // the profile and costs sizing counts
 	Feed       string                `json:"feed,omitempty"`        // rest | websocket
 	FeedState  *FeedState            `json:"feed_state,omitempty"`  // websocket only
 	LastEvent  string                `json:"last_event"`
@@ -492,7 +492,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 		}
 		fdone()
 	} else if restored {
-		// N2: a stop the exchange dropped late (a cancel cut short by the stop
+		// a stop the exchange dropped late (a cancel cut short by the stop
 		// request may still land) is put back before the loop goes
 		rctx, rdone := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := en.Reconcile(rctx); err != nil {
@@ -521,7 +521,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string,
 	record func(kind, reason string), save func(func(*State)), nw *newsWorker, onNews func(newsResult)) string {
 	ended := func() string { return endedReason(dir) }
-	if err := en.ConfigureMarkets(ctx); err != nil { // FR-P3: before any order, reconcile included
+	if err := en.ConfigureMarkets(ctx); err != nil { // before any order, reconcile included
 		if ctx.Err() != nil {
 			return ended()
 		}
@@ -688,7 +688,7 @@ func endedReason(dir string) string {
 
 // finalSnapshotTimeout bounds the last Positions read at shutdown: long
 // enough for the simulator to fill a stop hit at that instant after the
-// profile's delay (N1), plus a margin for the read itself.
+// profile's delay, plus a margin for the read itself.
 func finalSnapshotTimeout(cfg *config.Config) time.Duration {
 	d := 500 * time.Millisecond
 	for _, c := range cfg.SimCosts() {

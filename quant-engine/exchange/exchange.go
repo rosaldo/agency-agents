@@ -77,7 +77,7 @@ type OrderRequest struct {
 	Type         OrderType
 	Limit        float64
 	AttachedStop float64
-	ReduceOnly   bool // exits and flatten: may only shrink a position (FR-P2)
+	ReduceOnly   bool // exits and flatten: may only shrink a position, never open or reverse one
 }
 
 type OrderState struct {
@@ -136,7 +136,7 @@ type Capabilities struct {
 	MinQty             float64 // minimum order quantity
 	Swap               bool    // bound to linear swap markets: shorts allowed, exits reduce-only
 	ReportsLiquidation bool    // a position must carry LiquidationPrice; missing = violation
-	Netting            bool    // one net position per symbol on the account (FR-P8 netting rule applies)
+	Netting            bool    // one net position per symbol on the account: the engine nets its own quantity against it
 }
 
 type Exchange interface {
@@ -158,12 +158,12 @@ var (
 	// ErrRefused wraps an answer by which the venue did NOT take the order.
 	ErrRefused = errors.New("exchange: refused")
 	// ErrNotOwn: the order is not in the engine's registry; it is never
-	// cancelled nor changed (FR-P8).
+	// cancelled nor changed: the user's own orders are left alone.
 	ErrNotOwn = errors.New("exchange: order not opened by this engine")
 )
 
 // FundingReporter is implemented by adapters whose venue reports the funding
-// paid or received on a symbol (FR-P5): the engine journals it.
+// paid or received on a symbol: the engine journals it.
 type FundingReporter interface {
 	Funding(ctx context.Context, env Env, symbol string, since time.Time) ([]FundingPayment, error)
 }
@@ -191,7 +191,7 @@ type IDFormatter interface {
 
 // LiquidationEstimator is implemented by adapters that know the venue's
 // liquidation formula: the distance from entry to liquidation, as a fraction
-// of entry, of a fresh position at leverage (FR-P4, pre-entry). ok=false
+// of entry, of a fresh position at leverage, checked before the entry. ok=false
 // means no formula for symbol; the engine then uses the conservative
 // fallback 1/leverage minus the round-trip cost.
 type LiquidationEstimator interface {

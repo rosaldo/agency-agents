@@ -12,7 +12,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
-// FR-P9, generic trailing stop: the rule is the strategy's (strategy.Trailer);
+// Generic trailing stop: the rule is the strategy's (strategy.Trailer);
 // the engine only applies an answer that tightens, sits on the losing side of
 // the close and clears the liquidation, and swaps it on the exchange through
 // exec.MoveStop. A stop whose cancel failed during a swap is kept in

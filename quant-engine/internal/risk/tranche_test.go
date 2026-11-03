@@ -11,7 +11,7 @@ import (
 )
 
 // realFillCosts are the costs sizing counts on real fills with the
-// pessimistic profile: floored at the real one (FR-R1).
+// pessimistic profile: floored at the real one.
 func realFillCosts(t *testing.T) config.SimCosts {
 	t.Helper()
 	yml := "mode: paper\nexchange: hyperliquid\nmarket: swap\nasset_class: crypto\nsymbols: [SOL/USDC:USDC]\ninterval: 1h\n" +

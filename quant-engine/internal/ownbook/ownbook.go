@@ -1,5 +1,5 @@
 // Package ownbook holds the rule by which the engine keeps managing only what
-// it opened on a venue that nets one position per symbol (FR-P8): the
+// it opened on a venue that nets one position per symbol: the
 // account's position may mix the engine's own quantity with the user's.
 package ownbook
 

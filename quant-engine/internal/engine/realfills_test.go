@@ -26,7 +26,7 @@ func optimisticZeroFee(t *testing.T) *config.Config {
 	return c
 }
 
-// FR-R1 floor in the liquidation check: with real fills the round-trip cost
+// The real-cost floor in the liquidation check: with real fills the round-trip cost
 // taken off the distance to liquidation is the floored one (the real
 // profile), not the optimistic zero-fee profile the simulator charges.
 func TestRealFillsLiquidationDistanceIsFloored(t *testing.T) {

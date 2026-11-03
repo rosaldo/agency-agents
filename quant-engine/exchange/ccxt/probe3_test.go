@@ -1,7 +1,7 @@
 package ccxt
 
-// Re-review 3 probes (R1a, R2), ported from the frozen engine's round 3 to
-// this adapter: they failed there and must pass here.
+// Probes of refusals and of lost answers, ported from the engine before the
+// split: they failed there and must pass here.
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 )
 
-// R1a: DDoSProtection, RateLimitExceeded and InvalidNonce are refusals
+// DDoSProtection, RateLimitExceeded and InvalidNonce are refusals
 // (CCXT's routerIsOutcomeUnknownError treats them as known outcomes); the
 // rest of the OperationFailed family and ExchangeError stay unknown.
 func TestProbeR3RefusedClassification(t *testing.T) {
@@ -51,7 +51,7 @@ func TestProbeR3RefusedClassification(t *testing.T) {
 	}
 }
 
-// R1a end to end: a 429 on the entry is a clean rejection, wrapped as
+// End to end: a 429 on the entry is a clean rejection, wrapped as
 // exchange.ErrRefused — no halt, nothing left unknown in the book.
 func TestRateLimitedEntryIsARefusal(t *testing.T) {
 	c := &buyRefused{stub: newStub(now), err: lib.RateLimitExceeded("429")}
@@ -79,7 +79,7 @@ type recorder struct{ evs []journal.Event }
 
 func (r *recorder) Append(ev journal.Event) error { r.evs = append(r.evs, ev); return nil }
 
-// R2: a stop whose answer was lost is cancelled by its client order ID before
+// A stop whose answer was lost is cancelled by its client order ID before
 // the position is flattened, and the cancel is journaled: no stop is left
 // resting untracked on the exchange.
 func TestProbeR3StopTimeoutLeavesAnOrphanStop(t *testing.T) {
@@ -134,13 +134,13 @@ func (c *unknownBuy) FetchClosedOrders(...lib.FetchClosedOrdersOptions) ([]lib.O
 	return nil, nil
 }
 
-// R1(b), ported from round 3: a buy of unknown outcome (429, connection
+// A buy of unknown outcome (429, connection
 // refused) never wedges Positions, not even after a restart: its symbol comes
 // back blocked (no entry) while the other symbol reconciles and flattens, and
 // a new start works without editing the book.
 func TestProbeR3UnknownBuyStillWedgesTheBook(t *testing.T) {
 	for i, e := range []error{lib.RateLimitExceeded("429"), lib.NetworkError("Network error: dial tcp: connection refused")} {
-		unknown := i == 1 // 429 is a refusal (R1a): nothing to block
+		unknown := i == 1 // 429 is a refusal: nothing to block
 		c := &unknownBuy{stub: newStub(now), err: e}
 		o := Options{Symbols: []string{"AAA/USDT", "BBB/USDT"}, Env: exchange.Real, Book: filepath.Join(t.TempDir(), "book.json"), Now: func() time.Time { return now }}
 		a, err := New(c, o)
@@ -213,7 +213,7 @@ func (c *slowCancel) CancelOrder(id string, o ...lib.CancelOrderOptions) (lib.Or
 	return c.stub.CancelOrder(id, o...)
 }
 
-// N2, ported from round 2: a stop request lands while an exit cancels the
+// A stop request lands while an exit cancels the
 // stop, and the cancel takes longer than the protective timeout. The exit's
 // reconcile runs in a fresh protective context, so when the late cancel
 // lands the stop is put back.

@@ -344,7 +344,7 @@ func stops(c *stub) int {
 	return n
 }
 
-// Review B2: an unconfirmed market buy never returns success, and a fill that
+// An unconfirmed market buy never returns success, and a fill that
 // lands later is protected by the next reconcile.
 func TestUnconfirmedEntryHaltsAndLateFillGetsAStop(t *testing.T) {
 	c := &pendingStub{stub: newStub(now), fillAfter: 100}
@@ -397,7 +397,7 @@ func (c *lostStub) FetchClosedOrders(...lib.FetchClosedOrdersOptions) ([]lib.Ord
 	return out, nil
 }
 
-// Review M4: the intent is in the book before sending; a retry resolves the
+// The intent is in the book before sending; a retry resolves the
 // order by its client order ID instead of sending it again.
 func TestLostResponseIsResolvedNotResent(t *testing.T) {
 	c := &lostStub{stub: newStub(now), lose: true}
@@ -413,7 +413,7 @@ func TestLostResponseIsResolvedNotResent(t *testing.T) {
 	}
 }
 
-// Review M5: the book holds the executed quantity net of a fee charged in the
+// The book holds the executed quantity net of a fee charged in the
 // base asset, and that is what the stop sells.
 func TestPositionIsTheNetFilledQuantity(t *testing.T) {
 	c := &feeStub{stub: newStub(now)}
@@ -436,7 +436,7 @@ func (c *feeStub) CreateOrder(symbol, typ, side string, amount float64, opts ...
 	return o, nil
 }
 
-// Review minor 1: lot sizes are per market, not the largest of all.
+// Lot sizes are per market, not the largest of all.
 func TestLotIsPerSymbol(t *testing.T) {
 	c := &twoMarkets{stub: newStub(now)}
 	a, err := New(c, Options{Symbols: []string{"AAA/USDT", "BBB/USDT"}, Env: exchange.Real, Book: filepath.Join(t.TempDir(), "b.json")})

@@ -179,7 +179,7 @@ func TestNoneWithAReasonIsJournaled(t *testing.T) {
 }
 
 // Holding, a None with a Reason is not a dropped signal: nothing is
-// journaled and the trail still runs (the frozen engine never skipped while holding).
+// journaled and the trail still runs (the engine before the split never skipped while holding).
 func TestNoneWithAReasonWhileHoldingStillTrails(t *testing.T) {
 	e, f, j, s := trailEngine(t, "", fake.Options{}, strategy.Long, 90, []float64{100, 100}, answers(95))
 	ctx := context.Background()

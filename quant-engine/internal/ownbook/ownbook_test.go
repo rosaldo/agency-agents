@@ -7,7 +7,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
 )
 
-// FR-P8 netting rule, one case per line of the spec.
+// The netting rule, one case per row.
 func TestReconcile(t *testing.T) {
 	L, S := exchange.Long, exchange.Short
 	for _, c := range []struct {

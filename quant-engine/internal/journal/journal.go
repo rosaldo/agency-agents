@@ -22,7 +22,7 @@ const (
 	Rejected = "rejected"
 	Limit    = "limit" // a risk limit was reached
 	Halt     = "halt"
-	// FR-P8 / R1b: a symbol takes no new entry, with the reason; ForeignQty
+	// a symbol takes no new entry, with the reason; ForeignQty
 	// when the account holds more than the engine's own quantity.
 	Blocked    = "blocked"
 	ForeignQty = "foreign_qty_detected"
@@ -30,7 +30,7 @@ const (
 	// ClosedOutside: the engine's position is gone without its own exit
 	// (stop, liquidation or a close outside the engine); target cleared.
 	ClosedOutside = "closed_outside"
-	Funding       = "funding" // FR-P5: a funding payment as the venue reports it (Amount)
+	Funding       = "funding" // a funding payment as the venue reports it (Amount)
 	// Derivatives: a gap or recovery of the derivatives snapshots, or the
 	// recorder switched off, with the reason.
 	Derivatives = "derivatives"

@@ -13,7 +13,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
 )
 
-// FR-P4, stop before liquidation, on swap markets only (spot has none):
+// Stop before liquidation, on swap markets only (spot has none):
 //   - before an entry, the distance to liquidation comes from the adapter's
 //     formula (exchange.LiquidationEstimator) or, without one, from the
 //     conservative fallback 1/leverage; the round-trip cost comes off either;
@@ -62,7 +62,7 @@ func (e *Engine) liquidationViolation(p exchange.Position) error {
 		if e.Ex.Capabilities().ReportsLiquidation {
 			return errors.New("the exchange reports no liquidation price for the position")
 		}
-		lev := p.Leverage // applied: FR-P3 can only read it back once a position exists
+		lev := p.Leverage // applied: the exchange can only report it once a position exists
 		if lev <= 0 {
 			lev = float64(e.Cfg.Perp.Leverage)
 		}

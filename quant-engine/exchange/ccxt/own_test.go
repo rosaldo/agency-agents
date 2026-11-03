@@ -1,6 +1,6 @@
 package ccxt
 
-// FR-P8 / FR-P6: the adapter manages only the engine's own orders and
+// The adapter manages only the engine's own orders and
 // quantity. Netting mode = swap (one position per symbol on the account);
 // non-netting = spot and a hedged account. No test relies on a dedicated
 // account: the user's quantity sits next to the engine's.
@@ -48,7 +48,8 @@ func onePosition(t *testing.T, a *Adapter) exchange.Position {
 }
 
 // later moves the adapter's clock past cutConfirm: the next reading can
-// confirm a drop of own_qty the previous one only held (B1).
+// confirm a drop of own_qty the previous one only held: one reading
+// alone never shrinks the book.
 func later(a *Adapter) {
 	t := a.opt.Now().Add(cutConfirm)
 	a.opt.Now = func() time.Time { return t }
@@ -427,7 +428,7 @@ func TestUnknownStopIsLookedUpBeforeItTurnsStale(t *testing.T) {
 	}
 }
 
-// FR-P5: the venue's funding history, per symbol; spot has none.
+// The venue's funding history, per symbol; spot has none.
 func TestFundingIsReadFromTheVenue(t *testing.T) {
 	c := newSwapStub()
 	c.funding = []lib.FundingHistory{{Symbol: s(perp), Timestamp: func() *int64 { v := now.UnixMilli(); return &v }(), Amount: f(-0.4)},

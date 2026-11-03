@@ -116,7 +116,7 @@ func TestWeeklyHaltSurvivesTheDayBoundary(t *testing.T) {
 	}
 }
 
-// Review M2: bases from another mode, or an equity that jumped outside the
+// Bases from another mode, or an equity that jumped outside the
 // engine, are not reused; a halt is never lifted by either.
 func TestRestoreForChecksModeAndEquity(t *testing.T) {
 	now := time.Date(2026, 1, 7, 10, 0, 0, 0, time.UTC)
@@ -152,7 +152,7 @@ func TestRestoreForChecksModeAndEquity(t *testing.T) {
 	}
 }
 
-// Review MINOR 2: a halt for a failed stop (Trip) is persisted like a daily halt.
+// A halt for a failed stop (Trip) is persisted like a daily halt.
 func TestTripPersistsUntilTheNextDay(t *testing.T) {
 	b := &Breaker{DailyPct: 3, WeeklyPct: 6, Loc: time.UTC}
 	_ = b.Allow(mon, 10_000)
@@ -167,7 +167,7 @@ func TestTripPersistsUntilTheNextDay(t *testing.T) {
 	}
 }
 
-// FR-P4: the fallback is 1/leverage minus the round trip; the stop must lie
+// The fallback is 1/leverage minus the round trip; the stop must lie
 // strictly between entry and liquidation, leaving the buffer free.
 func TestStopBeforeLiquidation(t *testing.T) {
 	if d := FallbackLiquidationDistance(4, RoundTripCost(0.05, 0.02, 0.04)); d != 0.25-0.002 {

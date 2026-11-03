@@ -218,7 +218,7 @@ func (e *Executor) protect(ctx context.Context, symbol string, side exchange.Pos
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, exchange.ErrRefused) { // R2: it may rest on the exchange; never leave it behind
+	if !errors.Is(err, exchange.ErrRefused) { // its answer may be lost: it may rest on the exchange; never leave it behind
 		cev := journal.Event{ClientID: stopID, Symbol: symbol, Side: string(side.Closing()), Qty: qty,
 			Reason: "cancel the stop of unknown fate before flattening"}
 		_, _ = e.send(ctx, cev, func() (exchange.OrderState, error) { return e.Ex.CancelOrder(ctx, e.Env, stopID) })
@@ -244,7 +244,7 @@ func (e *Executor) flattenAndHalt(ctx context.Context, symbol string, side excha
 // unknown (0) or the venue refuses it. The side of the market is not checked
 // here: a stop already crossed by the price is flattened only because the
 // venue (or the paper simulator) refuses to rest it. A stop that
-// closes more than the own quantity (the account netted it down, FR-P8) is
+// closes more than the own quantity (the account netted it down) is
 // resized to it, new stop first; one that closes less (an add filled and its
 // swap never ran) is covered.
 func (e *Executor) Reconcile(ctx context.Context, stopFor func(exchange.Position) float64) error {
@@ -326,7 +326,7 @@ func (e *Executor) Exit(ctx context.Context, p exchange.Position, candle time.Ti
 }
 
 // restore puts p's stop back after a failed exit, in a protective context of
-// its own (N2): the exit's may have run out on a cancel that hung, which may
+// its own: the exit's may have run out on a cancel that hung, which may
 // still land and leave p naked.
 func (e *Executor) restore(ctx context.Context, p exchange.Position) error {
 	rctx, cancel := protective(ctx)
@@ -339,7 +339,7 @@ func (e *Executor) restore(ctx context.Context, p exchange.Position) error {
 var ErrStopFilled = errors.New("exec: the stop filled during the move")
 
 // MoveStop moves p's stop to next without an instant where p rests without
-// one (FR-P9 d): the new stop is placed first, reduce-only, and only then the
+// one: the new stop is placed first, reduce-only, and only then the
 // old one is cancelled.
 //   - new stop refused or of unknown fate: the old one stays (an unknown new
 //     one is cancelled, and a position left naked gets the old price back);
@@ -372,7 +372,7 @@ func (e *Executor) swap(ctx context.Context, p exchange.Position, next float64, 
 		err = fmt.Errorf("%s stop not resting (status %q)", purpose, st.Status)
 	}
 	if err != nil {
-		if !errors.Is(err, exchange.ErrRefused) { // R2: it may rest; never leave it behind
+		if !errors.Is(err, exchange.ErrRefused) { // its answer may be lost: it may rest; never leave it behind
 			// the adapter looks it up by client ID first: one found resting and
 			// not cancelled is stale; one the venue does not have is not
 			stale = e.cancel(ctx, p, newID, "cancel the "+purpose+" stop of unknown fate")

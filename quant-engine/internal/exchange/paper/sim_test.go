@@ -38,7 +38,7 @@ func fill(t *testing.T, s *Sim, id string, side exchange.Side, qty float64) floa
 	return st.FillPrice
 }
 
-// FR-P10 latency: the fill takes the price after the delay, not the price
+// Latency: the fill takes the price after the delay, not the price
 // at the decision.
 func TestPaperSimLatencyFillsAtTheLaterPrice(t *testing.T) {
 	var waited time.Duration
@@ -51,7 +51,7 @@ func TestPaperSimLatencyFillsAtTheLaterPrice(t *testing.T) {
 	}
 }
 
-// FR-P10 fee: the taker fee leaves cash on the entry and on the exit.
+// Fee: the taker fee leaves cash on the entry and on the exit.
 func TestPaperSimFeeIsDebited(t *testing.T) {
 	s := charged(t, config.SimCosts{CommissionPct: 0.1}, nil)
 	fill(t, s, "e", exchange.Buy, 10) // 1000 notional, 500 margin at leverage 2, fee 1
@@ -79,7 +79,7 @@ func TestPaperSimFeeIsDebited(t *testing.T) {
 	}
 }
 
-// FR-P10 slippage: against the trader on the entry, the exit and a stop,
+// Slippage: against the trader on the entry, the exit and a stop,
 // whether a candle or the last price triggers it.
 func TestPaperSimSlippageHitsEntryExitAndStops(t *testing.T) {
 	c := config.SimCosts{SlippagePct: 1}
@@ -128,7 +128,7 @@ func TestPaperSimSlippageHitsEntryExitAndStops(t *testing.T) {
 	}
 }
 
-// FR-P10: the same scenario under each profile, with the yml's numbers,
+// The same scenario under each profile, with the yml's numbers,
 // ends optimistic >= real >= pessimistic.
 func TestPaperSimProfilesOrderTheResult(t *testing.T) {
 	var equity []float64

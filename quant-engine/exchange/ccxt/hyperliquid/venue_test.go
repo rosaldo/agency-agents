@@ -73,7 +73,7 @@ func newVenueServer(t *testing.T) *venueServer {
 		switch q.Type {
 		case "clearinghouseState":
 			pos := ""
-			if v.held != 0 { // the account must show what the engine holds: the adapter nets against it (FR-P8)
+			if v.held != 0 { // the account must show what the engine holds: the adapter nets against it
 				pos = `{"type":"oneWay","position":{"coin":"BTC","szi":"` + strconv.FormatFloat(v.held, 'f', -1, 64) +
 					`","entryPx":"80000.0","leverage":{"type":"isolated","value":2},"liquidationPx":"40000.0","positionValue":"160.0","unrealizedPnl":"0.0","marginUsed":"80.0","maxLeverage":40}}`
 			}
@@ -134,7 +134,7 @@ func dialTo(t *testing.T, srv *venueServer, symbols []string) ccxt.Client {
 	return c
 }
 
-// NFR-0 through the real fork: every /exchange request an entry, its stop,
+// Through the real fork: every /exchange request an entry, its stop,
 // leverage settings and the exit produce carries no builder, broker or
 // referral field; client order IDs are 0x + 128-bit hex; stop and exit are
 // reduce-only. Nothing leaves the process (loopback server).
@@ -208,7 +208,7 @@ func TestNoBuilderOrReferralReachesTheWire(t *testing.T) {
 // hl is the fork's client under the venue's dex binding.
 func hl(c ccxt.Client) *lib.Hyperliquid { return c.(*client).Hyperliquid }
 
-// FR-P4 (V2): Hyperliquid positions carry liquidationPx, and its maintenance
+// Stop before liquidation: Hyperliquid positions carry liquidationPx, and its maintenance
 // margin is half the initial margin at the market's max leverage (HIP-3
 // xyz:GOOGL: 20x ⇒ 2.5%).
 func TestHyperliquidLiquidationInputs(t *testing.T) {

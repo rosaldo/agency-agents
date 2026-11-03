@@ -32,7 +32,7 @@ func swapEngine(t *testing.T, decide func(strategy.Input) strategy.Decision) (*E
 	return New(c, s, f, exchange.Demo, j, func() time.Time { return now }), f, j, &now
 }
 
-// FR-P2: a short sells at market, its stop is a BUY above the entry, sized on
+// A short sells at market, its stop is a BUY above the entry, sized on
 // the short's own risk, and the stop closes it when crossed.
 func TestShortEntryHasABuyStopAbove(t *testing.T) {
 	ctx := context.Background()
@@ -89,7 +89,7 @@ func TestShortExitBuysBackReduceOnly(t *testing.T) {
 	}
 }
 
-// FR-P3: margin mode and leverage go to the exchange before any order, and an
+// Margin mode and leverage go to the exchange before any order, and an
 // applied value that differs from the yml refuses to trade.
 func TestConfigureMarketsChecksWhatWasApplied(t *testing.T) {
 	ctx := context.Background()

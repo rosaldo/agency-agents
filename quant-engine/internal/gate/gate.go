@@ -1,5 +1,5 @@
 // Package gate decides whether a mainnet run may start. The human confirmation
-// at start is separate (open decision O6).
+// at start is separate.
 package gate
 
 import (

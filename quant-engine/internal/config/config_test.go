@@ -103,7 +103,7 @@ func unwrapAll(err error) error {
 	}
 }
 
-// FR-R3 (O1): perp limits default to max_leverage 3 and buffer 0.5; a
+// Perp limits default to max_leverage 3 and buffer 0.5; a
 // leverage above max_leverage, or out-of-range values, refuse the yml.
 func TestPerpLimits(t *testing.T) {
 	c, err := Parse([]byte(validYAML), example.New())
@@ -135,7 +135,7 @@ func TestPerpLimits(t *testing.T) {
 	}
 }
 
-// D10: equities default to news_guard required, an explicit none is refused,
+// Equities default to news_guard required, an explicit none is refused,
 // and swap defaults to isolated margin.
 func TestEquityAndSwapDefaults(t *testing.T) {
 	c, err := Parse([]byte(strings.Replace(validYAML, "asset_class: crypto", "asset_class: equity\nmarket: swap", 1)), example.New())

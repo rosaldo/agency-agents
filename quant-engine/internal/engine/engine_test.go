@@ -159,7 +159,7 @@ func TestNoNewsPolicyFailsClosed(t *testing.T) {
 	}
 }
 
-// Review B2: Reconcile runs every step, not only at start; the stop goes
+// Reconcile runs every step, not only at start; the stop goes
 // back at the price the strategy gave at entry.
 func TestEveryStepProtectsAnUnprotectedPosition(t *testing.T) {
 	c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "crypto", 1))

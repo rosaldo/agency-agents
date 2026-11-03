@@ -67,7 +67,8 @@ type Venue struct {
 	// an error refuses to start (venue rules the generic adapter cannot know).
 	Check func(markets map[string]lib.MarketInterface) error
 	// ReportsLiquidation: the venue's positions carry a liquidation price; a
-	// position without one is then a violation (FR-P4).
+	// position without one is then a violation: the stop cannot be checked
+	// against the liquidation.
 	ReportsLiquidation bool
 	// MaintenanceMargin is the venue's maintenance margin rate of a market,
 	// as a fraction of the notional; ok=false = unknown. With it the adapter
@@ -99,7 +100,7 @@ type Options struct {
 	Book    string       // file holding the engine's positions and orders
 	Now     func() time.Time
 	// Candles, when set, serves the candles in place of the trading client:
-	// the testnet demo reads the signal from mainnet's public data (O4).
+	// the testnet demo reads the signal from mainnet's public data.
 	Candles Client
 	// Feed, when set, streams the candles (exchange.CandleFeed); nil = no
 	// stream, the loop then polls REST only.
@@ -150,7 +151,7 @@ type Adapter struct {
 	mu      sync.Mutex
 	b       book
 	want    exchange.MarginSettings // applied by ConfigureMarket; checked on every Positions
-	cuts    map[string]cut          // own-quantity drops seen once, awaiting confirmation (B1)
+	cuts    map[string]cut          // own-quantity drops seen once, awaiting confirmation: one reading alone never shrinks the book
 }
 
 // cut is an own-quantity drop the account showed on one reading: own is the
@@ -168,7 +169,7 @@ type cut struct {
 // both fall inside the lag; a grace alone could cut on one late reading.
 const cutConfirm = time.Minute
 
-// New binds c to the yml's markets. FR-P1: only spot and linear swap are
+// New binds c to the yml's markets. Only spot and linear swap are
 // traded, read from CCXT's market structure, never from the symbol's name;
 // every symbol must be of the yml's market type.
 func New(c Client, o Options) (*Adapter, error) {
@@ -446,7 +447,7 @@ func terminal(st exchange.Status) bool {
 }
 
 // PlaceOrder sends a market order with the client order ID, a reference
-// price (some venues build a market order as an IOC limit around it, V5) and,
+// price (some venues build a market order as an IOC limit around it) and,
 // on swap, reduceOnly for exits. A client ID the book already knows is never
 // sent again: it is resolved on the exchange. A fill not confirmed after a
 // few looks comes back as Open, never as success.
@@ -483,7 +484,7 @@ func (a *Adapter) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.O
 		if px <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: no reference price for %s", r.Symbol)
 		}
-		if r.ReduceOnly { // FR-P8: an exit never closes more than the engine's own quantity
+		if r.ReduceOnly { // netting: an exit never closes more than the engine's own quantity
 			r.Qty = min(r.Qty, a.b.Positions[r.Symbol].Qty)
 		}
 		amount := a.toContracts(r.Symbol, r.Qty)
@@ -520,7 +521,7 @@ func (a *Adapter) PlaceOrder(ctx context.Context, env exchange.Env, r exchange.O
 
 // orderParams are the only extra fields an order carries: its client order
 // ID and, on swap, reduceOnly. Nothing else (no builder, broker or referral
-// field: NFR-0).
+// field).
 func (a *Adapter) orderParams(clientID string, reduceOnly bool) map[string]any {
 	p := map[string]any{"clientOrderId": clientID}
 	if a.swap() && reduceOnly {
@@ -530,7 +531,7 @@ func (a *Adapter) orderParams(clientID string, reduceOnly bool) map[string]any {
 }
 
 // mayOpen refuses, before sending, an order that would grow a position on
-// the other side of the engine's own (inversion goes through flat, FR-R4),
+// the other side of the engine's own (inversion goes through flat, in a separate step),
 // a reduce-only order with nothing to reduce, and a short on spot.
 func (a *Adapter) mayOpen(symbol string, side exchange.Side, reduceOnly bool) error {
 	h := a.b.Positions[symbol]
@@ -552,7 +553,7 @@ func (a *Adapter) mayOpen(symbol string, side exchange.Side, reduceOnly bool) er
 // a network error or a generic ExchangeError, leaves the order's fate unknown.
 // DDoSProtection, RateLimitExceeded and InvalidNonce are answers sent before
 // the venue accepts a request (CCXT's routerIsOutcomeUnknownError lists them
-// as known outcomes), so they are refusals too (R1a).
+// as known outcomes), so they are refusals too: nothing is left unknown.
 func refused(err error) bool {
 	var ce *lib.Error
 	if !errors.As(err, &ce) || ce.Type == lib.DuplicateOrderIdErrType { // a duplicate ID means it exists
@@ -691,7 +692,7 @@ func (a *Adapter) PlaceStop(ctx context.Context, env exchange.Env, clientID, sym
 		if h == nil || side != h.Side.Closing() {
 			return exchange.OrderState{Status: exchange.Rejected}, errors.New("ccxt: a stop must close the engine's own position")
 		}
-		qty = min(qty, h.Qty) // FR-P8: never more than the engine's own quantity
+		qty = min(qty, h.Qty) // netting: never more than the engine's own quantity
 		amount := a.toContracts(symbol, qty)
 		if amount <= 0 {
 			return exchange.OrderState{Status: exchange.Rejected}, fmt.Errorf("ccxt: %s stop quantity %g is below one amount step", symbol, qty)
@@ -706,7 +707,7 @@ func (a *Adapter) PlaceStop(ctx context.Context, env exchange.Env, clientID, sym
 		// the trigger price doubles as the reference price of the market order it fires
 		o, err := a.c.CreateOrder(symbol, "market", string(side), amount, lib.WithCreateOrderPrice(stopPrice), lib.WithCreateOrderParams(params))
 		if err != nil {
-			st.Status = exchange.Unknown // it may have landed: R2 resolves it by client ID
+			st.Status = exchange.Unknown // it may have landed: it is resolved later by its client ID
 			if refused(err) {
 				st.Status, err = exchange.Rejected, errors.Join(exchange.ErrRefused, err)
 			}
@@ -784,10 +785,10 @@ func (a *Adapter) cancelByClientID(clientID string, lookup error) (exchange.Orde
 // Positions returns the engine's holdings after bringing every open order up
 // to date: late fills are applied, filled stops close their holding, and a
 // stop the exchange dropped leaves its holding unprotected for reconcile.
-// Trouble in one symbol never fails the call (R1b): an own order of unknown
+// Trouble in one symbol never fails the call, so the other symbols keep trading: an own order of unknown
 // fate that cannot be found blocks entries on its symbol (Position.Blocked,
 // with Qty 0 when nothing is held). On swap the account is netted against the
-// own holdings (FR-P8, ownbook.Reconcile), and the own stops left without a
+// own holdings (ownbook.Reconcile), and the own stops left without a
 // holding to protect are cancelled.
 func (a *Adapter) Positions(ctx context.Context, env exchange.Env) ([]exchange.Position, error) {
 	return do(ctx, a, env, func() ([]exchange.Position, error) {
@@ -864,7 +865,7 @@ func (a *Adapter) sweep() {
 // Balance: on spot, cash is the free quote currency of the traded markets
 // and equity adds the engine's holdings at the last price; on swap both come
 // from the exchange in the settle currency: free margin and account value
-// with unrealized P&L and funding (FR-P5).
+// with unrealized P&L and funding as the venue reports them.
 func (a *Adapter) Balance(ctx context.Context, env exchange.Env) (exchange.Balance, error) {
 	return do(ctx, a, env, func() (exchange.Balance, error) {
 		if a.swap() {
@@ -895,7 +896,7 @@ func (a *Adapter) Balance(ctx context.Context, env exchange.Env) (exchange.Balan
 // CCXT's amount precision as a tick size (CCXT's usual precision mode; to be
 // verified per exchange), in base (Lot).
 func (a *Adapter) Capabilities() exchange.Capabilities {
-	// Netting on every swap: Hyperliquid is one-way (V13), and the adapter sends
+	// Netting on every swap: Hyperliquid is one-way (one position per coin), and the adapter sends
 	// no position side, so a CEX account in hedge mode is not traded as one
 	c := exchange.Capabilities{Swap: a.swap(), ReportsLiquidation: a.swap() && a.opt.Venue.ReportsLiquidation, Netting: a.swap()}
 	for sym := range a.markets {
@@ -1082,9 +1083,9 @@ func (a *Adapter) confirmCut(sym string, own, kept float64) bool {
 	return false
 }
 
-// ConfigureMarket sets margin mode and leverage on a swap market (FR-P3).
+// ConfigureMarket sets margin mode and leverage on a swap market, before any order.
 // Both calls pass both values: on some venues setLeverage alone resets the
-// margin mode (Hyperliquid: cross, V10). Neither answer echoes what was
+// margin mode (Hyperliquid: cross). Neither answer echoes what was
 // applied, so it is read back from the exchange's position when one exists;
 // otherwise the accepted request is the answer, and every later Positions
 // checks the position against it. Spot has nothing to set.
@@ -1128,7 +1129,7 @@ func (a *Adapter) ConfigureMarket(ctx context.Context, env exchange.Env, symbol 
 	})
 }
 
-// Funding is the funding the venue reports on symbol since a time (FR-P5),
+// Funding is the funding the venue reports on symbol since a time,
 // for the journal; spot has none.
 func (a *Adapter) Funding(ctx context.Context, env exchange.Env, symbol string, since time.Time) ([]exchange.FundingPayment, error) {
 	if !a.swap() {

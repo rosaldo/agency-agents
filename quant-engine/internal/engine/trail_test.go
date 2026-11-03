@@ -95,7 +95,7 @@ func stepAndCheck(t *testing.T, e *Engine, f *fake.Fake, want ...float64) {
 	}
 }
 
-// FR-P9 (a): only tighter answers move the stop; looser, equal or no answer
+// Only tighter answers move the stop; looser, equal or no answer
 // keep it, silently. Long: up only; short: down only.
 func TestTrailOnlyTightens(t *testing.T) {
 	flat := []float64{100, 100, 100, 100, 100, 100}
@@ -112,7 +112,7 @@ func TestTrailOnlyTightens(t *testing.T) {
 	stepAndCheck(t, e, f, 105, 105, 105, 105, 103)
 }
 
-// FR-P9 (b): an answer at or beyond the close is refused and journaled.
+// An answer at or beyond the close is refused and journaled.
 func TestTrailOnTheWrongSideIsRefused(t *testing.T) {
 	flat := []float64{100, 100, 100, 100}
 	e, f, j, _ := trailEngine(t, "", fake.Options{}, strategy.Long, 90, flat, answers(101, 100, 95))
@@ -128,7 +128,7 @@ func TestTrailOnTheWrongSideIsRefused(t *testing.T) {
 	}
 }
 
-// FR-P9 (c): a move whose stop does not clear the liquidation (FR-P4) is
+// A move whose stop does not clear the liquidation is
 // refused and journaled, nothing sent. Through Step a tighter stop of a
 // position that passed guardLiquidation always clears it; trail checks again
 // with the trailing rule, here on a position that does not.
@@ -147,7 +147,7 @@ func TestTrailThatBreaksTheLiquidationBufferIsRefused(t *testing.T) {
 	}
 }
 
-// FR-P4 with FR-P9: a long's stop trailed above its entry is past any loss,
+// A long's stop trailed above its entry is past any loss,
 // so before the liquidation; the every-step check must not flatten it.
 func TestStopTrailedPastTheEntryClearsTheLiquidation(t *testing.T) {
 	e, f, _, _ := trailEngine(t, "market: swap\nperp: {allow_short: true, leverage: 2}\n",
@@ -156,7 +156,7 @@ func TestStopTrailedPastTheEntryClearsTheLiquidation(t *testing.T) {
 	stepAndCheck(t, e, f, 105, 105, 105)
 }
 
-// FR-P9 (d) on swap: the old stop's cancel fails: the move holds, the symbol
+// On swap, the old stop's cancel fails: the move holds, the symbol
 // waits (no new move, no entry) until the retry at the next step clears it.
 func TestStaleStopBlocksTheSymbolUntilCancelled(t *testing.T) {
 	e, f, _, s := trailEngine(t, "market: swap\nperp: {allow_short: true, leverage: 2}\n", fake.Options{Shorts: true},
@@ -191,7 +191,7 @@ func TestStaleStopBlocksTheSymbolUntilCancelled(t *testing.T) {
 	}
 }
 
-// FR-P9 (d) on spot: with an old stop not cancelled two stops could
+// On spot, with an old stop not cancelled two stops could
 // sell beyond the own quantity: the position is closed at once and the
 // symbol takes no entry until the old stop is gone.
 func TestStaleStopOnSpotClosesAndBlocks(t *testing.T) {
@@ -233,7 +233,7 @@ func TestStaleStopOnSpotClosesAndBlocks(t *testing.T) {
 	}
 }
 
-// FR-P9 (d): the old stop fills during the swap: the engine forgets the
+// The old stop fills during the swap: the engine forgets the
 // position's target and stop.
 func TestOldStopFilledDuringTheMoveForgetsThePosition(t *testing.T) {
 	e, f, _, _ := trailEngine(t, "", fake.Options{}, strategy.Long, 90, []float64{100, 100, 100}, answers(95))
@@ -268,7 +268,7 @@ func (x *firesOnCancel) CancelOrder(ctx context.Context, env exchange.Env, id st
 	return exchange.OrderState{ClientID: id, Status: exchange.Filled}, err
 }
 
-// validateTrail as a table: sanity, tighten-only and side (FR-P9 a, b).
+// validateTrail as a table: sanity, tighten-only and side.
 func TestValidateTrail(t *testing.T) {
 	for _, tc := range []struct {
 		side           exchange.PositionSide

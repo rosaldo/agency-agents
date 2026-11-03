@@ -132,7 +132,7 @@ type SizeInput struct {
 	SlippagePct float64
 	// CommissionPct is the sim profile's taker fee per fill, paid on the entry
 	// and on the stop notional. No leverage here: the size comes from the
-	// risk budget, leverage only sets the margin locked (FR-R1).
+	// risk budget, leverage only sets the margin locked.
 	CommissionPct float64
 	QtyStep       float64 // market's quantity increment (0 = fractional)
 	MinQty        float64 // market's minimum quantity
@@ -207,7 +207,7 @@ func size(budget float64, in SizeInput) (qty float64, why string) {
 // FallbackLiquidationDistance is the conservative distance from entry to
 // liquidation, as a fraction of the entry, used when the adapter knows no
 // formula for the venue (paper simulator, CEX "basic"): 1/leverage minus
-// the round-trip cost (FR-P4). It ignores the maintenance margin the venue
+// the round-trip cost. It ignores the maintenance margin the venue
 // keeps; the post-fill check against the exchange's own liquidation price
 // covers that, and min_liquidation_buffer leaves room for it before.
 func FallbackLiquidationDistance(leverage, roundTrip float64) float64 {
@@ -233,7 +233,7 @@ func LiquidationPrice(short bool, entry, frac float64) float64 {
 	return entry * (1 - frac)
 }
 
-// StopBeforeLiquidation is the FR-P4 invariant: the stop lies strictly
+// StopBeforeLiquidation is the stop-before-liquidation invariant: the stop lies strictly
 // between entry and liquidation (a long's liquidation below, a short's
 // above) and leaves buffer (min_liquidation_buffer) of that distance free:
 // |entry - stop| <= |entry - liq| * (1 - buffer). A nil error means it holds.

@@ -37,7 +37,7 @@ func (x *failCancels) CancelOrder(ctx context.Context, env exchange.Env, id stri
 	return x.Fake.CancelOrder(ctx, env, id)
 }
 
-// FR-P9 (f): a moved stop and an old stop not yet cancelled survive a
+// A moved stop and an old stop not yet cancelled survive a
 // restart: the stop the exchange dropped comes back at the trailed price,
 // never the entry's, and the stale cancel is retried.
 func TestTrailedStopAndStaleStopSurviveARestart(t *testing.T) {

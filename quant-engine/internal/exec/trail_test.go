@@ -55,7 +55,7 @@ func entered(t *testing.T, swap ...bool) (*fake.Fake, *spy, *Executor, exchange.
 
 var t1 = t0.Add(time.Hour)
 
-// FR-P9 (d): the new stop goes first, the old one is cancelled after; the
+// The new stop goes first, the old one is cancelled after; the
 // moved stop is the one the next candle (low 94) fills.
 func TestMoveStopPlacesTheNewStopBeforeCancellingTheOld(t *testing.T) {
 	f, s, e, p := entered(t)
@@ -76,7 +76,7 @@ func TestMoveStopPlacesTheNewStopBeforeCancellingTheOld(t *testing.T) {
 	}
 }
 
-// FR-P9 (d): the venue refuses the new stop: the old one stays, nothing is cancelled.
+// The venue refuses the new stop: the old one stays, nothing is cancelled.
 func TestMoveStopRefusedKeepsTheOldStop(t *testing.T) {
 	f, s, e, p := entered(t)
 	f.FailNext("PlaceStop", errors.Join(exchange.ErrRefused, errors.New("too many orders")), false)
@@ -94,7 +94,7 @@ func TestMoveStopRefusedKeepsTheOldStop(t *testing.T) {
 	assertProtected(t, f)
 }
 
-// FR-P9 (d): the new stop's fate is unknown (it landed, the answer was lost):
+// The new stop's fate is unknown (it landed, the answer was lost):
 // it is cancelled, and a position the venue left naked gets the old price back.
 func TestMoveStopOfUnknownFateLeavesAStop(t *testing.T) {
 	f, _, e, p := entered(t)
@@ -108,7 +108,7 @@ func TestMoveStopOfUnknownFateLeavesAStop(t *testing.T) {
 	assertProtected(t, f)
 }
 
-// FR-P9 (d): the old stop's cancel fails: the move holds, two stops guard
+// The old stop's cancel fails: the move holds, two stops guard
 // the position for now, and the old one comes back as stale.
 func TestMoveStopOldCancelFailsIsStale(t *testing.T) {
 	f, _, e, p := entered(t)
@@ -126,7 +126,7 @@ func TestMoveStopOldCancelFailsIsStale(t *testing.T) {
 	assertProtected(t, f)
 }
 
-// FR-P9 (d): the old stop fires while the new one is placed: the position is
+// The old stop fires while the new one is placed: the position is
 // gone, the new stop is cancelled, no order is left and no position opens
 // (a swap fake: a stray sell would open a short).
 func TestMoveStopOldFilledCancelsTheNew(t *testing.T) {
@@ -157,7 +157,7 @@ func TestMoveStopOldFilledCancelsTheNew(t *testing.T) {
 	}
 }
 
-// FR-P9 (e): a move is journaled: proposed cur -> next, the new stop sent and
+// A move is journaled: proposed cur -> next, the new stop sent and
 // resting, the old one sent for cancel and cancelled.
 func TestMoveStopIsJournaled(t *testing.T) {
 	_, _, e, p := entered(t)

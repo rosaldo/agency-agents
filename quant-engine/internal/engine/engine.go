@@ -44,7 +44,8 @@ type Engine struct {
 	PastNews bool
 	// Simulated says the fills are simulated (paper simulator, backtest):
 	// sizing then counts the active sim profile as it is; with real fills
-	// (mainnet, testnet) it counts the profile floored at the real one (FR-R1).
+	// (mainnet, testnet) it counts the profile floored at the real one,
+	// so an optimistic profile never sizes a real trade larger.
 	Simulated bool
 	// OnStale, when set, persists the stale stops at once: a crash right
 	// after a move must not lose the one left behind.
@@ -75,7 +76,7 @@ type Engine struct {
 	closed     map[string]time.Time      // symbol -> open time of the candle this step decided on
 	targets    map[string]float64
 	stops      map[string]float64    // stop given at entry or moved by the trail, re-placed if the exchange drops it
-	staleStops map[string]string     // symbol -> old stop a trail could not cancel (FR-P9)
+	staleStops map[string]string     // symbol -> old stop a trail could not cancel
 	trades     map[string]risk.Trade // symbol -> budget fixed at the first tranche and fraction used (graduated entry)
 	blocked    map[string]string     // last journaled block reason per symbol
 	newsUntil  map[string]time.Time  // symbol -> end of the block a news catastrophe set
@@ -229,7 +230,7 @@ func (e *Engine) forget(sym string) {
 
 // ConfigureMarkets applies perp.margin_mode and perp.leverage to every
 // traded swap market before any order and checks what the exchange reports
-// as applied: any divergence refuses to trade (FR-P3). Spot has nothing to set.
+// as applied: any divergence refuses to trade. Spot has nothing to set.
 func (e *Engine) ConfigureMarkets(ctx context.Context) error {
 	if e.Cfg.Market != "swap" {
 		return nil
@@ -298,7 +299,7 @@ func (e *Engine) Step(ctx context.Context) error {
 	}
 	held := map[string]exchange.Position{}
 	for _, p := range ps {
-		if err := e.guardLiquidation(ctx, p); err != nil { // FR-P4 every step: liquidation moves with margin and funding
+		if err := e.guardLiquidation(ctx, p); err != nil { // every step: liquidation moves with margin and funding
 			return err
 		}
 		held[p.Symbol] = p
@@ -706,7 +707,7 @@ func TargetHit(side strategy.Side, close, target float64) bool {
 	return close >= target
 }
 
-// journalBlocks journals each change of a symbol's block (FR-P8, R1b): the
+// journalBlocks journals each change of a symbol's block: the
 // account holding foreign quantity, an own order of unknown fate, a position
 // on the other side; and its lifting.
 func (e *Engine) journalBlocks(held map[string]exchange.Position) {
@@ -727,7 +728,7 @@ func (e *Engine) journalBlocks(held map[string]exchange.Position) {
 }
 
 // journalFunding journals the funding the venue reports on the held swap
-// positions since the last look (FR-P5); none before the engine first saw
+// positions since the last look; none before the engine first saw
 // the position. A failed read is tried again next step.
 func (e *Engine) journalFunding(ctx context.Context, held map[string]exchange.Position) {
 	fr, ok := e.Ex.(exchange.FundingReporter)

@@ -7,8 +7,8 @@
 // On a swap market it simulates a linear perp: long and short, the margin
 // locked at the leverage ConfigureMarket set, and an ESTIMATED liquidation
 // (the venue's formula when the data adapter has one, else 1/leverage) at
-// which the position is closed and its margin lost. Funding is not modelled
-// (FR-P5): FundingNote says so in status.
+// which the position is closed and its margin lost. Funding is not modelled:
+// FundingNote says so in status.
 //
 // Every fill pays the profile's costs (config.Sim): it takes the price
 // read after the profile's latency, moved by its slippage against the
@@ -137,7 +137,7 @@ func fee(c config.SimCosts, qty, px float64) float64 { return qty * px * c.Commi
 
 func (s *Sim) swap() bool { return s.data.Capabilities().Swap }
 
-// FundingNote is what status shows about funding (FR-P5): the simulator
+// FundingNote is what status shows about funding: the simulator
 // leaves it out of P&L and drawdown; "" on spot, which pays none.
 func (s *Sim) FundingNote() string {
 	if !s.swap() {
@@ -169,7 +169,8 @@ func (s *Sim) liquidation(symbol string, side exchange.PositionSide, entry, lev 
 	return risk.LiquidationPrice(side == exchange.Short, entry, d)
 }
 
-// LiquidationDistance forwards the data adapter's venue formula (FR-P4).
+// LiquidationDistance forwards the data adapter's venue formula, for the stop
+// before liquidation.
 func (s *Sim) LiquidationDistance(symbol string, side exchange.PositionSide, entry, leverage float64) (float64, bool) {
 	if est, ok := s.data.(exchange.LiquidationEstimator); ok {
 		return est.LiquidationDistance(symbol, side, entry, leverage)

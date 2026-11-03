@@ -68,7 +68,7 @@ func TestUnknownNewStopIsStaleOnlyWhenItRests(t *testing.T) {
 }
 
 // shrunk reports the position smaller than the fake holds, as an account
-// netted down (FR-P8): its stop then closes more than the own quantity.
+// netted down: its stop then closes more than the own quantity.
 type shrunk struct {
 	*fake.Fake
 	qty float64
@@ -82,7 +82,7 @@ func (x *shrunk) Positions(ctx context.Context, env exchange.Env) ([]exchange.Po
 	return ps, err
 }
 
-// FR-P8: Reconcile resizes a stop larger than the own quantity, new stop first.
+// Reconcile resizes a stop larger than the own quantity, new stop first.
 func TestReconcileResizesAStopLargerThanTheOwnQuantity(t *testing.T) {
 	f, _, e, p := entered(t)
 	e.Ex = &shrunk{Fake: f, qty: 6}

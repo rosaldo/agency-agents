@@ -57,7 +57,7 @@ func (e events) halted() string {
 	return ""
 }
 
-// FR-P4 pre-entry: at leverage 2 with no maintenance formula the liquidation
+// Before the entry: at leverage 2 with no maintenance formula the liquidation
 // is 1/2 away; with buffer 0.5 the stop may be at most 25% from the entry.
 // Long and short, both sides of the line.
 func TestEntryStopMustClearTheLiquidationBuffer(t *testing.T) {
@@ -85,7 +85,7 @@ func TestEntryStopMustClearTheLiquidationBuffer(t *testing.T) {
 	}
 }
 
-// FR-P4 post-fill: the exchange's liquidation price is the truth. Long
+// After the fill: the exchange's liquidation price is the truth. Long
 // entry 105 stop 100: liquidation 97 leaves 8, half of it (4) is less than
 // the stop's 5 ⇒ flatten and halt; 90 leaves 15 ⇒ keeps. Short mirrored:
 // stop 110, liquidation 113 halts, 120 keeps.
@@ -117,7 +117,7 @@ func TestFilledPositionIsCheckedAgainstTheExchangesLiquidation(t *testing.T) {
 	}
 }
 
-// FR-P4: a venue that reports liquidation prices and leaves one out is a
+// A venue that reports liquidation prices and leaves one out is a
 // violation; a venue that reports none falls back to the estimate.
 func TestMissingLiquidationPriceIsAViolationWhereTheVenueReportsIt(t *testing.T) {
 	e, f, j := liqEngine(t, fake.Options{ReportsLiquidation: true}, strategy.Long, 100)
@@ -134,7 +134,7 @@ func TestMissingLiquidationPriceIsAViolationWhereTheVenueReportsIt(t *testing.T)
 	}
 }
 
-// FR-P4 every step: the liquidation moves (margin, funding); a later step
+// Every step: the liquidation moves (margin, funding); a later step
 // that finds it too near flattens and halts.
 func TestLiquidationIsRecheckedEveryStep(t *testing.T) {
 	e, f, j := liqEngine(t, fake.Options{ReportsLiquidation: true}, strategy.Long, 100)
@@ -154,7 +154,7 @@ func TestLiquidationIsRecheckedEveryStep(t *testing.T) {
 	}
 }
 
-// FR-P4 with FR-P3: without a position the applied leverage cannot be read
+// Without a position the applied leverage cannot be read
 // back, so the estimate after the fill uses what the position reports, not
 // the yml's. yml 2x clears a 4.8% stop; the exchange's 20x (5% to
 // liquidation, 2.5% after the buffer) does not.
@@ -182,7 +182,7 @@ func TestSpotHasNoLiquidationCheck(t *testing.T) {
 	}
 }
 
-// FR-P4 with the sim profile's costs: commission 1% and slippage 1% take a
+// With the sim profile's costs: commission 1% and slippage 1% take a
 // round trip of 4% off the liquidation distance (0.5 - 0.04) x 0.5 = 23%, so
 // the 23.8% stop that clears it at zero cost is refused.
 func TestLiquidationBufferCountsTheSimProfileCosts(t *testing.T) {

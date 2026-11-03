@@ -22,7 +22,7 @@ func (marketsOnly) LoadMarkets(...any) (map[string]lib.MarketInterface, error) {
 	return map[string]lib.MarketInterface{"AAA": {Type: &spot, Spot: &yes}}, nil
 }
 
-// QA t12e (M4, M13): testnet credentials pick the sandbox, and with it the
+// Testnet credentials pick the sandbox, and with it the
 // testnet level and book, never the simulator's (mode paper) ones.
 func TestCredentialPickedTestnetUsesItsOwnLevelAndBook(t *testing.T) {
 	app := testApp()
@@ -42,7 +42,7 @@ func TestCredentialPickedTestnetUsesItsOwnLevelAndBook(t *testing.T) {
 	}
 }
 
-// QA t12e (M6, finding 1): stop --flatten checks only its own level's files.
+// stop --flatten checks only its own level's files.
 // Another level's file never blocks closing; its own refuses with what keeps
 // the positions safe meanwhile and how to close them now.
 func TestFlattenChecksOnlyItsLevel(t *testing.T) {

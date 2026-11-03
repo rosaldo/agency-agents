@@ -52,7 +52,7 @@ func isStop(opts []lib.CreateOrderOptions) bool {
 	return o.Params != nil && (*o.Params)["triggerPrice"] != nil
 }
 
-// Review 2 N1: a stop the exchange refused is never taken as placed on retry:
+// A stop the exchange refused is never taken as placed on retry:
 // the position is flattened and the engine halts.
 func TestRefusedStopFlattensAndHalts(t *testing.T) {
 	for _, failures := range []int{1, -1} {
@@ -79,7 +79,7 @@ func (c *cancelInFlight) CancelOrder(id string, o ...lib.CancelOrderOptions) (li
 	return c.stub.CancelOrder(id, o...)
 }
 
-// Review 2 N2: a stop arriving during the stop cancel of an exit never leaves
+// A stop arriving during the stop cancel of an exit never leaves
 // the position without a stop: the exit is carried through.
 func TestStopDuringTheStopCancelStaysProtected(t *testing.T) {
 	c := &cancelInFlight{stub: newStub(now), in: make(chan struct{}), release: make(chan struct{})}
@@ -119,7 +119,7 @@ func (c *buyRefused) FetchClosedOrders(...lib.FetchClosedOrdersOptions) ([]lib.O
 	return nil, nil
 }
 
-// Review 2 N3: a buy the exchange refused outright (insufficient funds) is
+// A buy the exchange refused outright (insufficient funds) is
 // rejected, not unknown: positions, reconcile and flatten keep working, even
 // after a restart. A network error stays unknown (fail closed).
 func TestRefusedBuyDoesNotWedgeTheBook(t *testing.T) {

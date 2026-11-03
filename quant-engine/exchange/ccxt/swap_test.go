@@ -14,7 +14,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/internal/exec"
 )
 
-// swapStub lists the market types FR-P1 must tell apart.
+// swapStub lists the market types New must tell apart.
 type swapStub struct{ *stub }
 
 func (c *swapStub) LoadMarkets(...any) (map[string]lib.MarketInterface, error) {
@@ -51,7 +51,7 @@ func swapAdapter(t *testing.T, c Client) *Adapter {
 	return a
 }
 
-// FR-P1: spot and linear swap are traded (any positive contract size);
+// Spot and linear swap are traded (any positive contract size);
 // future, option, inverse swap, margin, a swap without a contract size and a
 // market of the other type than the yml's are refused at start.
 func TestOnlySpotAndLinearSwapAreTraded(t *testing.T) {
@@ -75,7 +75,7 @@ func TestOnlySpotAndLinearSwapAreTraded(t *testing.T) {
 	}
 }
 
-// FR-P2: a short opens with a sell, its stop is a reduce-only BUY trigger and
+// A short opens with a sell, its stop is a reduce-only BUY trigger and
 // the exit a reduce-only buy; every market order carries a reference price.
 func TestSwapShortStopAndExitAreReduceOnly(t *testing.T) {
 	c := newSwapStub()
@@ -120,7 +120,7 @@ func TestSwapShortStopAndExitAreReduceOnly(t *testing.T) {
 }
 
 // An entry against the engine's open position and a reduce-only order with
-// nothing to reduce never leave (inversion through flat, FR-R4).
+// nothing to reduce never leave (inversion goes through flat).
 func TestNoInversionAndNoNakedReduceOnly(t *testing.T) {
 	c := newSwapStub()
 	a := swapAdapter(t, c)
@@ -138,7 +138,7 @@ func TestNoInversionAndNoNakedReduceOnly(t *testing.T) {
 	}
 }
 
-// NFR-0: no order the adapter sends carries a builder, broker or referral
+// No order the adapter sends carries a builder, broker or referral
 // field — only the client order ID, reduceOnly and the stop trigger.
 func TestOrdersCarryNoBuilderOrReferralField(t *testing.T) {
 	c := newSwapStub()
@@ -163,7 +163,7 @@ func TestOrdersCarryNoBuilderOrReferralField(t *testing.T) {
 	}
 }
 
-// FR-P3: margin mode and leverage are both sent; the position read back is
+// Margin mode and leverage are both sent; the position read back is
 // the answer, and a position with other settings blocks entries.
 func TestConfigureMarketReadsBackAndBlocksADivergence(t *testing.T) {
 	c := newSwapStub()
@@ -205,7 +205,7 @@ func TestSwapBalanceIsMarginAndAccountValue(t *testing.T) {
 	}
 }
 
-// The venue shapes client order IDs (Hyperliquid: 0x + 128-bit hex, V9).
+// The venue shapes client order IDs (Hyperliquid: 0x + 128-bit hex).
 func TestVenueFormatsClientIDs(t *testing.T) {
 	a, err := New(&swapStub{newStub(now)}, Options{Symbols: []string{"AAA/USDC:USDC"}, Market: "swap", Env: exchange.Real,
 		Venue: Venue{ClientID: func(d [16]byte) string { return "0xid" }}})

@@ -14,7 +14,7 @@ import (
 )
 
 // accountView adds what an adapter reports beyond the fake: a symbol blocked
-// with nothing of the engine's held (FR-P8, R1b), and funding (FR-P5).
+// with nothing of the engine's held, and funding.
 type accountView struct {
 	*fake.Fake
 	blocked string
@@ -59,7 +59,7 @@ func count(j *events, kind string) int {
 	return n
 }
 
-// FR-P8: a symbol blocked by foreign quantity, with nothing of the engine's,
+// A symbol blocked by foreign quantity, with nothing of the engine's,
 // takes no entry; the block is journaled once (foreign_qty_detected), its
 // lifting too, and only then the entry goes; flatten skips it.
 func TestBlockedSymbolTakesNoEntryAndIsJournaledOnce(t *testing.T) {
@@ -86,7 +86,7 @@ func TestBlockedSymbolTakesNoEntryAndIsJournaledOnce(t *testing.T) {
 	}
 }
 
-// FR-P6: a position gone without the engine's exit (liquidated, closed or
+// A position gone without the engine's exit (liquidated, closed or
 // reversed by the user) is journaled and its target cleared, also when the
 // symbol comes back blocked with nothing of the engine's.
 func TestPositionClosedOutsideIsJournaledAndItsTargetCleared(t *testing.T) {
@@ -114,7 +114,7 @@ func TestPositionClosedOutsideIsJournaledAndItsTargetCleared(t *testing.T) {
 	}
 }
 
-// FR-P5: funding the venue reports on a held swap position goes to the
+// Funding the venue reports on a held swap position goes to the
 // journal, once, and only from when the engine saw the position.
 func TestFundingIsJournaled(t *testing.T) {
 	e, f, j, _ := scriptedEngine(t, "market: swap\nperp: {leverage: 2}\n", func(in strategy.Input) strategy.Decision {

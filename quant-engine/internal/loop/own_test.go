@@ -80,7 +80,7 @@ func TestStaleStopIsSavedRightAfterTheMove(t *testing.T) {
 	}
 }
 
-// N2: a run that ends without flatten reconciles once more on its way out: a
+// A run that ends without flatten reconciles once more on its way out: a
 // stop the venue dropped at the last moment is put back.
 func TestRunEndsWithAFinalReconcile(t *testing.T) {
 	c, s, f, fc, tick, dir := trailRun(t)

@@ -22,7 +22,7 @@ func (c cancelAfter) CancelOrder(ctx context.Context, env exchange.Env, id strin
 	return st, err
 }
 
-// Review B3: an exit interrupted by stop never leaves the position naked.
+// An exit interrupted by stop never leaves the position naked.
 func TestExitInterruptedByStopStaysProtected(t *testing.T) {
 	f, e := setup(t, false)
 	if err := e.Enter(ctx, "AAA", t0, plan); err != nil {
@@ -40,6 +40,6 @@ func TestExitInterruptedByStopStaysProtected(t *testing.T) {
 	}
 }
 
-// Review B2: a position that appears unprotected is protected by Reconcile;
+// A position that appears unprotected is protected by Reconcile;
 // the engine calls it every step (see the engine test).
 var _ = fake.New

@@ -15,7 +15,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
-// FR-R1: leverage only sets the margin locked; the size comes from the risk
+// Leverage only sets the margin locked; the size comes from the risk
 // budget, so leverage 1 and 3 buy the same quantity.
 func TestLeverageDoesNotChangeTheSize(t *testing.T) {
 	qty := map[int]float64{}
@@ -37,7 +37,7 @@ func TestLeverageDoesNotChangeTheSize(t *testing.T) {
 	}
 }
 
-// FR-R3: an entry whose margin (notional / leverage) exceeds the free margin
+// An entry whose margin (notional / leverage) exceeds the free margin
 // is not sent; the same entry fits with more leverage.
 func TestInsufficientMarginDoesNotEnter(t *testing.T) {
 	// stop 104.5 on entry 105: qty = 100 / 0.5 = 200, notional 21 000 > cash 10 000
@@ -60,7 +60,7 @@ func TestInsufficientMarginDoesNotEnter(t *testing.T) {
 	}
 }
 
-// FR-R4: holding a long, an Enter on the other side is refused; reversing
+// Holding a long, an Enter on the other side is refused; reversing
 // takes an Exit to flat first, in a separate step.
 func TestReversalOnlyThroughFlat(t *testing.T) {
 	answer := strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 100}
@@ -90,7 +90,7 @@ func (o balanceOverride) Balance(context.Context, exchange.Env) (exchange.Balanc
 	return *o.b, nil
 }
 
-// FR-R2: drawdown is measured on equity, not on free margin: margin locked
+// Drawdown is measured on equity, not on free margin: margin locked
 // by a position does not trip the breaker, an equity loss does.
 func TestDrawdownIsOnEquity(t *testing.T) {
 	e, f, _, _ := scriptedEngine(t, "", func(strategy.Input) strategy.Decision { return strategy.Decision{} })
@@ -110,7 +110,7 @@ func TestDrawdownIsOnEquity(t *testing.T) {
 	}
 }
 
-// FR-R3: entries in the same step share the free margin: the second one is
+// Entries in the same step share the free margin: the second one is
 // checked against what the first left, not against the step's whole cash.
 func TestEntriesInOneStepShareTheFreeMargin(t *testing.T) {
 	s := &scripted.Strategy{Decider: func(strategy.Input) strategy.Decision {
@@ -138,7 +138,7 @@ func TestEntriesInOneStepShareTheFreeMargin(t *testing.T) {
 	}
 }
 
-// FR-R1 floor: with real fills (live, testnet) an optimistic profile with a
+// The real-cost floor: with real fills (live, testnet) an optimistic profile with a
 // zero fee buys what the real profile buys; on simulated fills (paper
 // simulator, backtest) the active profile sizes as it is, so it buys more.
 func TestRealFillsAreSizedAtLeastAtTheRealProfile(t *testing.T) {
