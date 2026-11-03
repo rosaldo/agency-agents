@@ -192,6 +192,37 @@ func TestRateLimitIsRetriedWithinTheTimeout(t *testing.T) {
 	}
 }
 
+// A classification cut short by the caller's deadline (on equity, a slow
+// feed ate the check's budget) is a catastrophe for that check only: the
+// next check asks again. One that fails on its own timeout stays judged.
+func TestFailureOfTheCallersDeadlineIsNotKept(t *testing.T) {
+	const title = "Exchange hack drains BTC reserves"
+	j := &jev{answer: answer(0.1), delay: 100 * time.Millisecond}
+	g := guard(feedServer(t, title, 0).URL, client(j.server(t).URL, testKey))
+	g.Timeout = time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	fs, err := g.Check(ctx, "BTC/USDC:USDC", at)
+	cancel()
+	if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil {
+		t.Fatalf("cut short: findings %+v %v; want a catastrophe for this check", fs, err)
+	}
+	if fs, err = g.Check(context.Background(), "BTC/USDC:USDC", at); err != nil || len(fs) != 1 || fs[0].Catastrophe || j.calls.Load() != 2 {
+		t.Fatalf("next check: findings %+v %v, %d calls; want the headline asked again, noise", fs, err, j.calls.Load())
+	}
+
+	slow := &jev{answer: answer(0.1), delay: 200 * time.Millisecond}
+	g = guard(feedServer(t, title, 0).URL, client(slow.server(t).URL, testKey))
+	g.Timeout = 50 * time.Millisecond
+	for range 2 {
+		if fs, err = g.Check(context.Background(), "BTC/USDC:USDC", at); err != nil || len(fs) != 1 || !fs[0].Catastrophe {
+			t.Fatalf("classifier timeout: findings %+v %v; want a catastrophe", fs, err)
+		}
+	}
+	if slow.calls.Load() != 1 {
+		t.Fatalf("classifier timeout: %d calls; want the failure kept, one call", slow.calls.Load())
+	}
+}
+
 // A headline is classified once: the same one in a later check reuses the
 // verdict; a headline without the asset or a keyword is never sent.
 func TestHeadlineIsClassifiedOnce(t *testing.T) {

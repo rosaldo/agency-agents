@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.55.4** (2026-11-03) · `fix` — quant-engine: news: a classification cut short by the caller's deadline is not kept: the next check asks again instead of blocking until the end of the lookback
 - **v1.55.3** (2026-11-03) · `fix` — quant-engine: a news result that comes during a stop is dropped: no false emergency_exit in the journal
 - **v1.55.2** (2026-11-03) · `fix` — quant-engine: typesafe: a 429 or 529 is retried with exponential backoff (3 retries from 250ms) within the classification's timeout; past them it stays a failure
 - **v1.55.1** (2026-11-03) · `fix` — quant-engine: the news block persists in the state file: a restart within the lookback neither enters the symbol again nor judges the headline again

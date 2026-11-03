@@ -107,6 +107,9 @@ func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
 		cancel()
 		f.Classified = f.Err == nil
 		f.Catastrophe = f.Err != nil || f.Verdict.Yes >= g.Threshold
+		if f.Err != nil && ctx.Err() != nil {
+			return f // the caller's deadline or stop cut it short, not the classifier: judged again at the next check
+		}
 	}
 	g.mu.Lock()
 	if g.seen == nil {
