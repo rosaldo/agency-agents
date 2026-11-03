@@ -390,7 +390,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 	st.Sizing = en.SizingNote()
 	st.Feed = cfg.Feed
 	var mu sync.Mutex
-	save := func(update func(*State)) {
+	saveErr := func(update func(*State)) error {
 		mu.Lock()
 		defer mu.Unlock()
 		update(&st)
@@ -398,14 +398,19 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			st.FeedState = &fs
 		}
 		st.Heartbeat = time.Now()
-		_ = SaveState(dir, st)
+		return SaveState(dir, st)
 	}
+	save := func(update func(*State)) { _ = saveErr(update) }
 	record := func(kind, reason string) {
 		_ = j.Append(journal.Event{Time: tick.Now(), Kind: kind, Reason: reason})
 		save(func(s *State) { s.LastEvent = kind + " " + reason })
 	}
 	en.OnStale = func() { save(func(s *State) { s.StaleStops = en.StaleStops() }) }
-	en.OnNewsBlock = func() { save(func(s *State) { s.NewsUntil = en.NewsBlocks() }) }
+	en.OnNewsBlock = func() { // a failed write is journaled; it never holds the emergency exit back
+		if err := saveErr(func(s *State) { s.NewsUntil = en.NewsBlocks() }); err != nil {
+			_ = j.Append(journal.Event{Time: tick.Now(), Kind: Error, Reason: "news block not saved: " + err.Error()})
+		}
+	}
 	onNews := func(r newsResult) {
 		note := func(ev journal.Event) {
 			ev.Time = tick.Now()

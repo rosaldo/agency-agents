@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -129,4 +131,32 @@ func killAtTheExitOrder(t *testing.T, naked bool) {
 	if !retried {
 		t.Fatalf("no retried emergency exit after the restart; journal %+v", journalOf(t, dir)[before:])
 	}
+}
+
+// The news block's save fails (the state directory turned read-only): the
+// failure goes to the journal and the emergency exit still goes out.
+func TestNewsBlockSaveFailureIsJournaledAndTheExitStillGoes(t *testing.T) {
+	var dir string
+	var once sync.Once
+	h := func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { _ = os.Chmod(dir, 0o500) })
+		rssHack(w, r)
+	}
+	c, s, f, cs, d := hackSetup(t, h, []int{0, 1, 2, 3})
+	dir = d
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	Run(context.Background(), c, s, f, exchange.Demo, &FakeTicker{Ex: f, Candles: cs, Delay: 500 * time.Millisecond}, dir)
+	_ = os.Chmod(dir, 0o700)
+	if st, _ := LoadState(dir, "paper"); len(st.NewsUntil) != 0 {
+		t.Fatalf("news_until saved %v; the test needs the save to fail", st.NewsUntil)
+	}
+	if ps, _ := f.Positions(context.Background(), exchange.Demo); len(ps) != 0 {
+		t.Fatalf("positions %+v; want the emergency exit done although the save failed", ps)
+	}
+	for _, e := range journalOf(t, dir) {
+		if e.Kind == Error && strings.HasPrefix(e.Reason, "news block not saved: ") {
+			return
+		}
+	}
+	t.Fatalf("no journaled save failure; journal %+v", journalOf(t, dir))
 }
