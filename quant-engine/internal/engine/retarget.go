@@ -59,9 +59,14 @@ func (e *Engine) retarget(ctx context.Context, sym string, in strategy.Input) {
 func (e *Engine) applyRetarget(p exchange.Position, in strategy.Input) {
 	sym := p.Symbol
 	delete(e.retargetDue, sym)
+	r, ok := e.Strategy.(strategy.Retargeter)
+	if !ok { // owed by a run whose strategy had it
+		e.note(journal.Retarget, sym, "retarget owed dropped: the strategy does not implement Retargeter")
+		return
+	}
 	in.Position = e.view(p)
 	cur := e.targets[sym]
-	next := e.Strategy.(strategy.Retargeter).Retarget(in)
+	next := r.Retarget(in)
 	switch {
 	case next == 0:
 		return

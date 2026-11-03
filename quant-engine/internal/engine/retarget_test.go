@@ -360,3 +360,20 @@ func TestOwedRetargetIsMadeBeforeTheTargetCheck(t *testing.T) {
 		t.Fatalf("target %v, want %v", e.Targets()["AAA"], p.AvgPrice*1.10)
 	}
 }
+
+// A retarget owed by a run whose strategy had Retargeter, restored for one
+// that has not: dropped and journaled, no panic.
+func TestOwedRetargetWithoutRetargeterIsDropped(t *testing.T) {
+	var told []float64
+	s := answering(&told, entryAt(0))
+	cs := retargetCandles()
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs}})
+	e := retargetRun(t, s, f, f, cs, 2, func(k int, e *Engine) {
+		if k == 1 {
+			e.RestoreRetarget([]string{"AAA"})
+		}
+	})
+	if len(e.RetargetDue()) != 0 || !strings.Contains(retargets(e), "retarget owed dropped") {
+		t.Fatalf("owed %v, journal %q; want it dropped and journaled", e.RetargetDue(), retargets(e))
+	}
+}
