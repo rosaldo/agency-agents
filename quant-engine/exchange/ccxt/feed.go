@@ -52,6 +52,11 @@ func (a *Adapter) Subscribe(ctx context.Context, env exchange.Env, symbols []str
 	if err != nil {
 		return nil, err
 	}
+	if p, ok := a.opt.Feed.(interface{ Prepare() error }); ok { // what the watchers would otherwise set up concurrently
+		if err := p.Prepare(); err != nil {
+			return nil, errors.New("ccxt: candle stream: " + err.Error())
+		}
+	}
 	out := make(chan exchange.Boundary, 64)
 	l := &link{out: out}
 	var wg sync.WaitGroup

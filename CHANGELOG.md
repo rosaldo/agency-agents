@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.54.4** (2026-11-02) · `fix` — quant-engine: hyperliquid candle stream: markets and the stream client set up once before the watchers (concurrent first watches raced inside the fork); the recorded candle messages tested through the fork's parser over a loopback wss stream
 - **v1.54.3** (2026-11-02) · `chore` — quant-engine: gofmt the FeedTicker race tests
 - **v1.54.2** (2026-11-02) · `test` — quant-engine: engine test: a REST candle newer than the one the stream ended takes no decision (candle_not_final)
 - **v1.54.1** (2026-11-02) · `test` — quant-engine: FeedTicker tests: a boundary after the deadline wakes no extra step, a boundary at the deadline instant is one step, a boundary before the local close waits for it

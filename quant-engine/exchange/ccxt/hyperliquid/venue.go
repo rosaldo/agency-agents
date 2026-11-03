@@ -140,7 +140,25 @@ func dialFeed(symbols []string) (ccxt.Watcher, error) {
 	x := pro.NewHyperliquid(map[string]any{"streaming": map[string]any{"keepAlive": feedKeepAlive.Milliseconds()}})
 	fm, _ := marketsFor(symbols)
 	x.Options.Store("fetchMarkets", fm)
-	return x, nil
+	return feedClient{x}, nil
+}
+
+// feedClient is the Pro client the symbols' watchers share.
+type feedClient struct{ *pro.Hyperliquid }
+
+// Prepare loads the markets and opens the stream's client once, before the
+// watchers start: each watch would do both lazily, and concurrent first
+// watches race inside the fork (its markets and its client map).
+func (f feedClient) Prepare() error {
+	if _, err := f.LoadMarkets(); err != nil {
+		return err
+	}
+	ws, _ := f.Urls["api"].(map[string]any)["ws"].(map[string]any)
+	url, _ := ws["public"].(string)
+	if f.Client(url) == nil {
+		return errors.New("hyperliquid: candle stream client not built for " + url)
+	}
+	return nil
 }
 
 // check refuses, before trading: swap symbols of more than

@@ -3,6 +3,7 @@ module github.com/rosaldo/agency-agents/quant-engine
 go 1.25.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/rosaldo/ccxt/v5 v5.0.2
 	go.yaml.in/yaml/v3 v3.0.5
 )
@@ -20,7 +21,6 @@ require (
 	github.com/ethereum/go-ethereum v1.17.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
