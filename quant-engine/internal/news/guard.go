@@ -23,7 +23,7 @@ type Verdict struct {
 	Yes   float64
 }
 
-// Classifier classifies a headline. It is a port: the engine wires the one
+// Classifier classifies a headline, given as its title and description. It is a port: the engine wires the one
 // the strategy's news policy names.
 type Classifier interface {
 	Classify(ctx context.Context, state string, q Question) (Verdict, error)
@@ -32,6 +32,7 @@ type Classifier interface {
 // Finding is one headline the keyword pre-filter matched for a symbol.
 type Finding struct {
 	Symbol, Headline, Feed string
+	ClassifierText         string    // what the classifier was given: with Feed, what identifies the headline
 	At                     time.Time // the headline's time; the check's when undated
 	Until                  time.Time // At + lookback: while a catastrophe blocks entries
 	Classified             bool      // the classifier answered
@@ -83,25 +84,27 @@ func (g *Guard) Check(ctx context.Context, symbol string, at time.Time) ([]Findi
 }
 
 func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
-	key := h.Feed + "\n" + h.Text
+	key := h.Feed + "\n" + h.ClassifierText
 	g.mu.Lock()
 	f, ok := g.seen[key]
 	g.mu.Unlock()
 	if ok && f.Until.After(at) {
 		return f
 	}
-	f = Finding{Headline: h.Text, Feed: h.Feed, At: at, Catastrophe: true}
+	f = Finding{Headline: h.Text, ClassifierText: h.ClassifierText, Feed: h.Feed, At: at, Catastrophe: true}
 	if !h.When.IsZero() {
 		f.At = h.When
 	}
 	f.Until = f.At.Add(g.RSS.Lookback)
-	if g.Classifier != nil {
+	if g.Classifier != nil && h.PastTheCap {
+		f.Err = fmt.Errorf("the matched words are past the first %d characters, all the classifier reads", MaxClassifierText)
+	} else if g.Classifier != nil {
 		timeout := g.Timeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
 		cctx, cancel := context.WithTimeout(ctx, timeout)
-		f.Verdict, f.Err = g.Classifier.Classify(cctx, h.Text, g.Question)
+		f.Verdict, f.Err = g.Classifier.Classify(cctx, h.ClassifierText, g.Question)
 		cancel()
 		f.Classified = f.Err == nil
 		f.Catastrophe = f.Err != nil || f.Verdict.Yes >= g.Threshold

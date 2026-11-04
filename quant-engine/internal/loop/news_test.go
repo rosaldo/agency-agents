@@ -294,3 +294,47 @@ func TestAHeadlineJudgedAgainAfterTheLookbackExitsAgain(t *testing.T) {
 		t.Fatalf("buys at %v, emergency exits at %v; want an entry and its exit at %v and again at %v", buys, exits, cs[0].Time, cs[2].Time)
 	}
 }
+
+type alwaysNoise struct{}
+
+func (alwaysNoise) Classify(context.Context, string, news.Question) (news.Verdict, error) {
+	return news.Verdict{Model: "fake", Yes: 0.1}, nil
+}
+
+// The worker hands each judged text over once: the same title with another
+// description is another headline, so a later catastrophe told only in the
+// description is not lost to the first verdict on that title.
+func TestWorkerHandsOverTheSameTitleWithAnotherDescription(t *testing.T) {
+	var desc atomic.Value
+	desc.Store("AAA exchange hack")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "<rss><channel><item><title>Markets update</title><description>"+desc.Load().(string)+"</description></item></channel></rss>")
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startNewsWorker(ctx, &news.Guard{RSS: &news.RSS{Feeds: []string{srv.URL}, Keywords: []string{"hack"}, Lookback: time.Hour, Client: srv.Client()},
+		Classifier: alwaysNoise{}, Threshold: 0.5})
+	at := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	await := func() newsResult {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			w.check([]string{"AAA"}, at) // dropped while the worker is busy, so asked until answered
+			select {
+			case r := <-w.results():
+				return r
+			case <-deadline:
+				t.Fatal("the worker handed nothing over")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	if r := await(); len(r.found) != 1 || r.found[0].Headline != "Markets update" {
+		t.Fatalf("first result %+v", r)
+	}
+	desc.Store("AAA exchange hack, all funds gone")
+	if r := await(); len(r.found) != 1 || !strings.Contains(r.found[0].ClassifierText, "funds gone") {
+		t.Fatalf("second result %+v", r)
+	}
+}

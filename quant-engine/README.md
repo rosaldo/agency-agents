@@ -174,7 +174,7 @@ Adding an exchange means adding a venue package; the engine itself has no per-ex
 
 ## News guard
 
-The engine provides the mechanism, not the content. With `news_guard: required` the engine reads the strategy's RSS/Atom feeds; a recent headline that names the asset together with one of the strategy's keywords is a hit. The asset's names are its base and that base's aliases; on a HIP-3 symbol (`XYZ-GOOGL/USDC:USDC`) they are the ticker and the dex, each with the aliases under its own key (`aliases: {GOOGL: [google]}` or `{XYZ: [...]}`). Each hit goes to the strategy's classifier, once per headline (feed and text): only the headline is sent. Without a classifier every hit is a catastrophe (keywords alone).
+The engine provides the mechanism, not the content. With `news_guard: required` the engine reads the strategy's RSS/Atom feeds; a recent headline that names the asset together with one of the strategy's keywords is a hit. The asset's names are its base and that base's aliases; on a HIP-3 symbol (`XYZ-GOOGL/USDC:USDC`) they are the ticker and the dex, each with the aliases under its own key (`aliases: {GOOGL: [google]}` or `{XYZ: [...]}`). Keywords match the title and the description, so a hit goes to the strategy's classifier with both, once per headline (feed and text): the title and the description as plain text (no HTML), at most 2000 characters; nothing else is sent. The journal shows the title. A hit whose matched words fall past those 2000 characters counts as a catastrophe without a call: the classifier could not read them. Without a classifier every hit is a catastrophe (keywords alone).
 
 When the check runs depends on `asset_class`:
 

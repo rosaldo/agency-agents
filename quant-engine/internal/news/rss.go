@@ -9,9 +9,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	neturl "net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -42,15 +44,23 @@ type feed struct {
 }
 
 type headline struct {
-	text string
-	when string
+	title, description string
+	when               string
 }
 
-// Hit is a recent headline naming the asset with a keyword.
+// MaxClassifierText caps the text of one headline sent to the classifier, in
+// characters: a whole title and summary fit, a full article pasted in a feed
+// does not reach the paid call.
+const MaxClassifierText = 2000
+
+// Hit is a recent headline naming the asset with a keyword. The keywords match
+// the title and the description, so the classifier reads both.
 type Hit struct {
-	Text string    // the headline (its title)
-	Feed string    // the feed URL without its query and fragment
-	When time.Time // zero when undated
+	Text           string    // the headline for people: its title
+	ClassifierText string    // what the classifier reads: title and description, without HTML, capped
+	PastTheCap     bool      // the matched words fell past the cap: the classifier cannot judge this hit
+	Feed           string    // the feed URL without its query and fragment
+	When           time.Time // zero when undated
 }
 
 // Clear reports whether no recent headline in any feed names symbol's base
@@ -79,8 +89,10 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 			if dated && t.Before(at.Add(-r.Lookback)) {
 				continue // undated headlines count as recent: fail closed
 			}
-			if mentions(h.text, names) && mentions(h.text, r.Keywords) {
-				out = append(out, Hit{Text: firstLine(h.text), Feed: redact(url), When: t})
+			if full := h.title + "\n" + h.description; mentions(full, names) && mentions(full, r.Keywords) {
+				text, cut := classifierText(h)
+				out = append(out, Hit{Text: label(h, text), ClassifierText: text, Feed: redact(url), When: t,
+					PastTheCap: cut && !(mentions(text, names) && mentions(text, r.Keywords))})
 			}
 		}
 	}
@@ -141,14 +153,14 @@ func (r *RSS) fetch(ctx context.Context, rawURL string) ([]headline, error) {
 	}
 	var hs []headline
 	for _, i := range f.Items {
-		hs = append(hs, headline{i.Title + "\n" + i.Description, i.PubDate})
+		hs = append(hs, headline{i.Title, i.Description, i.PubDate})
 	}
 	for _, e := range f.Entries {
 		when := e.Published
 		if when == "" {
 			when = e.Updated
 		}
-		hs = append(hs, headline{e.Title + "\n" + e.Summary, when})
+		hs = append(hs, headline{e.Title, e.Summary, when})
 	}
 	return hs, nil
 }
@@ -177,4 +189,27 @@ func mentions(text string, words []string) bool {
 	return false
 }
 
-func firstLine(s string) string { return strings.SplitN(s, "\n", 2)[0] }
+var htmlTag = regexp.MustCompile(`<[^>]*>`)
+
+// classifierText is the headline's title and description as plain text, cut
+// at MaxClassifierText; cut says it was.
+func classifierText(h headline) (text string, cut bool) {
+	plain := strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(h.description, " "))), " ")
+	text = strings.TrimSpace(strings.TrimSpace(h.title) + "\n" + plain)
+	if r := []rune(text); len(r) > MaxClassifierText {
+		return string(r[:MaxClassifierText]), true
+	}
+	return text, false
+}
+
+// label is the one line journaled for a headline: its title, or the start of
+// its text when the feed gives none.
+func label(h headline, text string) string {
+	if t := strings.TrimSpace(h.title); t != "" {
+		return strings.SplitN(t, "\n", 2)[0]
+	}
+	if r := []rune(text); len(r) > 200 {
+		return string(r[:200])
+	}
+	return text
+}

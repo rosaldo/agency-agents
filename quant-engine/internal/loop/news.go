@@ -51,7 +51,7 @@ func startNewsWorker(ctx context.Context, g *news.Guard) *newsWorker {
 				fs, err := g.Check(ctx, sym, a.at)
 				r := newsResult{symbol: sym, err: err}
 				for _, f := range fs {
-					k := sym + "\n" + f.Feed + "\n" + f.Headline
+					k := sym + "\n" + f.Feed + "\n" + f.ClassifierText
 					if _, ok := handed[k]; !ok {
 						handed[k] = f.Until
 						r.found = append(r.found, f)
