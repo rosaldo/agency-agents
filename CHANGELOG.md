@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.12** (2026-11-03) · `fix` — quant-engine: check refuses feed websocket on an interval the stream does not carry, or with no stream
 - **v1.58.11** (2026-11-03) · `fix` — quant-engine: a news classifier with news_guard none is refused at load: nothing would ever ask it
 - **v1.58.10** (2026-11-03) · `fix` — quant-engine: start says started only after the loop passed its preconditions; a refusal is start's error and status shows it
 - **v1.58.9** (2026-11-03) · `fix` — quant-engine: a yml the parameter hash cannot take (an unquoted true as a key, .inf) is refused at load instead of a panic

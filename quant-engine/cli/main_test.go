@@ -398,3 +398,36 @@ func TestCommandsRefuseAKeyTheHashCannotTake(t *testing.T) {
 		}
 	}
 }
+
+// check refuses feed: websocket where the loop would: no stream, or an
+// interval the stream does not carry. Without websocket nothing changes.
+func TestCheckRefusesAFeedTheStreamCannotServe(t *testing.T) {
+	_, path := writeConfig(t)
+	base, _ := os.ReadFile(path)
+	dial := func(map[string]string, bool, []string) (ccxtx.Client, error) { return nil, nil }
+	dialFeed := func([]string) (ccxtx.Watcher, error) { return nil, nil }
+	stream := ccxtx.Venue{ID: "hyperliquid", Dial: dial, DialFeed: dialFeed, FeedIntervals: []time.Duration{time.Hour}}
+	noStream := ccxtx.Venue{ID: "hyperliquid", Dial: dial}
+	for name, tc := range map[string]struct {
+		venue    ccxtx.Venue
+		exchange string
+		interval string
+		feed     string
+		want     string // "" = ok
+	}{
+		"carried":            {stream, "hyperliquid", "1h", "websocket", ""},
+		"not carried":        {stream, "hyperliquid", "7m", "websocket", "does not carry interval 7m"},
+		"no stream":          {noStream, "hyperliquid", "1h", "websocket", "candle stream"},
+		"fake has no stream": {stream, "fake", "1h", "websocket", "candle stream"},
+		"rest, any interval": {noStream, "hyperliquid", "7m", "rest", ""},
+	} {
+		y := strings.NewReplacer("exchange: fake", "exchange: "+tc.exchange, "interval: 1h", "interval: "+tc.interval).Replace(string(base)) + "feed: " + tc.feed + "\n"
+		if err := os.WriteFile(path, []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := App{Strategy: renamed{example.New()}, Version: "test", Venue: tc.venue}.Run([]string{"check", "--config", path}, &bytes.Buffer{})
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+}

@@ -100,6 +100,20 @@ func candleFeed(ex exchange.Exchange) (exchange.CandleFeed, bool) {
 	return f, ok
 }
 
+// CheckFeedIntervals refuses feed: websocket when the adapter's candle stream
+// carries the given intervals (none: no stream) and not the yml's.
+func CheckFeedIntervals(cfg *config.Config, intervals []time.Duration) error {
+	switch {
+	case cfg.Feed != "websocket":
+		return nil
+	case len(intervals) == 0:
+		return errors.New("feed: websocket needs an adapter with a candle stream; this one has none (use feed: rest)")
+	case !slices.Contains(intervals, cfg.Interval()):
+		return fmt.Errorf("feed: websocket: the venue's candle stream does not carry interval %s (use feed: rest or one of %v)", cfg.IntervalSpec, intervals)
+	}
+	return nil
+}
+
 // checkFeed refuses, at load, feed: websocket on an adapter without a candle
 // stream or with an interval its stream does not carry, or without the
 // FeedTicker to pace on it.
@@ -108,12 +122,12 @@ func checkFeed(cfg *config.Config, ex exchange.Exchange, tick Ticker) (exchange.
 		return nil, nil, nil
 	}
 	f, ok := candleFeed(ex)
-	if !ok || len(f.FeedIntervals()) == 0 {
-		return nil, nil, errors.New("feed: websocket needs an adapter with a candle stream; this one has none (use feed: rest)")
+	var intervals []time.Duration
+	if ok {
+		intervals = f.FeedIntervals()
 	}
-	if !slices.Contains(f.FeedIntervals(), cfg.Interval()) {
-		return nil, nil, fmt.Errorf("feed: websocket: the venue's candle stream does not carry interval %s (use feed: rest or one of %v)",
-			cfg.IntervalSpec, f.FeedIntervals())
+	if err := CheckFeedIntervals(cfg, intervals); err != nil {
+		return nil, nil, err
 	}
 	ft, ok := tick.(*FeedTicker)
 	if !ok {
