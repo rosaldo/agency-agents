@@ -191,12 +191,13 @@ func UnsearchableAlias(symbol string, aliases map[string][]string) (string, bool
 }
 
 // IgnoredAliasKey finds a key of aliases the guard never reads, for any symbol:
-// base, ticker and dex are all looked up in uppercase, so a key that is not
-// uppercase is dead. An uppercase key of no configured symbol is not reported:
+// base, ticker and dex are all looked up in uppercase and none holds a
+// separator, so a key in lowercase or in the form of a symbol is dead. Any other
+// key of no configured symbol is not reported:
 // one policy may list more assets than a run trades.
 func IgnoredAliasKey(aliases map[string][]string) (string, bool) {
 	for _, k := range slices.Sorted(maps.Keys(aliases)) {
-		if k != strings.ToUpper(k) {
+		if k != strings.ToUpper(k) || strings.ContainsAny(k, "-/:") {
 			return k, true
 		}
 	}

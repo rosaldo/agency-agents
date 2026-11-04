@@ -259,6 +259,8 @@ func TestIgnoredAliasKeyAgreesWithTheLookup(t *testing.T) {
 		{"XYZ-GOOGL/USDC:USDC", "GOOGL"}, {"XYZ-GOOGL/USDC:USDC", "googl"},
 		{"XYZ-GOOGL/USDC:USDC", "XYZ"}, {"XYZ-GOOGL/USDC:USDC", "xyz"},
 		{"xyz-GOOGL/USDC:USDC", "XYZ"}, {"xyz-GOOGL/USDC:USDC", "xyz"},
+		{"XYZ-GOOGL/USDC:USDC", "XYZ-GOOGL"}, {"XYZ-GOOGL/USDC:USDC", "XYZ-GOOGL/USDC:USDC"},
+		{"BTC/USDC:USDC", "BTC/USDC"}, {"BTC/USDC:USDC", "BTC/USDC:USDC"}, {"BTC/USDC:USDC", "BTC:USDC"},
 	} {
 		aliases := map[string][]string{tc.key: {"zebracoin"}}
 		r := &RSS{Feeds: []string{srv.URL}, Keywords: testKeywords, Aliases: aliases, Lookback: time.Hour, Client: srv.Client()}

@@ -246,6 +246,8 @@ func TestAliasKeyTheGuardNeverReadsIsRefused(t *testing.T) {
 		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"xyz": {"google"}}, `"xyz"`},
 		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"googl": {"google"}}, `"googl"`},
 		{on, "S/USDC:USDC", feeds, map[string][]string{"s": {"sonic"}}, `"s"`},
+		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"XYZ-GOOGL": {"google"}}, "GOOGL or XYZ"},
+		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC/USDC:USDC": {"bitcoin"}}, `"BTC/USDC:USDC"`},
 
 		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC": {"bitcoin"}}, ""},
 		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC": {"btc"}, "ETH": {"ethereum"}}, ""},

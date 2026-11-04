@@ -156,7 +156,7 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		c.news = &p
 		if c.NewsGuard == "required" && len(p.Feeds) > 0 {
 			if key, bad := news.IgnoredAliasKey(p.Aliases); bad {
-				return nil, fmt.Errorf("config: strategy %s: alias key %q is never read: the news guard looks keys up in uppercase, tickers and dexes alike; write it as %q", s.Name(), key, strings.ToUpper(key))
+				return nil, fmt.Errorf("config: strategy %s: alias key %q is never read: a key is one uppercase name, the base or, on HIP-3, the ticker or the dex (for XYZ-GOOGL/USDC:USDC: GOOGL or XYZ)", s.Name(), key)
 			}
 			for _, sym := range c.Symbols {
 				if name := news.NameNeedingAlias(sym, p.Aliases); name != "" {
