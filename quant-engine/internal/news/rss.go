@@ -32,7 +32,8 @@ type RSS struct {
 }
 
 type feed struct {
-	Items []struct {
+	XMLName xml.Name // the root: only rss and feed are read, so another format is not an empty feed
+	Items   []struct {
 		Title       string `xml:"title"`
 		Description string `xml:"description"`
 		PubDate     string `xml:"pubDate"`
@@ -223,6 +224,9 @@ func (r *RSS) fetch(ctx context.Context, rawURL string) ([]headline, error) {
 	var f feed
 	if err := xml.NewDecoder(io.LimitReader(resp.Body, 5<<20)).Decode(&f); err != nil {
 		return nil, fmt.Errorf("news feed %s: not RSS or Atom: %w", url, err)
+	}
+	if root := f.XMLName.Local; root != "rss" && root != "feed" {
+		return nil, fmt.Errorf("news feed %s: not RSS or Atom: root element <%s>", url, root)
 	}
 	var hs []headline
 	for _, i := range f.Items {

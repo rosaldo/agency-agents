@@ -12,12 +12,24 @@ import (
 
 var at = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
+// feedBodies are well-formed XML answers: some a feed, some not.
+var feedBodies = map[string]string{
+	"rdf":       `<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"><channel><title>f</title></channel><item><title>AAA hack</title></item></rdf:RDF>`,
+	"xhtml":     `<html><body><p>AAA hack</p></body></html>`,
+	"emptyrss":  `<rss version="2.0"><channel></channel></rss>`,
+	"emptyatom": `<feed xmlns="http://www.w3.org/2005/Atom"></feed>`,
+	"prefixed":  `<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:entry><atom:title>AAA hack</atom:title></atom:entry></atom:feed>`,
+}
+
 func server(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("../../testdata")))
 	mux.HandleFunc("/broken", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", 500) })
 	mux.HandleFunc("/garbage", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<rss><channel><item>")) })
+	for path, body := range feedBodies {
+		mux.HandleFunc("/"+path, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
+	}
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
@@ -66,6 +78,26 @@ func TestFeedFailuresAreErrors(t *testing.T) {
 		if _, _, err := checker(srv, "news_rss.xml", f).Clear(context.Background(), "ZZZ/USDT", at); err == nil {
 			t.Errorf("%s: a failing feed must be an error (fail-closed upstream)", f)
 		}
+	}
+}
+
+// Well-formed XML that is neither RSS 2.0 nor Atom fails like a feed that is
+// down, and a real feed with no items is clear; the root says which is which.
+func TestOnlyRSSAndAtomRootsAreFeeds(t *testing.T) {
+	srv := server(t)
+	for _, f := range []string{"rdf", "xhtml"} {
+		ok, _, err := checker(srv, f).Clear(context.Background(), "AAA/USDT", at)
+		if ok || err == nil || !strings.Contains(err.Error(), "not RSS or Atom") {
+			t.Errorf("%s: clear = %v, err = %v; want the failure of an unreadable feed", f, ok, err)
+		}
+	}
+	for _, f := range []string{"emptyrss", "emptyatom"} {
+		if ok, _, err := checker(srv, f).Clear(context.Background(), "AAA/USDT", at); !ok || err != nil {
+			t.Errorf("%s: clear = %v, err = %v; a feed with no items is clear", f, ok, err)
+		}
+	}
+	if ok, _, err := checker(srv, "prefixed").Clear(context.Background(), "AAA/USDT", at); ok || err != nil {
+		t.Errorf("Atom under a namespace prefix: clear = %v, err = %v; want its headline read", ok, err)
 	}
 }
 
