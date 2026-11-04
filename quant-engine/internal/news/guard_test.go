@@ -121,6 +121,7 @@ func TestFailureTable(t *testing.T) {
 		"jev down":              {jev: &jev{status: 503}, key: testKey, catastrophe: true},
 		"jev timeout":           {jev: &jev{answer: answer(0.1), delay: time.Second}, key: testKey, catastrophe: true},
 		"jev error":             {jev: &jev{status: 400}, key: testKey, catastrophe: true},
+		"jev 402":               {jev: &jev{status: 402}, key: testKey, catastrophe: true}, // no credit at OpenRouter
 		"jev 429":               {jev: &jev{status: 429}, key: testKey, catastrophe: true},
 		"jev 529":               {jev: &jev{status: 529}, key: testKey, catastrophe: true},
 		"jev malformed answer":  {jev: &jev{answer: `{"model":"jev-1.14.0","answers":{}}`}, key: testKey, catastrophe: true},
