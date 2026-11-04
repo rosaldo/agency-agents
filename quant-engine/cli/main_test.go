@@ -117,9 +117,10 @@ func TestTheYmlMustNameTheBinarysVenue(t *testing.T) {
 	var got dialed
 	app := testApp()
 	app.Venue = testVenue("hyperliquid", false, &got)
+	equity := strings.NewReplacer("exchange: fake", "exchange: hyperliquid", "asset_class: crypto", "asset_class: equity", "symbols: [AAA]", "symbols: [XYZ-AAA/USDC:USDC]").Replace(cfg)
 	for body, want := range map[string]string{
-		strings.Replace(cfg, "exchange: fake", "exchange: okx", 1):                                                   "built for \"hyperliquid\"",
-		strings.Replace(cfg, "exchange: fake\nasset_class: crypto", "exchange: hyperliquid\nasset_class: equity", 1): "equity",
+		strings.Replace(cfg, "exchange: fake", "exchange: okx", 1): "built for \"hyperliquid\"",
+		equity: "lists no equity",
 	} {
 		if _, err := app.load(writeYML(t, body)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("err %v, want it naming %s", err, want)
@@ -129,7 +130,7 @@ func TestTheYmlMustNameTheBinarysVenue(t *testing.T) {
 		t.Error("a binary without a venue accepted an exchange")
 	}
 	app.Venue.Equity = true
-	c, err := app.load(writeYML(t, strings.Replace(cfg, "exchange: fake\nasset_class: crypto", "exchange: hyperliquid\nasset_class: equity", 1)))
+	c, err := app.load(writeYML(t, equity))
 	if err != nil || c.NewsGuard != "required" {
 		t.Fatalf("equity on an equity venue: %v, news_guard %q", err, c.NewsGuard)
 	}

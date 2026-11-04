@@ -135,3 +135,25 @@ func TestClassifierWithoutTheGuardIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// An equity's news guard searches the ticker of a HIP-3 symbol: any other
+// symbol is refused rather than left with a guard that finds nothing.
+func TestEquitySymbolMustBeHIP3(t *testing.T) {
+	y := strings.NewReplacer("exchange: fake", "exchange: hyperliquid", "asset_class: crypto", "asset_class: equity").Replace(validYAML) + "sim: {liquidity_class: major}\n"
+	for symbol, ok := range map[string]bool{
+		"XYZ-GOOGL/USDC:USDC": true,
+		"XYZ-BRK.B/USDC:USDC": false,
+		"XYZ-BRK-B/USDC:USDC": false,
+		"GOOGL/USDC:USDC":     false,
+		"XYZ-GOOGL":           false,
+	} {
+		_, err := Parse([]byte(strings.Replace(y, "[AAA-USD]", "[\""+symbol+"\"]", 1)), example.New())
+		if ok && err != nil || !ok && (err == nil || !strings.Contains(err.Error(), "XYZ-GOOGL/USDC:USDC")) {
+			t.Errorf("%s: err = %v", symbol, err)
+		}
+	}
+	// a crypto on the same venue keeps any symbol
+	if _, err := Parse([]byte(strings.Replace(y, "asset_class: equity", "asset_class: crypto", 1)), example.New()); err != nil {
+		t.Errorf("crypto: %v", err)
+	}
+}

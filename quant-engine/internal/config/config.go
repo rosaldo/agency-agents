@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
 
@@ -239,6 +240,13 @@ func (c *Config) validate() error {
 	}
 	if c.NewsGuard == "" { // equities check news before entering; crypto news lags the price
 		c.NewsGuard = map[string]string{"crypto": "none", "equity": "required"}[c.AssetClass]
+	}
+	if c.AssetClass == "equity" && c.Exchange != "fake" { // the fake adapter's symbols are made up
+		for _, sym := range c.Symbols {
+			if _, _, ok := market.HIP3(sym); !ok {
+				return fmt.Errorf("asset_class equity: symbol %q is not in the form DEX-TICKER/QUOTE:SETTLE with letters and digits only, such as XYZ-GOOGL/USDC:USDC: the news guard could not search its ticker", sym)
+			}
+		}
 	}
 	if c.interval, err = time.ParseDuration(c.IntervalSpec); err != nil || c.interval <= 0 {
 		return fmt.Errorf("interval %q must be a positive duration such as 15m or 1h", c.IntervalSpec)
