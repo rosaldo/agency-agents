@@ -320,6 +320,13 @@ func stopRequested(dir string) bool {
 // Run is the loop. It returns why it ended, which is also in state.json and
 // the journal.
 func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string) string {
+	return RunReady(parent, cfg, s, ex, env, tick, dir, func() {})
+}
+
+// RunReady is Run that calls ready once, when every precondition passed and
+// just before the first step. If it returns without having called ready, the
+// loop never ran and the returned reason says why.
+func RunReady(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string, ready func()) string {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "state dir: " + err.Error()
 	}
@@ -487,7 +494,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 			record(journal.Limit, note)
 		}
 		restored = true
-		reason = run(ctx, en, ex, env, tick, dir, record, save, nw, onNews)
+		reason = run(ctx, en, ex, env, tick, dir, record, save, nw, onNews, ready)
 	}
 	cancel()
 	<-beatDone
@@ -528,7 +535,7 @@ func Run(parent context.Context, cfg *config.Config, s strategy.Strategy, ex exc
 }
 
 func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, tick Ticker, dir string,
-	record func(kind, reason string), save func(func(*State)), nw *newsWorker, onNews func(newsResult)) string {
+	record func(kind, reason string), save func(func(*State)), nw *newsWorker, onNews func(newsResult), ready func()) string {
 	ended := func() string { return endedReason(dir) }
 	if err := en.ConfigureMarkets(ctx); err != nil { // before any order, reconcile included
 		if ctx.Err() != nil {
@@ -542,6 +549,7 @@ func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env excha
 		}
 		return "reconcile failed: " + err.Error()
 	}
+	ready()
 	var lastBeat time.Time
 	for {
 		if ctx.Err() != nil || stopRequested(dir) {
@@ -639,8 +647,12 @@ func ReadStatus(dir string) (Status, error) {
 	if err := CheckRenamed(dir); err != nil {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
+	refused := startRefusal(dir)
 	st, err := lastState(dir)
 	if errors.Is(err, os.ErrNotExist) {
+		if refused != "" {
+			return Status{StopReason: refused}, nil
+		}
 		return Status{StopReason: "never started"}, nil
 	}
 	if err != nil {
@@ -665,7 +677,37 @@ func ReadStatus(dir string) (Status, error) {
 	if st.Running && !s.Alive {
 		s.StopReason = "loop died without stopping (stale heartbeat); positions keep their exchange stops"
 	}
+	if refused != "" && !s.Alive { // the last start, newer than what the state says of the last run
+		s.StopReason = refused
+	}
 	return s, nil
+}
+
+func refusalPath(dir string) string { return filepath.Join(dir, "start-refused") }
+
+// SaveRefusal keeps why the last start did not start the loop, for status:
+// a refused start may leave no state file, or one of an older run.
+func SaveRefusal(dir, reason string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(refusalPath(dir), []byte(reason), 0o600)
+}
+
+// ClearRefusal forgets it: the loop came up.
+func ClearRefusal(dir string) error {
+	if err := os.Remove(refusalPath(dir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func startRefusal(dir string) string {
+	b, err := os.ReadFile(refusalPath(dir))
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	return "start refused: " + strings.TrimPrefix(string(b), "refused: ")
 }
 
 // Locked reports whether a loop holds the state directory's lock.

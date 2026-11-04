@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,4 +196,38 @@ func tickerFrom(f *fake.Fake, cs []market.Candle, i int64) *FakeTicker {
 	t := &FakeTicker{Ex: f, Candles: cs}
 	t.i.Store(i)
 	return t
+}
+
+type noBalance struct{ *fake.Fake }
+
+func (noBalance) Balance(context.Context, exchange.Env) (exchange.Balance, error) {
+	return exchange.Balance{}, errors.New("balance down")
+}
+
+// ready comes once, after every precondition: never on a refusal, however
+// late it is found out, and before the first step of a run that goes on.
+func TestRunReadyOnlyAfterThePreconditions(t *testing.T) {
+	run := func(yml string, wrap func(*fake.Fake) exchange.Exchange) (string, int) {
+		t.Helper()
+		c, st, f, tick, dir := setup(t, "loop_two_days.csv", 0)
+		if yml != "" {
+			var err error
+			if c, err = config.Parse([]byte(cfgYAML+yml), st); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n := 0
+		r := RunReady(context.Background(), c, st, wrap(f), exchange.Demo, tick, dir, func() { n++ })
+		return r, n
+	}
+	plain := func(f *fake.Fake) exchange.Exchange { return f }
+	if r, n := run("feed: websocket\n", plain); n != 0 || !strings.HasPrefix(r, "refused: feed") {
+		t.Errorf("feed refused: ready %d times, reason %q", n, r)
+	}
+	if r, n := run("", func(f *fake.Fake) exchange.Exchange { return noBalance{f} }); n != 0 || !strings.Contains(r, "balance unavailable") {
+		t.Errorf("no balance: ready %d times, reason %q", n, r)
+	}
+	if r, n := run("", plain); n != 1 || r != "candles exhausted" {
+		t.Errorf("a whole run: ready %d times, reason %q", n, r)
+	}
 }

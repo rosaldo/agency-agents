@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -51,7 +52,7 @@ func processGone(pid int) bool {
 // writes into dir when t.TempDir's cleanup removes it.
 func waitGone(t *testing.T, dir string, pid int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second) // its last reads go through the fake's latency
 	for !processGone(pid) {
 		if time.Now().After(deadline) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
@@ -67,7 +68,7 @@ func TestStartStatusStop(t *testing.T) {
 	work, cfgPath := writeConfig(t)
 	dir := filepath.Join(work, ".test-strategy")
 	candles, _ := filepath.Abs("../testdata/loop_two_days.csv")
-	start := []string{"start", "--config", cfgPath, "--dir", dir, "--fake-candles", candles, "--fake-tick", "200ms", "--fake-latency", "5s"}
+	start := []string{"start", "--config", cfgPath, "--dir", dir, "--fake-candles", candles, "--fake-tick", "200ms", "--fake-latency", "1s"}
 
 	if err := testApp().Run(start, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -133,5 +134,68 @@ func TestSecondLoopIsImpossible(t *testing.T) {
 	_ = os.Remove(filepath.Join(dir, "state-paper.json")) // even a lost state file must not allow a second loop
 	if err := testApp().Run(append([]string{"run"}, args...), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second loop: %v", err)
+	}
+}
+
+// A start the loop refuses is an error with the reason, not started:true;
+// status says the same, also over the state of an older run; the next start
+// that works forgets it.
+func TestRefusedStartIsAnErrorAndStatusSaysWhy(t *testing.T) {
+	t.Setenv("TEST_STRATEGY_TEST_MAIN", "1")
+	work, cfgPath := writeConfig(t)
+	dir := filepath.Join(work, ".test-strategy")
+	candles, _ := filepath.Abs("../testdata/loop_two_days.csv")
+	start := []string{"start", "--config", cfgPath, "--dir", dir, "--fake-candles", candles, "--fake-tick", "200ms"}
+	good, _ := os.ReadFile(cfgPath)
+	refuse := func() {
+		t.Helper()
+		if err := os.WriteFile(cfgPath, append(slices.Clone(good), "feed: websocket\n"...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		err := testApp().Run(start, &out)
+		if err == nil || !strings.Contains(err.Error(), "candle stream") || strings.Contains(out.String(), "started") {
+			t.Fatalf("refused start: err %v, stdout %q", err, out.String())
+		}
+		if s := status(t, dir); s["alive"] != false || !strings.Contains(s["stop_reason"].(string), "candle stream") {
+			t.Fatalf("status after a refused start = %v", s)
+		}
+	}
+	refuse() // no state file yet
+
+	if err := os.WriteFile(cfgPath, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := testApp().Run(start, &out); err != nil || !strings.Contains(out.String(), `"started":true`) {
+		t.Fatalf("good start: err %v, stdout %q", err, out.String())
+	}
+	s := status(t, dir)
+	if s["alive"] != true { // started means up: no wait
+		t.Fatalf("status right after started:true = %v", s)
+	}
+	pid := int(s["pid"].(float64))
+	if err := testApp().Run([]string{"stop", "--dir", dir}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	waitGone(t, dir, pid)
+	if s := status(t, dir); !strings.Contains(s["stop_reason"].(string), "stop command") {
+		t.Fatalf("status after a good run = %v, the old refusal was not forgotten", s)
+	}
+
+	refuse() // over the state of the run above
+}
+
+// A failed mainnet gate is a refused start too; a running loop is not.
+func TestStatusAfterAGateRefusal(t *testing.T) {
+	work, cfgPath := writeConfig(t)
+	dir := filepath.Join(work, "s")
+	b, _ := os.ReadFile(cfgPath)
+	_ = os.WriteFile(cfgPath, append(b, "mode: mainnet\n"...), 0o600)
+	if err := testApp().Run([]string{"start", "--config", cfgPath, "--dir", dir}, &bytes.Buffer{}); err == nil {
+		t.Fatal("mainnet start passed the gate")
+	}
+	if s := status(t, dir); !strings.Contains(s["stop_reason"].(string), "mainnet refused") {
+		t.Fatalf("status = %v", s)
 	}
 }

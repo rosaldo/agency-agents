@@ -368,19 +368,26 @@ func anySet(prefix string, suffixes []string) bool {
 }
 
 // start launches `run` in the background and waits until that process
-// reports it holds the loop lock and, in mainnet, passed the gates and got the
-// typed confirmation itself. A second loop on the same directory is refused.
-func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags, stdout io.Writer) error {
+// reports it holds the loop lock, passed the loop's preconditions and, in
+// mainnet, passed the gates and got the typed confirmation itself. A refusal
+// is start's error and status shows it. A second loop on the same directory
+// is refused.
+func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags, stdout io.Writer) (err error) {
 	if err := loop.CheckRenamed(dir); err != nil {
 		return err
 	}
+	if loop.Locked(dir) {
+		return errors.New("already running; run stop first")
+	}
+	defer func() {
+		if err != nil {
+			_ = loop.SaveRefusal(dir, err.Error())
+		}
+	}()
 	if cfg.Mode == "mainnet" {
 		if err := gate.CheckLive(cfg, filepath.Join(dir, "journal.jsonl")); err != nil {
 			return err
 		}
-	}
-	if loop.Locked(dir) {
-		return errors.New("already running; run stop first")
 	}
 	if cfg.Exchange == "fake" { // a CCXT adapter is checked by the loop itself, once
 		if _, _, err := a.newExchange(cfg, fk, dir); err != nil {
@@ -435,7 +442,7 @@ func (a App) start(cfg *config.Config, dir string, flags []string, fk fakeFlags,
 			return errors.New(strings.TrimPrefix(l, "error: "))
 		}
 	case <-time.After(confirmTimeout + time.Minute):
-		return errors.New("start: the loop did not report ready; see " + filepath.Join(dir, "engine.log"))
+		return errors.New("start: the loop did not report ready in time and may still come up: run status; see " + filepath.Join(dir, "engine.log"))
 	}
 	if err := os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		return err
@@ -451,7 +458,7 @@ func (a App) ready(msg string) {
 		return
 	}
 	f := os.NewFile(3, "ready")
-	_, _ = f.WriteString(msg + "\n")
+	_, _ = f.WriteString(strings.Join(strings.Fields(msg), " ") + "\n") // start reads one line
 	f.Close()
 }
 
@@ -484,10 +491,18 @@ func (a App) runLoop(cfg *config.Config, dir string, fk fakeFlags, stdout io.Wri
 		}
 		ignoreHangup()
 	}
-	a.ready("ready " + cfg.Level())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	_, err = fmt.Fprintln(stdout, loop.Run(ctx, cfg, a.Strategy, ex, env(cfg), tick, dir))
+	started := false
+	reason := loop.RunReady(ctx, cfg, a.Strategy, ex, env(cfg), tick, dir, func() {
+		started = true
+		_ = loop.ClearRefusal(dir)
+		a.ready("ready " + cfg.Level())
+	})
+	if !started {
+		return errors.New(reason)
+	}
+	_, err = fmt.Fprintln(stdout, reason)
 	return err
 }
 
