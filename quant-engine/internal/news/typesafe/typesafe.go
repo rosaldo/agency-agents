@@ -35,7 +35,8 @@ type Client struct {
 	Key    config.Secret // empty: every call fails, naming KeyVar
 	KeyVar string        // the environment variable the key comes from
 	HTTP   *http.Client
-	// Backoff is the wait before retrying a 429 (rate limited) or a 529
+	// Backoff is the wait before retrying a 429 (rate limited), a 502 or 503
+	// (a passing failure, above all with a router in the way) or a 529
 	// (overloaded), doubled at each retry, at most retries times and never
 	// past ctx's deadline: a classification stays within its timeout.
 	// 0 = 250ms.
@@ -94,7 +95,7 @@ func (c *Client) Classify(ctx context.Context, state string, q news.Question) (n
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return news.Verdict{}, fmt.Errorf("%s: HTTP %d", c.name(), resp.StatusCode) // 429 or 529 after the retries, 401, ...
+		return news.Verdict{}, fmt.Errorf("%s: HTTP %d", c.name(), resp.StatusCode) // a retryable status after the retries, 401, 402, ...
 	}
 	var r response
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r); err != nil {
@@ -128,8 +129,16 @@ func (c *Client) post(ctx context.Context, body []byte) (*http.Response, error) 
 	return resp, err
 }
 
-// retryable is a status the API asks to retry with exponential backoff.
-func retryable(status int) bool { return status == http.StatusTooManyRequests || status == 529 }
+// retryable is a status worth retrying with exponential backoff: a passing
+// failure must not read as a catastrophe. 401 and 402 are not: waiting brings
+// neither a valid key nor credit back.
+func retryable(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, 529:
+		return true
+	}
+	return false
+}
 
 // fits says a wait leaves ctx time for one more request.
 func fits(ctx context.Context, wait time.Duration) bool {

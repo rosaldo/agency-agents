@@ -61,11 +61,11 @@ func TestOpenRouterAnswerIsRead(t *testing.T) {
 	}
 }
 
-// Every failing status OpenRouter documents is an error naming the provider,
-// asked once and without the key, even when the body echoes it. 402 (no
-// credit) above all: waiting does not bring credit back.
+// A failing status OpenRouter documents and no wait can cure is an error naming
+// the provider, asked once and without the key, even when the body echoes it.
+// 402 (no credit) above all: waiting does not bring credit back.
 func TestOpenRouterFailuresAreErrors(t *testing.T) {
-	for _, status := range []int{400, 401, 402, 403, 408, 502, 503} {
+	for _, status := range []int{400, 401, 402, 403, 408} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var calls atomic.Int32
 			url := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -84,18 +84,32 @@ func TestOpenRouterFailuresAreErrors(t *testing.T) {
 	}
 }
 
-// A 429 is retried at OpenRouter as at TypeSafe.
-func TestOpenRouterRateLimitIsRetried(t *testing.T) {
-	var calls atomic.Int32
-	url := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 {
-			http.Error(w, "slow down", http.StatusTooManyRequests)
-			return
-		}
-		_, _ = io.WriteString(w, orAnswer)
-	})
-	if _, err := orClient(url).Classify(context.Background(), "state", orQuestion); err != nil || calls.Load() != 2 {
-		t.Fatalf("err %v after %d requests; want the second to pass", err, calls.Load())
+// A passing 429, 502 or 503 gets the verdict; one that lasts is an error after
+// the retries, naming the provider and without the key.
+func TestOpenRouterPassingFailuresAreRetried(t *testing.T) {
+	for _, status := range []int{429, 502, 503} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var calls atomic.Int32
+			url := serve(t, func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) == 1 {
+					http.Error(w, "passing", status)
+					return
+				}
+				_, _ = io.WriteString(w, orAnswer)
+			})
+			if _, err := orClient(url).Classify(context.Background(), "state", orQuestion); err != nil || calls.Load() != 2 {
+				t.Fatalf("err %v after %d requests; want the second to pass", err, calls.Load())
+			}
+			calls.Store(0)
+			url = serve(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				http.Error(w, orKey, status)
+			})
+			_, err := orClient(url).Classify(context.Background(), "state", orQuestion)
+			if want := fmt.Sprintf("openrouter: HTTP %d", status); err == nil || err.Error() != want || calls.Load() != 4 {
+				t.Fatalf("error %v after %d requests; want %q after 3 retries", err, calls.Load(), want)
+			}
+		})
 	}
 }
 

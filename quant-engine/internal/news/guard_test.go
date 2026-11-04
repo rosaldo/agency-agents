@@ -170,12 +170,37 @@ func TestFailureTable(t *testing.T) {
 	}
 }
 
-// A 429 or a 529 is retried with exponential backoff within the
+// A status no wait can cure is asked once, and is a catastrophe.
+func TestKeyAndCreditFailuresAreNotRetried(t *testing.T) {
+	for _, status := range []int{401, 402} {
+		j := &jev{status: status, answer: answer(0.1)}
+		c := client(j.server(t).URL, testKey)
+		c.Backoff = time.Millisecond
+		fs, err := guard(feedServer(t, "Exchange hack drains BTC reserves", 0).URL, c).Check(context.Background(), "BTC/USDC:USDC", at)
+		if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil || j.calls.Load() != 1 {
+			t.Fatalf("HTTP %d: findings %+v %v, %d calls; want a catastrophe after 1 call", status, fs, err, j.calls.Load())
+		}
+	}
+}
+
+// Retrying a lasting 503 stops at the classification's deadline, as a failure.
+func TestLastingFailureStaysWithinTheDeadline(t *testing.T) {
+	j := &jev{status: 503, answer: answer(0.1)}
+	c := client(j.server(t).URL, testKey)
+	c.Backoff = 80 * time.Millisecond // 80 fits the 200 ms timeout, 160 does not
+	start := time.Now()
+	fs, err := guard(feedServer(t, "Exchange hack drains BTC reserves", 0).URL, c).Check(context.Background(), "BTC/USDC:USDC", at)
+	if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil || j.calls.Load() != 2 || time.Since(start) > time.Second {
+		t.Fatalf("findings %+v %v, %d calls in %v; want a catastrophe after 2 calls, within the timeout", fs, err, j.calls.Load(), time.Since(start))
+	}
+}
+
+// A 429, 502, 503 or 529 is retried with exponential backoff within the
 // classification's timeout: a passing one gets the verdict (noise: no exit);
 // one that lasts past the retries is a failure, so a catastrophe.
 func TestRateLimitIsRetriedWithinTheTimeout(t *testing.T) {
 	const title = "Exchange hack drains BTC reserves"
-	for _, status := range []int{429, 529} {
+	for _, status := range []int{429, 502, 503, 529} {
 		passing := &jev{status: status, fail: 2, answer: answer(0.1)}
 		c := client(passing.server(t).URL, testKey)
 		c.Backoff = 10 * time.Millisecond
