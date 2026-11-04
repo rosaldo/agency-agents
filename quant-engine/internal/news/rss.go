@@ -103,7 +103,8 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 // assetNames is what a headline can call an asset. A short name from the
 // symbol is matched as written (NOT, S, NET and NOW are tickers, not, s, net
 // and now are words); a longer one and every alias in any case. An alias of
-// the same word brings any case back: {BTC: [btc]}.
+// the same word brings any case back: {BTC: [btc]}. A name of one character
+// never matches by itself.
 type assetNames struct{ exact, anyCase []string }
 
 const maxExactName = 4 // characters
@@ -125,9 +126,11 @@ func (r *RSS) names(symbol string) assetNames {
 	}
 	var n assetNames
 	for _, b := range bases {
-		if utf8.RuneCountInString(b) <= maxExactName {
+		switch size := utf8.RuneCountInString(b); {
+		case size == 1: // the S of "U.S." and "S&P": only an alias can name such an asset
+		case size <= maxExactName:
 			n.exact = append(n.exact, b)
-		} else {
+		default:
 			n.anyCase = append(n.anyCase, strings.ToLower(b))
 		}
 		for _, a := range r.Aliases[strings.ToUpper(b)] {
