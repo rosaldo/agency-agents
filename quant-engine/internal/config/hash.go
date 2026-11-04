@@ -16,6 +16,14 @@ import (
 // same parameters share it and any threshold change breaks it. The sim
 // profile and its resolved costs are in it too.
 func (c *Config) ParamsHash() string {
+	h, err := c.paramsHash()
+	if err != nil {
+		panic(err) // Parse refuses a yml that cannot be hashed
+	}
+	return h
+}
+
+func (c *Config) paramsHash() (string, error) {
 	r := c.Risk
 	r.ConfirmedByUser = false
 	symbols := slices.Clone(c.Symbols)
@@ -23,7 +31,7 @@ func (c *Config) ParamsHash() string {
 	var block any // a zero Node (no block) hashes as null
 	if c.StrategyParams.Kind != 0 {
 		if err := c.StrategyParams.Decode(&block); err != nil {
-			panic(err) // the same node already decoded in Parse
+			return "", err
 		}
 	}
 	b, err := json.Marshal(struct {
@@ -41,8 +49,8 @@ func (c *Config) ParamsHash() string {
 	}{c.Exchange, c.Market, c.AssetClass, c.NewsGuard, c.IntervalSpec, c.Timezone, symbols, c.Perp, r, c.name, block, c.news,
 		c.Sim.Profile, c.sim})
 	if err != nil {
-		panic(err) // plain numbers, strings and decoded yml always marshal
+		return "", err
 	}
 	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:])
+	return hex.EncodeToString(h[:]), nil
 }

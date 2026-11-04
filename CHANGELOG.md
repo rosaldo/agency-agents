@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.9** (2026-11-03) · `fix` — quant-engine: a yml the parameter hash cannot take (an unquoted true as a key, .inf) is refused at load instead of a panic
 - **v1.58.8** (2026-11-03) · `fix` — quant-engine: the news classifier reads the title and the description the keywords matched, as plain text up to 2000 characters
 - **v1.58.7** (2026-11-03) · `fix` — quant-engine: the news guard searches a HIP-3 symbol by its ticker and its dex, not by the dex alone
 - **v1.58.6** (2026-11-03) · `test` — quant-engine: an Add filled on the venue without a confirmed fill (answer lost, or rejected without an error) halts and keeps the retarget owed

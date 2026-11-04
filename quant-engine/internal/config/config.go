@@ -150,6 +150,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		}
 		c.news = &p
 	}
+	if _, err := c.paramsHash(); err != nil {
+		return nil, fmt.Errorf("config: a key that is not a string (quote true, false, null and numbers used as keys) or a .inf or .nan value cannot be part of a run's parameters: %s", oneLine(err.Error()))
+	}
 	return &c, nil
 }
 

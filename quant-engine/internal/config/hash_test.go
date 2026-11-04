@@ -6,6 +6,7 @@ import (
 
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
+	"go.yaml.in/yaml/v3"
 )
 
 // named renames a strategy, as a second strategy with the same block would be.
@@ -65,5 +66,40 @@ func TestParamsHash(t *testing.T) {
 	}
 	if hashOf(t, validYAML+"market: swap\nperp: {allow_short: true}\n") == base {
 		t.Error("allowing shorts kept the hash")
+	}
+}
+
+// acceptsAnyBlock stands for a strategy whose Configure takes these blocks
+// (yaml turns the key true into the string "true" for a map[string]string).
+type acceptsAnyBlock struct{ strategy.Strategy }
+
+func (acceptsAnyBlock) Configure(yaml.Node) error { return nil }
+
+// A yml the hash could not take is refused at load, with what to do, so no
+// command gets as far as hashing it. A quoted key is fine.
+func TestParseRefusesWhatCannotBeHashed(t *testing.T) {
+	const block = "exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA-USD]\nrisk: {confirmed_by_user: true}\n"
+	s := acceptsAnyBlock{example.New()}
+	for _, y := range []string{
+		"strategy: {criteria: {true: a, false: b}}\n",
+		"strategy: {1.5: a}\n",
+		"strategy: {[1, 2]: a}\n",
+		"strategy: {list: [{~: a}]}\n",
+		"strategy: {x: .inf}\n",
+		"strategy: {x: .nan}\n",
+	} {
+		if _, err := Parse([]byte(block+y), s); err == nil || !strings.Contains(err.Error(), "quote") {
+			t.Errorf("%s: err = %v, want a refusal saying what to quote", y, err)
+		}
+	}
+	if _, err := Parse([]byte(block+"strategy: {criteria: {\"true\": a, \"false\": b}}\n"), s); err != nil {
+		t.Errorf("quoted keys: %v", err)
+	}
+	if _, err := Parse([]byte(strings.Replace(validYAML, "confirmed_by_user: true", "confirmed_by_user: true\n  max_daily_drawdown_pct: .inf", 1)), example.New()); err == nil || !strings.Contains(err.Error(), ".inf") {
+		t.Errorf("an infinite risk limit: %v", err)
+	}
+	// a repeated key that only the hash's own decode of the block would meet
+	if _, err := Parse([]byte(block+"strategy:\n  a: 1\n  a: 2\n"), s); err == nil || !strings.Contains(err.Error(), "config:") {
+		t.Errorf("a repeated key: %v", err)
 	}
 }

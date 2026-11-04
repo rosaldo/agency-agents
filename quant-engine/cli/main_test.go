@@ -16,6 +16,7 @@ import (
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
+	"go.yaml.in/yaml/v3"
 )
 
 const cfg = `
@@ -366,5 +367,32 @@ func TestCheckWantsTheClassifierKey(t *testing.T) {
 	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", "set")
 	if err := app.Run([]string{"check", "--config", path}, &out); err != nil {
 		t.Fatalf("check with the key: %v", err)
+	}
+}
+
+// acceptsAnyBlock stands for a strategy whose Configure takes the block.
+type acceptsAnyBlock struct{ strategy.Strategy }
+
+func (acceptsAnyBlock) Configure(yaml.Node) error { return nil }
+
+// An unquoted true as a yml key stops check, backtest and start with the same
+// clear error, never a panic.
+func TestCommandsRefuseAKeyTheHashCannotTake(t *testing.T) {
+	work, path := writeConfig(t)
+	b, _ := os.ReadFile(path)
+	y := strings.Replace(string(b), "strategy: {period: 3, stop_pct: 4, target_pct: 5}", "strategy: {criteria: {true: a, false: b}}", 1)
+	if err := os.WriteFile(path, []byte(y), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := App{Strategy: acceptsAnyBlock{renamed{example.New()}}, Version: "test"}
+	for name, args := range map[string][]string{
+		"check":    {"check", "--config", path},
+		"backtest": {"backtest", "--config", path, "--candles", "../testdata/backtest_one_trade.csv", "--capital", "10000", "--out", filepath.Join(work, "bt")},
+		"start":    {"start", "--config", path, "--dir", filepath.Join(work, "s")},
+	} {
+		var out bytes.Buffer
+		if err := app.Run(args, &out); err == nil || !strings.Contains(err.Error(), "quote true") {
+			t.Errorf("%s: err = %v, stdout %q", name, err, out.String())
+		}
 	}
 }
