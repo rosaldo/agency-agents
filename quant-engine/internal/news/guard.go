@@ -96,9 +96,7 @@ func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
 		f.At = h.When
 	}
 	f.Until = f.At.Add(g.RSS.Lookback)
-	if g.Classifier != nil && h.PastTheCap {
-		f.Err = fmt.Errorf("the matched words are past the first %d characters, all the classifier reads", MaxClassifierText)
-	} else if g.Classifier != nil {
+	if g.Classifier != nil {
 		timeout := g.Timeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second

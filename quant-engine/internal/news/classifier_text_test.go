@@ -96,30 +96,100 @@ func TestVerdictIsCachedByTheTextJudged(t *testing.T) {
 	}
 }
 
-// The text is capped in characters. Matched words within the cap are judged;
-// past it the classifier could not read them, so the hit is a catastrophe
-// with no call.
-func TestClassifierTextIsCapped(t *testing.T) {
-	pad := strings.Repeat("é", MaxClassifierText)
-
+// The cap counts characters: text under it in characters goes whole, however
+// many bytes it takes.
+func TestClassifierCapCountsCharacters(t *testing.T) {
 	c := &fakeClassifier{yes: 0.1}
-	items := [][2]string{{"Markets update", "BTC exchange hacked " + pad}}
-	fs, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at)
-	if err != nil || len(fs) != 1 || fs[0].Catastrophe || len(c.states) != 1 {
-		t.Fatalf("within the cap: findings %+v, err %v, calls %d", fs, err, len(c.states))
+	desc := "BTC exchange hacked " + strings.Repeat("é", MaxClassifierText-100)
+	items := [][2]string{{"Markets update", desc}}
+	if _, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at); err != nil {
+		t.Fatal(err)
 	}
-	if n := utf8.RuneCountInString(c.states[0]); n != MaxClassifierText || !utf8.ValidString(c.states[0]) {
-		t.Errorf("classifier read %d characters, want %d, valid", n, MaxClassifierText)
+	if want := "Markets update\n" + desc; len(c.states) != 1 || c.states[0] != want {
+		t.Errorf("text under the cap was changed: %d characters", utf8.RuneCountInString(c.states[0]))
 	}
 
+	// a title over half the cap is kept too while the whole text fits
 	c = &fakeClassifier{yes: 0.1}
-	items = [][2]string{{"Markets update", pad + " BTC exchange hacked"}}
-	fs, err = guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at)
-	if err != nil || len(fs) != 1 || !fs[0].Catastrophe || len(c.states) != 0 {
-		t.Fatalf("past the cap: findings %+v, err %v, calls %d", fs, err, len(c.states))
+	title := strings.Repeat("ú", MaxClassifierText*3/4)
+	items = [][2]string{{title, "BTC exchange hacked"}}
+	if _, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at); err != nil {
+		t.Fatal(err)
 	}
-	if why := fs[0].Why(0.5); !strings.Contains(why, "past the first") {
-		t.Errorf("why: %s", why)
+	if want := title + "\nBTC exchange hacked"; len(c.states) != 1 || c.states[0] != want {
+		t.Errorf("a long title under the cap was cut to %d characters", utf8.RuneCountInString(c.states[0]))
+	}
+
+	// past the cap, a title in many bytes takes no more room than its characters
+	c = &fakeClassifier{yes: 0.1}
+	items = [][2]string{{strings.Repeat("ú", 500) + " BTC hacked", strings.Repeat("é ", MaxClassifierText)}}
+	if _, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at); err != nil {
+		t.Fatal(err)
+	}
+	if n := utf8.RuneCountInString(c.states[0]); n < MaxClassifierText-1 || n > MaxClassifierText { // a trailing space is trimmed
+		t.Errorf("read %d characters, want the whole %d", n, MaxClassifierText)
+	}
+}
+
+// Past the cap the classifier reads the title and what surrounds the matched
+// words, wherever they are, and it always decides: no verdict comes without a call.
+func TestClassifierAlwaysReadsWhatMatched(t *testing.T) {
+	pad := strings.Repeat("é ", MaxClassifierText)
+	for name, tc := range map[string]struct {
+		title, desc string
+		want        []string // in what the classifier reads
+		wantGap     bool     // two pieces
+	}{
+		"both past the cap":     {"Markets update", pad + "Unlike BTC, it was never hacked." + pad, []string{"Markets update", "Unlike BTC, it was never hacked."}, false},
+		"name far from keyword": {"Report", "Exchange hacked. " + pad + "BTC unaffected.", []string{"Report", "Exchange hacked", "BTC unaffected"}, true},
+		"keyword far from name": {"Report", "BTC up. " + pad + "Exchange hacked.", []string{"BTC up", "Exchange hacked"}, true},
+		"the closest pair":      {"Report", "BTC up. " + pad + "BTC exchange hacked." + pad, []string{"BTC exchange hacked"}, false},
+		"a closer pair later":   {"Report", "BTC up. " + pad + "Funds hacked. " + pad + "BTC exchange hacked." + pad, []string{"BTC exchange hacked"}, false},
+		"name in the title":     {"BTC update", pad + "Exchange hacked." + pad, []string{"BTC update", "Exchange hacked"}, false},
+		"keyword in the title":  {"Exchange hacked", pad + "Unlike BTC, fine." + pad, []string{"Exchange hacked", "Unlike BTC, fine."}, false},
+		"both in the title":     {"BTC hacked", "Long story. " + pad, []string{"BTC hacked", "Long story"}, false},
+		"a title over the cap":  {strings.Repeat("ú", 2*MaxClassifierText), pad + "BTC hacked." + pad, []string{"úú", "BTC hacked"}, false},
+		"match cut off a title": {strings.Repeat("ú ", MaxClassifierText) + "BTC hacked", pad, []string{"úú"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &fakeClassifier{yes: 0.1}
+			items := [][2]string{{tc.title, tc.desc}}
+			fs, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at)
+			if err != nil || len(fs) != 1 || len(c.states) != 1 {
+				t.Fatalf("findings %+v, err %v, calls %d", fs, err, len(c.states))
+			}
+			if fs[0].Catastrophe || !fs[0].Classified {
+				t.Errorf("the classifier said noise, the finding says %+v", fs[0])
+			}
+			got := c.states[0]
+			if n := utf8.RuneCountInString(got); n > MaxClassifierText || !utf8.ValidString(got) {
+				t.Errorf("%d characters, valid %v", n, utf8.ValidString(got))
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(strings.ReplaceAll(got, "ú ", "ú"), w) {
+					t.Errorf("%q is not in what the classifier read", w)
+				}
+			}
+			if gap := strings.Contains(got, excerptGap); gap != tc.wantGap {
+				t.Errorf("two pieces: %v, want %v", gap, tc.wantGap)
+			}
+		})
+	}
+}
+
+// An excerpt uses the room it has.
+func TestExcerptFillsItsSize(t *testing.T) {
+	rs := []rune(strings.Repeat("é ", 500) + "BTC hacked" + strings.Repeat(" é", 500))
+	isName, isKeyword := func(w string) bool { return w == "BTC" }, func(w string) bool { return w == "hacked" }
+	if got := excerpt(rs, 100, isName, isKeyword); utf8.RuneCountInString(got) != 100 || !strings.Contains(got, "BTC hacked") {
+		t.Errorf("%d characters: %q", utf8.RuneCountInString(got), got)
+	}
+	end := []rune(strings.Repeat("é ", 500) + "BTC hacked")
+	if got := excerpt(end, 100, isName, isKeyword); utf8.RuneCountInString(got) != 100 || !strings.HasSuffix(got, "BTC hacked") {
+		t.Errorf("at the end, %d characters: %q", utf8.RuneCountInString(got), got)
+	}
+	if got := excerpt(rs, 100, nil, nil); got != string(rs[:100]) {
+		t.Errorf("nothing to find: %q", got)
 	}
 }
 

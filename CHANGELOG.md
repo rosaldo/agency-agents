@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.16** (2026-11-03) · `fix` — quant-engine: past the cap the classifier reads what surrounds the matched words and always decides; no hit is a catastrophe without a call
 - **v1.58.15** (2026-11-03) · `fix` — quant-engine: a name of up to 4 characters from the symbol matches a headline in exact case: tickers such as NOW, NET, NOT and S are also words
 - **v1.58.14** (2026-11-03) · `fix` — quant-engine: the news filter matches a description's text, not the addresses inside its HTML
 - **v1.58.13** (2026-11-03) · `fix` — quant-engine: the backtest's refusal says the truth: derivatives must span the candles, a gap inside is not refused and is counted

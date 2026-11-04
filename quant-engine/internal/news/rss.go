@@ -51,8 +51,8 @@ type headline struct {
 }
 
 // MaxClassifierText caps the text of one headline sent to the classifier, in
-// characters: a whole title and summary fit, a full article pasted in a feed
-// does not reach the paid call.
+// characters: a whole title and summary fit; of a full article pasted in a
+// feed it reads the title and what surrounds the matched words.
 const MaxClassifierText = 2000
 
 // Hit is a recent headline naming the asset with a keyword. The keywords match
@@ -60,7 +60,6 @@ const MaxClassifierText = 2000
 type Hit struct {
 	Text           string    // the headline for people: its title
 	ClassifierText string    // what the classifier reads: title and description, without HTML, capped
-	PastTheCap     bool      // the matched words fell past the cap: the classifier cannot judge this hit
 	Feed           string    // the feed URL without its query and fragment
 	When           time.Time // zero when undated
 }
@@ -92,9 +91,8 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 				continue // undated headlines count as recent: fail closed
 			}
 			if full := h.title + "\n" + h.description; names.in(full) && mentions(full, r.Keywords) {
-				text, cut := classifierText(h)
-				out = append(out, Hit{Text: label(h, text), ClassifierText: text, Feed: redact(url), When: t,
-					PastTheCap: cut && !(names.in(text) && mentions(text, r.Keywords))})
+				text := classifierText(h, names, r.Keywords, MaxClassifierText)
+				out = append(out, Hit{Text: label(h, text), ClassifierText: text, Feed: redact(url), When: t})
 			}
 		}
 	}
@@ -112,6 +110,9 @@ const maxExactName = 4 // characters
 func (n assetNames) in(text string) bool {
 	return mentionsExactly(text, n.exact) || mentions(text, n.anyCase)
 }
+
+// is reports whether one word is one of the names.
+func (n assetNames) is(word string) bool { return n.in(word) }
 
 // names lists symbol's base and that base's aliases; on a HIP-3 symbol, the
 // ticker and the dex, with the aliases of each (news of the dex matters to its
@@ -209,14 +210,85 @@ func plainText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(s, " "))), " ")
 }
 
-// classifierText is the headline's title and description, cut at
-// MaxClassifierText; cut says it was.
-func classifierText(h headline) (text string, cut bool) {
-	text = strings.TrimSpace(strings.TrimSpace(h.title) + "\n" + h.description)
-	if r := []rune(text); len(r) > MaxClassifierText {
-		return string(r[:MaxClassifierText]), true
+// classifierText is the headline's title and description in at most limit
+// characters; when they do not fit, the title and what surrounds the matched
+// words, so the classifier always reads what matched.
+func classifierText(h headline, names assetNames, keywords []string, limit int) string {
+	title := strings.TrimSpace(h.title)
+	if text := strings.TrimSpace(title + "\n" + h.description); utf8.RuneCountInString(text) <= limit {
+		return text
 	}
-	return text, false
+	if t := []rune(title); len(t) > limit/2 {
+		title = string(t[:limit/2])
+	}
+	isName, isKeyword := names.is, func(w string) bool { return slices.Contains(keywords, strings.ToLower(w)) }
+	if names.in(title) {
+		isName = nil
+	}
+	if mentions(title, keywords) {
+		isKeyword = nil
+	}
+	return strings.TrimSpace(title + "\n" + excerpt([]rune(h.description), limit-utf8.RuneCountInString(title)-1, isName, isKeyword))
+}
+
+const excerptGap = " ... "
+
+// excerpt is at most size characters of rs around the closest pair of a word
+// isName takes and one isKeyword takes (nil: not looked for); two pieces when
+// the pair does not fit in one; the start of rs when there is nothing to find.
+func excerpt(rs []rune, size int, isName, isKeyword func(string) bool) string {
+	type span struct{ from, to int }
+	var name, keyword, bestName, bestKeyword *span
+	best := len(rs) + 1
+	union := func(n, k *span) (int, int) {
+		switch {
+		case n == nil:
+			return k.from, k.to
+		case k == nil:
+			return n.from, n.to
+		}
+		return min(n.from, k.from), max(n.to, k.to)
+	}
+	for i := 0; i < len(rs); i++ {
+		if !unicode.IsLetter(rs[i]) && !unicode.IsDigit(rs[i]) {
+			continue
+		}
+		j := i
+		for j < len(rs) && (unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j])) {
+			j++
+		}
+		w, at := string(rs[i:j]), &span{i, j}
+		if isName != nil && isName(w) {
+			name = at
+		}
+		if isKeyword != nil && isKeyword(w) {
+			keyword = at
+		}
+		if (name != nil || isName == nil) && (keyword != nil || isKeyword == nil) && (name != nil || keyword != nil) {
+			if from, to := union(name, keyword); to-from < best {
+				best, bestName, bestKeyword = to-from, name, keyword
+			}
+		}
+		i = j
+	}
+	piece := func(from, to, size int) string {
+		start := max(0, from-(size-(to-from))/2)
+		end := min(len(rs), start+size)
+		return string(rs[max(0, end-size):end])
+	}
+	switch {
+	case best > len(rs): // nothing to find here: what matched is in the part of the title kept
+		return piece(0, 0, size)
+	case best <= size || bestName == nil || bestKeyword == nil:
+		from, to := union(bestName, bestKeyword)
+		return piece(from, to, size)
+	}
+	half := (size - len(excerptGap)) / 2
+	first, second := bestName, bestKeyword
+	if second.from < first.from {
+		first, second = second, first
+	}
+	return piece(first.from, first.to, half) + excerptGap + piece(second.from, second.to, half)
 }
 
 // label is the one line journaled for a headline: its title, or the start of
