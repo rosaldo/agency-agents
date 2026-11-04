@@ -117,7 +117,7 @@ func TestKeywordsMatchWholeWords(t *testing.T) {
 // error or a reason, which end up in the journal.
 func TestFeedQueryIsRedacted(t *testing.T) {
 	srv := server(t)
-	for _, f := range []string{"broken?apikey=hunter2", "news_rss.xml?apikey=hunter2"} {
+	for _, f := range []string{"broken?apikey=hunter2", "news_rss.xml?apikey=hunter2", "rdf?apikey=hunter2"} {
 		ok, reason, err := checker(srv, f).Clear(context.Background(), "AAA/USDT", at)
 		msg := reason
 		if err != nil {
