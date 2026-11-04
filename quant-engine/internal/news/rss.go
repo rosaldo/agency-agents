@@ -120,12 +120,8 @@ func (n assetNames) is(word string) bool { return n.in(word) }
 // ticker and the dex, with the aliases of each (news of the dex matters to its
 // markets too).
 func (r *RSS) names(symbol string) assetNames {
-	bases := []string{baseOf(symbol)}
-	if dex, ticker, ok := market.HIP3(symbol); ok {
-		bases = []string{ticker, dex}
-	}
 	var n assetNames
-	for _, b := range bases {
+	for _, b := range searchedBases(symbol) {
 		switch size := utf8.RuneCountInString(b); {
 		case size == 1: // the S of "U.S." and "S&P": only an alias can name such an asset
 		case size <= maxExactName:
@@ -138,6 +134,15 @@ func (r *RSS) names(symbol string) assetNames {
 		}
 	}
 	return n
+}
+
+// searchedBases is what the guard searches for symbol: its base or, on HIP-3,
+// the ticker and the dex.
+func searchedBases(symbol string) []string {
+	if dex, ticker, ok := market.HIP3(symbol); ok {
+		return []string{ticker, dex}
+	}
+	return []string{baseOf(symbol)}
 }
 
 func baseOf(symbol string) string {
@@ -160,6 +165,21 @@ func NameNeedingAlias(symbol string, aliases map[string][]string) string {
 		return ""
 	}
 	return name
+}
+
+// UnsearchableAlias finds an alias of symbol the guard could never match in a
+// headline: the matcher itself, given a headline that is only the alias, does
+// not find it. A headline is compared word by word, so an alias with a space or
+// punctuation is one.
+func UnsearchableAlias(symbol string, aliases map[string][]string) (string, bool) {
+	for _, b := range searchedBases(symbol) {
+		for _, a := range aliases[strings.ToUpper(b)] {
+			if !mentions(a, []string{strings.ToLower(a)}) {
+				return a, true
+			}
+		}
+	}
+	return "", false
 }
 
 // assetLine tells the classifier whose news it is judging.

@@ -157,7 +157,10 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		if c.NewsGuard == "required" && len(p.Feeds) > 0 {
 			for _, sym := range c.Symbols {
 				if name := news.NameNeedingAlias(sym, p.Aliases); name != "" {
-					return nil, fmt.Errorf("config: strategy %s: symbol %q: a name of one character cannot be searched in headlines, so the news guard would find nothing; add its names to the news policy's aliases, such as {%s: [full name]}", s.Name(), sym, name)
+					return nil, fmt.Errorf("config: strategy %s: symbol %q: a name of one character cannot be searched in headlines, so the news guard would find nothing; add its names to the news policy's aliases, one word each, such as {%s: [name]}", s.Name(), sym, name)
+				}
+				if alias, bad := news.UnsearchableAlias(sym, p.Aliases); bad {
+					return nil, fmt.Errorf("config: strategy %s: symbol %q: alias %q can never match: a headline is compared one word at a time, letters and digits only, so the news guard would not find it; list each name as one such word", s.Name(), sym, alias)
 				}
 			}
 		}

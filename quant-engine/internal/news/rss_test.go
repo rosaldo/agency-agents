@@ -197,3 +197,21 @@ func TestShortNamesMatchInExactCase(t *testing.T) {
 		}
 	}
 }
+
+// The refusal at load and the matcher agree: an alias is called unsearchable
+// exactly when a headline carrying it does not hit.
+func TestUnsearchableAliasAgreesWithTheMatcher(t *testing.T) {
+	for _, alias := range []string{"sonic", "Sonic", "s0nic", "比特币", "sonic labs", "dog-wif-hat", "brk.b", "sonic ", " sonic", "a_b", ""} {
+		aliases := map[string][]string{"S": {alias}}
+		srv := oneHeadline(t, alias+" hack")
+		r := &RSS{Feeds: []string{srv.URL}, Keywords: testKeywords, Aliases: aliases, Lookback: time.Hour, Client: srv.Client()}
+		hs, err := r.Hits(context.Background(), "S/USDC:USDC", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, bad := UnsearchableAlias("S/USDC:USDC", aliases)
+		if bad != (len(hs) == 0) || bad && got != alias {
+			t.Errorf("alias %q: unsearchable = %v (%q), hits = %d", alias, bad, got, len(hs))
+		}
+	}
+}
