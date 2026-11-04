@@ -67,18 +67,14 @@ type Hit struct {
 }
 
 // Clear reports whether no recent headline in any feed names symbol's base
-// asset with a keyword. With no hit, a feed that cannot be read or parsed is
-// an error, which the engine treats as not clear; with a hit, the hit decides
-// and the failure comes as a PartialFailure.
+// asset with a keyword. Any feed that cannot be read or parsed is an error,
+// which the engine treats as not clear.
 func (r *RSS) Clear(ctx context.Context, symbol string, at time.Time) (bool, string, error) {
 	hs, err := r.Hits(ctx, symbol, at)
-	if len(hs) == 0 {
+	if err != nil || len(hs) == 0 {
 		return err == nil, "", err
 	}
-	if err != nil {
-		err = PartialFailure{err}
-	}
-	return false, fmt.Sprintf("%q (%s)", hs[0].Text, hs[0].Feed), err
+	return false, fmt.Sprintf("%q (%s)", hs[0].Text, hs[0].Feed), nil
 }
 
 // Hits lists the recent headlines of every feed that name symbol's base

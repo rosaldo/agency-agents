@@ -151,42 +151,21 @@ func TestFailedEmergencyExitIsRetriedAtTheNextStep(t *testing.T) {
 	}
 }
 
-// An equity with one feed down: a headline from another decides as if all had
-// answered, and the failure is journaled; with no headline, it stays out.
-func TestEquityWithAFailingFeed(t *testing.T) {
+// An equity with one feed down stays out, whatever the other feed found: a
+// headline judged noise does not open the entry.
+func TestEquityWithAFailingFeedStaysOut(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", 500) }))
 	t.Cleanup(down.Close)
-	quiet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `<rss><channel><item><title>Nothing</title></item></channel></rss>`)
-	}))
-	t.Cleanup(quiet.Close)
-	for _, tc := range []struct {
-		name, p, rejection string
-		quiet, want        bool
-		failure            bool // journaled as news_check_failed
-	}{
-		{name: "catastrophe", p: "0.95", rejection: "news check not clear", failure: true},
-		{name: "noise", p: "0.2", want: true, failure: true},
-		{name: "no headline", p: "0.95", quiet: true, rejection: "news check failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "equity", 1))
-			var j events
-			got := stepWith(t, c, s, func(e *Engine) {
-				g := newsGuard(t, 200, tc.p)
-				if tc.quiet {
-					g.RSS.Feeds[0] = quiet.URL
-				}
-				g.RSS.Feeds = append(g.RSS.Feeds, down.URL)
-				e.News, e.Exec.Journal = g, &j
-			})
-			failed := false
-			for _, x := range j {
-				failed = failed || x.Kind == journal.NewsCheckFailed
-			}
-			if got != tc.want || failed != tc.failure || !strings.Contains(j.rejected(), tc.rejection) {
-				t.Fatalf("entered %v, news_check_failed %v, rejections %q; want %v, %v, %q", got, failed, j.rejected(), tc.want, tc.failure, tc.rejection)
-			}
+	for _, p := range []string{"0.95", "0.2"} {
+		c, s := parse(t, strings.Replace(cfgYAML, "CLASS", "equity", 1))
+		var j events
+		got := stepWith(t, c, s, func(e *Engine) {
+			g := newsGuard(t, 200, p)
+			g.RSS.Feeds = append(g.RSS.Feeds, down.URL)
+			e.News, e.Exec.Journal = g, &j
 		})
+		if got || !strings.Contains(j.rejected(), "news check failed") {
+			t.Fatalf("yes %s: entered %v, rejections %q; want the feed's failure to keep it out", p, got, j.rejected())
+		}
 	}
 }

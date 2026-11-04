@@ -3,7 +3,6 @@ package news_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -275,43 +274,54 @@ func TestClearBeforeAnEntry(t *testing.T) {
 	}
 }
 
-// A feed that fails does not hide what the others found, in either order: the
-// hit decides, once per headline, and the failure comes with it. With no hit,
-// the failure alone is not clear.
-func TestAFailingFeedDoesNotHideTheOthers(t *testing.T) {
-	const hit, other = "Exchange hack drains BTC reserves", "Nothing about it"
-	for _, tc := range []struct {
-		name      string
-		title     string
-		p         float64
-		clear     bool
-		partial   bool
-		wantCalls int32
+// Before an entry, a feed that fails keeps the entry out, in either order and
+// whatever the others found, and the classifier is not asked.
+func TestAFailingFeedAlwaysFailsTheEntryCheck(t *testing.T) {
+	for name, tc := range map[string]struct {
+		title string
+		p     float64
 	}{
-		{"catastrophe", hit, 0.95, false, true, 1},
-		{"noise", hit, 0.2, true, true, 1},
-		{"no hit", other, 0.95, false, false, 0},
+		"catastrophe": {"Exchange hack drains BTC reserves", 0.95},
+		"noise":       {"Exchange hack drains BTC reserves", 0.2},
+		"no hit":      {"Nothing about it", 0.95},
 	} {
-		for _, down := range []int{0, 1} {
-			t.Run(fmt.Sprintf("%s, failing feed %d", tc.name, down), func(t *testing.T) {
+		for _, failingFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, failing first %v", name, failingFirst), func(t *testing.T) {
 				j := &jev{answer: answer(tc.p)}
 				g := guard(feedServer(t, tc.title, 0).URL, client(j.server(t).URL, testKey))
-				failing := feedServer(t, "", http.StatusInternalServerError).URL
-				g.RSS.Feeds = append(g.RSS.Feeds, failing)
-				if down == 0 {
+				g.RSS.Feeds = append(g.RSS.Feeds, feedServer(t, "", http.StatusInternalServerError).URL)
+				if failingFirst {
 					g.RSS.Feeds[0], g.RSS.Feeds[1] = g.RSS.Feeds[1], g.RSS.Feeds[0]
 				}
-				for range 2 {
-					ok, why, err := g.Clear(context.Background(), "BTC/USDC:USDC", at)
-					var partial news.PartialFailure
-					if ok != tc.clear || err == nil || errors.As(err, &partial) != tc.partial || (!ok && tc.partial && why == "") {
-						t.Fatalf("clear %v %q, err %v; want clear %v, partial %v", ok, why, err, tc.clear, tc.partial)
-					}
+				if ok, why, err := g.Clear(context.Background(), "BTC/USDC:USDC", at); ok || err == nil {
+					t.Fatalf("clear %v %q, err %v; want the failure", ok, why, err)
 				}
-				if n := j.calls.Load(); n != tc.wantCalls {
-					t.Fatalf("classifier called %d times, want %d: the verdict is kept while a feed fails", n, tc.wantCalls)
+				if n := j.calls.Load(); n != 0 {
+					t.Fatalf("classifier called %d times; the entry is out already", n)
 				}
 			})
+		}
+	}
+}
+
+// After the entry, a feed that fails hides nothing, in either order: the others'
+// headlines are judged, once each, and come with the failure.
+func TestAFailingFeedDoesNotHideTheOthersAfterTheEntry(t *testing.T) {
+	for _, failingFirst := range []bool{false, true} {
+		j := &jev{answer: answer(0.95)}
+		g := guard(feedServer(t, "Exchange hack drains BTC reserves", 0).URL, client(j.server(t).URL, testKey))
+		g.RSS.Feeds = append(g.RSS.Feeds, feedServer(t, "", http.StatusInternalServerError).URL)
+		if failingFirst {
+			g.RSS.Feeds[0], g.RSS.Feeds[1] = g.RSS.Feeds[1], g.RSS.Feeds[0]
+		}
+		for range 2 {
+			fs, err := g.Check(context.Background(), "BTC/USDC:USDC", at)
+			if len(fs) != 1 || !fs[0].Catastrophe || err == nil {
+				t.Fatalf("failing first %v: findings %+v, err %v", failingFirst, fs, err)
+			}
+		}
+		if n := j.calls.Load(); n != 1 {
+			t.Fatalf("classifier called %d times, want 1: the verdict is kept while a feed fails", n)
 		}
 	}
 }

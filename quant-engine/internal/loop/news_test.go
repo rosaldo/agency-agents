@@ -165,6 +165,29 @@ func TestAFailingFeedDoesNotHideACatastropheAfterTheEntry(t *testing.T) {
 	}
 }
 
+// A failure with the others' headlines: only a catastrophe exits; noise is like
+// no headline, the failure journaled and the position kept.
+func TestAFailingFeedWithAHeadlineExitsOnlyOnACatastrophe(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		catastrophe bool
+		exits       int
+	}{{"noise", false, 0}, {"catastrophe", true, 1}} {
+		exits, failed := 0, 0
+		exit := func(context.Context, string, time.Time, string) error { exits++; return nil }
+		note := func(e journal.Event) {
+			if e.Kind == journal.NewsCheckFailed {
+				failed++
+			}
+		}
+		r := newsResult{symbol: "AAA", err: errors.New("news feed down"), found: []news.Finding{{Headline: "AAA hack", Catastrophe: tc.catastrophe}}}
+		handleNews(context.Background(), exit, 0.9, r, note, func(string, string) {})
+		if exits != tc.exits || failed != 1 {
+			t.Errorf("%s: exits %d, news_check_failed %d; want %d, 1", tc.name, exits, failed, tc.exits)
+		}
+	}
+}
+
 // The classifier's key never reaches the journal: a failing classifier's
 // verdict is journaled with the error, without the key.
 func TestTheClassifierKeyStaysOutOfTheJournal(t *testing.T) {
