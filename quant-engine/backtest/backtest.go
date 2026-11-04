@@ -236,7 +236,7 @@ func derivCovers(cs []market.Candle, ds []market.Deriv, interval time.Duration, 
 	if !from.IsZero() {
 		have = fmt.Sprintf("covers %s to %s for %s", from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339), sym)
 	}
-	return fmt.Errorf("backtest: the strategy needs %s for every candle from %s to %s; the data %s. "+
+	return fmt.Errorf("backtest: the strategy needs %s from the first candle to the last, %s to %s; the data %s. A gap inside that span is not refused: the filter does not pass there, and candles_without_derivatives counts it. "+
 		"Open interest exists only in our own recording (deriv-<level>.csv): replay candles inside it",
 		need, first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339), have)
 }

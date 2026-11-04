@@ -164,7 +164,7 @@ func TestBacktestRefusesADerivativesUserWithoutDataForThePeriod(t *testing.T) {
 }
 
 // A strategy that declares it decides on open interest is refused unless
-// snapshots WITH open interest span every candle: a funding-only history no
+// snapshots WITH open interest span the candles: a funding-only history no
 // longer replays as a filter that never passes. Without the declaration the
 // same history still runs.
 func TestBacktestRefusesAnOpenInterestUserWithoutOpenInterest(t *testing.T) {
@@ -189,7 +189,7 @@ func TestBacktestRefusesAnOpenInterestUserWithoutOpenInterest(t *testing.T) {
 		want string // "" = runs
 	}{
 		"funding only":        {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, funding, "has no open interest for AAA"},
-		"open interest ends":  {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, part, "needs open interest for every candle"},
+		"open interest ends":  {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, part, "needs open interest from the first candle to the last"},
 		"open interest spans": {oiUser{derivUser{&scripted.Strategy{Decider: none}}}, full, ""},
 		"undeclared, funding": {derivUser{&scripted.Strategy{Decider: none}}, funding, ""},
 	} {
@@ -200,6 +200,8 @@ func TestBacktestRefusesAnOpenInterestUserWithoutOpenInterest(t *testing.T) {
 				t.Fatalf("err = %v, want the backtest to run", err)
 			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
 				t.Fatalf("err = %v, want a refusal saying %q", err, tc.want)
+			case err != nil && strings.Contains(err.Error(), "every candle"):
+				t.Fatalf("err = %v: only the span is checked, a gap inside is not refused", err)
 			}
 		})
 	}
