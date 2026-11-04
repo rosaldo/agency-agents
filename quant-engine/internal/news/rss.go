@@ -59,7 +59,7 @@ const MaxClassifierText = 2000
 // the title and the description, so the classifier reads both.
 type Hit struct {
 	Text           string    // the headline for people: its title
-	ClassifierText string    // what the classifier reads: title and description, without HTML, capped
+	ClassifierText string    // what the classifier reads: the asset, then title and description without HTML, capped
 	Feed           string    // the feed URL without its query and fragment
 	When           time.Time // zero when undated
 }
@@ -91,8 +91,9 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 				continue // undated headlines count as recent: fail closed
 			}
 			if full := h.title + "\n" + h.description; names.in(full) && mentions(full, r.Keywords) {
-				text := classifierText(h, names, r.Keywords, MaxClassifierText)
-				out = append(out, Hit{Text: label(h, text), ClassifierText: text, Feed: redact(url), When: t})
+				asset := assetLine(symbol) + "\n"
+				text := classifierText(h, names, r.Keywords, MaxClassifierText-utf8.RuneCountInString(asset))
+				out = append(out, Hit{Text: label(h, text), ClassifierText: asset + text, Feed: redact(url), When: t})
 			}
 		}
 	}
@@ -118,7 +119,7 @@ func (n assetNames) is(word string) bool { return n.in(word) }
 // ticker and the dex, with the aliases of each (news of the dex matters to its
 // markets too).
 func (r *RSS) names(symbol string) assetNames {
-	bases := []string{strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0]}
+	bases := []string{baseOf(symbol)}
 	if dex, ticker, ok := market.HIP3(symbol); ok {
 		bases = []string{ticker, dex}
 	}
@@ -134,6 +135,18 @@ func (r *RSS) names(symbol string) assetNames {
 		}
 	}
 	return n
+}
+
+func baseOf(symbol string) string {
+	return strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0]
+}
+
+// assetLine tells the classifier whose news it is judging.
+func assetLine(symbol string) string {
+	if dex, ticker, ok := market.HIP3(symbol); ok {
+		return "Asset: " + ticker + " (dex " + strings.ToLower(dex) + ")"
+	}
+	return "Asset: " + baseOf(symbol)
 }
 
 // redact drops a feed URL's query and fragment, where access tokens live.

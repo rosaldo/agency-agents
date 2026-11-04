@@ -53,7 +53,7 @@ func TestClassifierReadsTheDescription(t *testing.T) {
 	if err != nil || len(fs) != 1 {
 		t.Fatalf("findings %v, err %v", fs, err)
 	}
-	if want := "Markets update\nBTC exchange hacked & drained"; len(c.states) != 1 || c.states[0] != want {
+	if want := "Asset: BTC\nMarkets update\nBTC exchange hacked & drained"; len(c.states) != 1 || c.states[0] != want {
 		t.Errorf("classifier read %q, want %q", c.states, want)
 	}
 	if fs[0].Headline != "Markets update" || !fs[0].Catastrophe {
@@ -105,7 +105,7 @@ func TestClassifierCapCountsCharacters(t *testing.T) {
 	if _, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at); err != nil {
 		t.Fatal(err)
 	}
-	if want := "Markets update\n" + desc; len(c.states) != 1 || c.states[0] != want {
+	if want := "Asset: BTC\nMarkets update\n" + desc; len(c.states) != 1 || c.states[0] != want {
 		t.Errorf("text under the cap was changed: %d characters", utf8.RuneCountInString(c.states[0]))
 	}
 
@@ -116,7 +116,7 @@ func TestClassifierCapCountsCharacters(t *testing.T) {
 	if _, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at); err != nil {
 		t.Fatal(err)
 	}
-	if want := title + "\nBTC exchange hacked"; len(c.states) != 1 || c.states[0] != want {
+	if want := "Asset: BTC\n" + title + "\nBTC exchange hacked"; len(c.states) != 1 || c.states[0] != want {
 		t.Errorf("a long title under the cap was cut to %d characters", utf8.RuneCountInString(c.states[0]))
 	}
 
@@ -190,6 +190,62 @@ func TestExcerptFillsItsSize(t *testing.T) {
 	}
 	if got := excerpt(rs, 100, nil, nil); got != string(rs[:100]) {
 		t.Errorf("nothing to find: %q", got)
+	}
+}
+
+// The classifier is told whose news it judges, and the asset line counts in the cap.
+func TestClassifierIsToldTheAsset(t *testing.T) {
+	for symbol, want := range map[string]string{
+		"XYZ-GOOGL/USDC:USDC": "Asset: GOOGL (dex xyz)\n",
+		"BTC/USDC:USDC":       "Asset: BTC\n",
+		"EEE-USD":             "Asset: EEE\n",
+	} {
+		c := &fakeClassifier{yes: 0.1}
+		items := [][2]string{{"BTC GOOGL XYZ EEE hacked", strings.Repeat("é ", MaxClassifierText)}}
+		fs, err := guardOn(t, c, &items).Check(context.Background(), symbol, at)
+		if err != nil || len(fs) != 1 || len(c.states) != 1 || !strings.HasPrefix(c.states[0], want) {
+			t.Errorf("%s: findings %+v, err %v, read %q", symbol, fs, err, c.states)
+			continue
+		}
+		if n := utf8.RuneCountInString(c.states[0]); n < MaxClassifierText-1 || n > MaxClassifierText { // a trailing space is trimmed
+			t.Errorf("%s: %d characters", symbol, n)
+		}
+		if fs[0].Headline != items[0][0] {
+			t.Errorf("%s: the journal's headline is %q", symbol, fs[0].Headline)
+		}
+	}
+}
+
+// byAsset answers yes on one asset only.
+type byAsset struct {
+	fakeClassifier
+	yesOn string
+}
+
+func (c *byAsset) Classify(ctx context.Context, state string, q Question) (Verdict, error) {
+	v, err := c.fakeClassifier.Classify(ctx, state, q)
+	if strings.HasPrefix(state, "Asset: "+c.yesOn+"\n") {
+		v.Yes = 0.9
+	}
+	return v, err
+}
+
+// One headline naming two assets is judged once for each: a verdict on one
+// never serves the other.
+func TestVerdictIsNotSharedBetweenAssets(t *testing.T) {
+	c := &byAsset{yesOn: "BTC"}
+	items := [][2]string{{"BTC and ETH exchange hacked", ""}}
+	g := guardOn(t, c, &items)
+	for range 2 {
+		for symbol, catastrophe := range map[string]bool{"BTC/USDC:USDC": true, "ETH/USDC:USDC": false} {
+			fs, err := g.Check(context.Background(), symbol, at)
+			if err != nil || len(fs) != 1 || fs[0].Catastrophe != catastrophe {
+				t.Fatalf("%s: findings %+v, err %v, want catastrophe %v", symbol, fs, err, catastrophe)
+			}
+		}
+	}
+	if len(c.states) != 2 {
+		t.Fatalf("judged %d times, want once per asset: %q", len(c.states), c.states)
 	}
 }
 

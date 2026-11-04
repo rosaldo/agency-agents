@@ -49,7 +49,7 @@ func TestSeenKeepsOnlyTheHeadlinesWithinTheLookback(t *testing.T) {
 		kept = append(kept, k[strings.Index(k, "\n")+1:])
 	}
 	slices.Sort(kept)
-	if !slices.Equal(kept, []string{"BTC hack three", "BTC hack two"}) || c.calls.Load() != 3 {
+	if !slices.Equal(kept, []string{"Asset: BTC\nBTC hack three", "Asset: BTC\nBTC hack two"}) || c.calls.Load() != 3 {
 		t.Fatalf("kept %q after %d calls; want the two within the lookback, each judged once", kept, c.calls.Load())
 	}
 }

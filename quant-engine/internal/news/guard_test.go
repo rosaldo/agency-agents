@@ -66,8 +66,8 @@ func (j *jev) server(t *testing.T) *httptest.Server {
 			j.bad.Store("headers")
 		case err != nil || !ok || q.Type != "noul" || q.Instructions == "" || q.Criteria["true"] == "" || req.Model != "jev-1.14.0":
 			j.bad.Store("body")
-		case req.State != "Exchange hack drains BTC reserves":
-			j.bad.Store("state " + req.State) // this feed has a title only
+		case req.State != "Asset: BTC\nExchange hack drains BTC reserves":
+			j.bad.Store("state " + req.State) // the asset, then the title: this feed has no description
 		}
 		time.Sleep(j.delay)
 		if j.status != 0 && (j.fail == 0 || n <= j.fail) {
