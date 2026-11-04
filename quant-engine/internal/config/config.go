@@ -148,6 +148,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		if err := checkClassifier(p.Classifier); err != nil {
 			return nil, fmt.Errorf("config: strategy %s: news classifier: %w", s.Name(), err)
 		}
+		if p.Classifier != nil && c.NewsGuard != "required" { // nothing would ever ask it
+			return nil, fmt.Errorf("config: strategy %s: news classifier: news_guard is %s, so it would never be asked; set news_guard: required or remove the classifier", s.Name(), c.NewsGuard)
+		}
 		c.news = &p
 	}
 	if _, err := c.paramsHash(); err != nil {

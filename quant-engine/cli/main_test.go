@@ -358,6 +358,8 @@ func (withClassifier) NewsPolicy() strategy.NewsPolicy {
 // check fails while the classifier's key variable is unset, naming it.
 func TestCheckWantsTheClassifierKey(t *testing.T) {
 	_, path := writeConfig(t)
+	b, _ := os.ReadFile(path)
+	_ = os.WriteFile(path, append(b, "news_guard: required\n"...), 0o600)
 	app := App{Strategy: withClassifier{renamed{example.New()}}, Version: "test"}
 	var out bytes.Buffer
 	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", "")

@@ -87,10 +87,11 @@ func classified(c *strategy.NewsClassifier) strategy.Strategy {
 // The classifier's question, criteria, type, threshold and model enter the
 // hash; one the engine cannot ask is refused at load.
 func TestNewsClassifierIsHashedAndValidated(t *testing.T) {
+	guarded := strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: required", 1)
 	base := strategy.NewsClassifier{Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9,
 		Criteria: map[string]string{"true": "at risk", "false": "noise"}}
-	h := hashFor(t, validYAML, classified(&base))
-	if hashFor(t, validYAML, classified(nil)) == h {
+	h := hashFor(t, guarded, classified(&base))
+	if hashFor(t, guarded, classified(nil)) == h {
 		t.Error("the classifier did not change the hash")
 	}
 	for name, change := range map[string]func(*strategy.NewsClassifier){
@@ -101,7 +102,7 @@ func TestNewsClassifierIsHashedAndValidated(t *testing.T) {
 	} {
 		c := base
 		change(&c)
-		if hashFor(t, validYAML, classified(&c)) == h {
+		if hashFor(t, guarded, classified(&c)) == h {
 			t.Errorf("%s did not change the hash", name)
 		}
 	}
@@ -115,8 +116,22 @@ func TestNewsClassifierIsHashedAndValidated(t *testing.T) {
 	} {
 		c := base
 		change(&c)
-		if _, err := Parse([]byte(validYAML), classified(&c)); err == nil || !strings.Contains(err.Error(), "news classifier") {
+		if _, err := Parse([]byte(guarded), classified(&c)); err == nil || !strings.Contains(err.Error(), "news classifier") {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A classifier under news_guard none would never be asked: refused, saying so.
+// Without a classifier, news_guard none loads as ever.
+func TestClassifierWithoutTheGuardIsRefused(t *testing.T) {
+	c := strategy.NewsClassifier{Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9}
+	for _, y := range []string{validYAML, strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: none", 1)} {
+		if _, err := Parse([]byte(y), classified(&c)); err == nil || !strings.Contains(err.Error(), "news_guard is none") {
+			t.Errorf("classifier with no guard: %v", err)
+		}
+		if _, err := Parse([]byte(y), classified(nil)); err != nil {
+			t.Errorf("no classifier: %v", err)
 		}
 	}
 }
