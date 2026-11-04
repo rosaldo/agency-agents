@@ -258,3 +258,54 @@ func TestWordsInsideATagDoNotMatch(t *testing.T) {
 		t.Fatalf("findings %+v, err %v, calls %d", fs, err, len(c.states))
 	}
 }
+
+// A loose < is text, not the start of a tag: what follows it still counts.
+// What reads as a tag or a link's address does not.
+func TestOnlyTagsAreStrippedFromADescription(t *testing.T) {
+	for desc, match := range map[string]bool{
+		"BTC falls <5% after exchange hacked, volume >10%":  true,
+		"Fees <1% as BTC was hacked <b>today</b>":           true,
+		"BTC hacked, losses < $5m":                          true,
+		"<p>Fees &lt;1% as BTC was hacked &gt; today</p>":   true,
+		"<p>BTC exchange <b>hacked</b></p>":                 true,
+		"BTC &amp; AT&T hacked":                             true,
+		"<a href=\"https://x.invalid/btc-hacked\">read</a>": false,
+		"<!-- BTC hacked --> calm day":                      false,
+		"</div BTC hacked> calm day":                        false,
+	} {
+		for _, form := range []string{"escaped", "cdata"} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				body := "<![CDATA[" + desc + "]]>"
+				if form == "escaped" {
+					var e strings.Builder
+					_ = xml.EscapeText(&e, []byte(desc))
+					body = e.String()
+				}
+				_, _ = w.Write([]byte("<rss><channel><item><title>Markets update</title><description>" + body + "</description></item></channel></rss>"))
+			}))
+			r := &RSS{Feeds: []string{srv.URL}, Keywords: []string{"hacked"}, Lookback: time.Hour, Client: srv.Client()}
+			hs, err := r.Hits(context.Background(), "BTC/USDC:USDC", at)
+			srv.Close()
+			if err != nil || (len(hs) == 1) != match {
+				t.Errorf("%s %q: hits %+v, err %v, want a hit %v", form, desc, hs, err, match)
+			}
+		}
+	}
+}
+
+// An Atom summary is cleaned like an RSS description.
+func TestAtomSummaryIsCleanedToo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Markets update</title><summary><![CDATA[<a href="https://x.invalid/btc-hacked">read</a>]]></summary></entry>` +
+			`<entry><title>Other update</title><summary><![CDATA[<p>ETH exchange <b>hacked</b></p>]]></summary></entry></feed>`))
+	}))
+	defer srv.Close()
+	r := &RSS{Feeds: []string{srv.URL}, Keywords: []string{"hacked"}, Lookback: time.Hour, Client: srv.Client()}
+	if hs, err := r.Hits(context.Background(), "BTC/USDC:USDC", at); err != nil || len(hs) != 0 {
+		t.Errorf("an address inside the summary matched: %+v, err %v", hs, err)
+	}
+	hs, err := r.Hits(context.Background(), "ETH/USDC:USDC", at)
+	if err != nil || len(hs) != 1 || hs[0].ClassifierText != "Asset: ETH\nOther update\nETH exchange hacked" {
+		t.Errorf("hits %+v, err %v", hs, err)
+	}
+}

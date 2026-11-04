@@ -217,7 +217,7 @@ func mentionsExactly(text string, words []string) bool {
 		func(w string) bool { return slices.Contains(words, w) })
 }
 
-var htmlTag = regexp.MustCompile(`<[^>]*>`)
+var htmlTag = regexp.MustCompile(`</?[a-zA-Z!][^>]*>`) // a tag, not a loose < as in "fees <1%"
 
 func plainText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(s, " "))), " ")

@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.59.2** (2026-11-03) · `fix` — quant-engine: only a real tag is stripped from a description: a loose < no longer erases the text after it
 - **v1.59.1** (2026-11-03) · `fix` — quant-engine: an equity symbol the news guard cannot search is refused at load
 - **v1.59.0** (2026-11-03) · `feat` — quant-engine: the news classifier is told the asset, and a verdict is kept per asset
 - **v1.58.16** (2026-11-03) · `fix` — quant-engine: past the cap the classifier reads what surrounds the matched words and always decides; no hit is a catastrophe without a call
