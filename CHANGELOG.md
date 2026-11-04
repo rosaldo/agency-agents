@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.14** (2026-11-03) · `fix` — quant-engine: the news filter matches a description's text, not the addresses inside its HTML
 - **v1.58.13** (2026-11-03) · `fix` — quant-engine: the backtest's refusal says the truth: derivatives must span the candles, a gap inside is not refused and is counted
 - **v1.58.12** (2026-11-03) · `fix` — quant-engine: check refuses feed websocket on an interval the stream does not carry, or with no stream
 - **v1.58.11** (2026-11-03) · `fix` — quant-engine: a news classifier with news_guard none is refused at load: nothing would ever ask it

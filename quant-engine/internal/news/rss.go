@@ -44,7 +44,7 @@ type feed struct {
 }
 
 type headline struct {
-	title, description string
+	title, description string // description as plain text: a link's address is not the news
 	when               string
 }
 
@@ -153,14 +153,14 @@ func (r *RSS) fetch(ctx context.Context, rawURL string) ([]headline, error) {
 	}
 	var hs []headline
 	for _, i := range f.Items {
-		hs = append(hs, headline{i.Title, i.Description, i.PubDate})
+		hs = append(hs, headline{i.Title, plainText(i.Description), i.PubDate})
 	}
 	for _, e := range f.Entries {
 		when := e.Published
 		if when == "" {
 			when = e.Updated
 		}
-		hs = append(hs, headline{e.Title, e.Summary, when})
+		hs = append(hs, headline{e.Title, plainText(e.Summary), when})
 	}
 	return hs, nil
 }
@@ -191,11 +191,14 @@ func mentions(text string, words []string) bool {
 
 var htmlTag = regexp.MustCompile(`<[^>]*>`)
 
-// classifierText is the headline's title and description as plain text, cut
-// at MaxClassifierText; cut says it was.
+func plainText(s string) string {
+	return strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(s, " "))), " ")
+}
+
+// classifierText is the headline's title and description, cut at
+// MaxClassifierText; cut says it was.
 func classifierText(h headline) (text string, cut bool) {
-	plain := strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(h.description, " "))), " ")
-	text = strings.TrimSpace(strings.TrimSpace(h.title) + "\n" + plain)
+	text = strings.TrimSpace(strings.TrimSpace(h.title) + "\n" + h.description)
 	if r := []rune(text); len(r) > MaxClassifierText {
 		return string(r[:MaxClassifierText]), true
 	}

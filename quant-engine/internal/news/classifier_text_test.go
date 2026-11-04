@@ -122,3 +122,13 @@ func TestClassifierTextIsCapped(t *testing.T) {
 		t.Errorf("why: %s", why)
 	}
 }
+
+// Words only inside a tag, such as a link's address, are not a headline.
+func TestWordsInsideATagDoNotMatch(t *testing.T) {
+	c := &fakeClassifier{yes: 0.9}
+	items := [][2]string{{"Markets update", `<a href="https://x.invalid/btc-hacked">read more</a>`}}
+	fs, err := guardOn(t, c, &items).Check(context.Background(), "BTC/USDC:USDC", at)
+	if err != nil || len(fs) != 0 || len(c.states) != 0 {
+		t.Fatalf("findings %+v, err %v, calls %d", fs, err, len(c.states))
+	}
+}
