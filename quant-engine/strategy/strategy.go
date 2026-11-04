@@ -103,10 +103,20 @@ type NewsPolicy struct {
 	Classifier *NewsClassifier `json:",omitempty"`
 }
 
+// The providers that serve the classifier.
+const (
+	NewsProviderTypeSafe   = "typesafe" // the default
+	NewsProviderOpenRouter = "openrouter"
+)
+
 // NewsClassifier is the question a classifier (TypeSafe's Jev) answers about
 // one headline. Type is "noul": a yes/no question whose yes means a
 // catastrophe for the asset; a yes at or above Threshold is one.
 type NewsClassifier struct {
+	// Provider serves the model: empty or NewsProviderTypeSafe, or
+	// NewsProviderOpenRouter. Omitted when empty so that a policy naming none
+	// keeps the parameter hash it had before providers existed.
+	Provider  string            `json:",omitempty"`
 	Model     string            // e.g. "jev-latest" or a pinned version
 	Type      string            // "noul"
 	Question  string            // the instructions

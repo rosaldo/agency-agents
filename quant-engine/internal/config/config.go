@@ -153,6 +153,11 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		if p.Classifier != nil && c.NewsGuard != "required" { // nothing would ever ask it
 			return nil, fmt.Errorf("config: strategy %s: news classifier: news_guard is %s, so it would never be asked; set news_guard: required or remove the classifier", s.Name(), c.NewsGuard)
 		}
+		if p.Classifier != nil && p.Classifier.Provider == strategy.NewsProviderTypeSafe { // the default, named: same parameters, same hash
+			named := *p.Classifier
+			named.Provider = ""
+			p.Classifier = &named
+		}
 		c.news = &p
 		if c.NewsGuard == "required" && len(p.Feeds) > 0 {
 			if word, bad := news.UnmatchableKeyword(p.Keywords); bad {
@@ -282,12 +287,15 @@ func (c *Config) validate() error {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// checkClassifier refuses a news classifier the engine cannot ask: a noul
-// question only, with its text, a model and a threshold in (0, 1].
+// checkClassifier refuses a news classifier the engine cannot ask: a known
+// provider, a noul question only, with its text, a model and a threshold in
+// (0, 1].
 func checkClassifier(c *strategy.NewsClassifier) error {
 	switch {
 	case c == nil:
 		return nil
+	case c.Provider != "" && c.Provider != strategy.NewsProviderTypeSafe && c.Provider != strategy.NewsProviderOpenRouter:
+		return fmt.Errorf("provider %q is not supported (typesafe or openrouter)", c.Provider)
 	case c.Type != "noul":
 		return fmt.Errorf("type %q is not supported (noul only)", c.Type)
 	case strings.TrimSpace(c.Question) == "":

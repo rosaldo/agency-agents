@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -28,10 +29,15 @@ func EnvPrefix(name, venue string, testnet bool) string {
 }
 
 // NewsKeyVar is the variable holding the news classifier's API key of a
-// strategy: <STRATEGY>_TYPESAFE_API_KEY, e.g. EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY.
-// It has no venue: one key serves every venue and network.
-func NewsKeyVar(name string) string {
-	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_TYPESAFE_API_KEY"
+// strategy on a provider: <STRATEGY>_TYPESAFE_API_KEY, e.g.
+// EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY, or <STRATEGY>_OPENROUTER_API_KEY. It has
+// no venue: one key serves every venue and network.
+func NewsKeyVar(name, provider string) string {
+	suffix := "_TYPESAFE_API_KEY"
+	if provider == strategy.NewsProviderOpenRouter {
+		suffix = "_OPENROUTER_API_KEY"
+	}
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + suffix
 }
 
 // LoadCredentials reads <PREFIX><SUFFIX> for every required and optional

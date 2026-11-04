@@ -105,9 +105,13 @@ func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exch
 		g := &news.Guard{RSS: &news.RSS{Feeds: n.Feeds, Keywords: kw, Aliases: n.Aliases,
 			Lookback: lookback, Client: &http.Client{Timeout: 10 * time.Second}}}
 		if c := n.Classifier; c != nil {
-			v := config.NewsKeyVar(cfg.StrategyName())
-			g.Classifier = &typesafe.Client{URL: typesafe.Endpoint, Key: config.Secret(os.Getenv(v)), KeyVar: v,
+			v := config.NewsKeyVar(cfg.StrategyName(), c.Provider)
+			jev := &typesafe.Client{URL: typesafe.Endpoint, Key: config.Secret(os.Getenv(v)), KeyVar: v,
 				HTTP: &http.Client{Timeout: 10 * time.Second}}
+			if c.Provider == strategy.NewsProviderOpenRouter {
+				jev.URL, jev.Name = typesafe.OpenRouterEndpoint, c.Provider
+			}
+			g.Classifier = jev
 			g.Question = news.Question{Type: c.Type, Instructions: c.Question, Criteria: c.Criteria, Model: c.Model}
 			g.Threshold = c.Threshold
 		}

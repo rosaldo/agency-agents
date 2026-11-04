@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -118,6 +119,49 @@ func TestNewsClassifierIsHashedAndValidated(t *testing.T) {
 		change(&c)
 		if _, err := Parse([]byte(guarded), classified(&c)); err == nil || !strings.Contains(err.Error(), "news classifier") {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A provider the engine has no fixed endpoint for is refused at load. The
+// default, named or not, hashes as a policy from before providers existed;
+// OpenRouter is other parameters.
+func TestNewsClassifierProvider(t *testing.T) {
+	guarded := strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: required", 1)
+	with := func(provider string) strategy.NewsClassifier {
+		return strategy.NewsClassifier{Provider: provider, Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9}
+	}
+	for _, p := range []string{"OpenRouter", "openrouter ", "acme", "https://example.invalid/v1/systemone"} {
+		c := with(p)
+		if _, err := Parse([]byte(guarded), classified(&c)); err == nil || !strings.Contains(err.Error(), "news classifier: provider") {
+			t.Errorf("provider %q: %v", p, err)
+		}
+	}
+	unset, named, openrouter := with(""), with(strategy.NewsProviderTypeSafe), with(strategy.NewsProviderOpenRouter)
+	h := hashFor(t, guarded, classified(&unset))
+	if hashFor(t, guarded, classified(&named)) != h {
+		t.Error("naming the default changed the hash")
+	}
+	if named.Provider != strategy.NewsProviderTypeSafe {
+		t.Error("loading changed the strategy's own classifier")
+	}
+	if hashFor(t, guarded, classified(&openrouter)) == h {
+		t.Error("the provider did not change the hash")
+	}
+	if b, _ := json.Marshal(unset); strings.Contains(string(b), "Provider") {
+		t.Errorf("an unset provider enters the hash of every existing policy: %s", b)
+	}
+}
+
+// Each provider has its own variable: a key never serves the other's endpoint.
+func TestNewsKeyVarPerProvider(t *testing.T) {
+	for provider, want := range map[string]string{
+		"":                              "MY_STRAT_TYPESAFE_API_KEY",
+		strategy.NewsProviderTypeSafe:   "MY_STRAT_TYPESAFE_API_KEY",
+		strategy.NewsProviderOpenRouter: "MY_STRAT_OPENROUTER_API_KEY",
+	} {
+		if got := NewsKeyVar("my-strat", provider); got != want {
+			t.Errorf("provider %q: %s; want %s", provider, got, want)
 		}
 	}
 }

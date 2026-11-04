@@ -123,6 +123,40 @@ func TestClassifierPolicyWiresTypeSafe(t *testing.T) {
 	}
 }
 
+// The provider picks the endpoint and the variable together: OpenRouter's key
+// reaches OpenRouter's endpoint and TypeSafe's key is left alone, and the
+// other way round.
+func TestClassifierProviderWiresEndpointAndKey(t *testing.T) {
+	const orKey, tsKey = "or-engine-test-key", "ts-engine-test-key"
+	t.Setenv("EXAMPLE_SMA_CROSS_OPENROUTER_API_KEY", orKey)
+	t.Setenv("EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY", tsKey)
+	for provider, want := range map[string]struct{ url, key, keyVar string }{
+		"":                              {"https://api.typesafe.ai/v1/systemone", tsKey, "EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY"},
+		strategy.NewsProviderTypeSafe:   {"https://api.typesafe.ai/v1/systemone", tsKey, "EXAMPLE_SMA_CROSS_TYPESAFE_API_KEY"},
+		strategy.NewsProviderOpenRouter: {"https://openrouter.ai/api/v1/systemone", orKey, "EXAMPLE_SMA_CROSS_OPENROUTER_API_KEY"},
+	} {
+		s := withProvider{example.New(), provider}
+		c, err := config.Parse([]byte(strings.Replace(cfgYAML, "CLASS", "equity", 1)), s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ts := New(c, s, nil, exchange.Demo, nil, time.Now).News.(*news.Guard).Classifier.(*typesafe.Client)
+		if ts.URL != want.url || ts.Key.Reveal() != want.key || ts.KeyVar != want.keyVar {
+			t.Errorf("provider %q: url %s, variable %s, key match %v", provider, ts.URL, ts.KeyVar, ts.Key.Reveal() == want.key)
+		}
+	}
+}
+
+type withProvider struct {
+	strategy.Strategy
+	provider string
+}
+
+func (s withProvider) NewsPolicy() strategy.NewsPolicy {
+	return strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}, Keywords: []string{"hack"},
+		Classifier: &strategy.NewsClassifier{Provider: s.provider, Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.85}}
+}
+
 type withClassifier struct{ strategy.Strategy }
 
 func (withClassifier) NewsPolicy() strategy.NewsPolicy {

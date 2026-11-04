@@ -373,6 +373,38 @@ func TestCheckWantsTheClassifierKey(t *testing.T) {
 	}
 }
 
+type withOpenRouter struct{ strategy.Strategy }
+
+func (withOpenRouter) NewsPolicy() strategy.NewsPolicy {
+	return strategy.NewsPolicy{Feeds: []string{"https://example.invalid/rss"}, Keywords: []string{"hack"},
+		Classifier: &strategy.NewsClassifier{Provider: strategy.NewsProviderOpenRouter, Model: "jev-latest", Type: "noul", Question: "Catastrophe?", Threshold: 0.9}}
+}
+
+// check wants the key of the provider chosen: TypeSafe's does not stand in for
+// OpenRouter's, and the error names the right variable and no value.
+func TestCheckWantsTheKeyOfTheProvider(t *testing.T) {
+	_, path := writeConfig(t)
+	b, _ := os.ReadFile(path)
+	_ = os.WriteFile(path, append(b, "news_guard: required\n"...), 0o600)
+	app := App{Strategy: withOpenRouter{renamed{example.New()}}, Version: "test"}
+	var out bytes.Buffer
+	const canary = "ts-canary-key-77c1"
+	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", canary)
+	t.Setenv("TEST_STRATEGY_OPENROUTER_API_KEY", "")
+	err := app.Run([]string{"check", "--config", path}, &out)
+	if err == nil || !strings.Contains(err.Error(), "TEST_STRATEGY_OPENROUTER_API_KEY") || strings.Contains(err.Error(), canary) {
+		t.Fatalf("check with only TypeSafe's key: %v", err)
+	}
+	t.Setenv("TEST_STRATEGY_TYPESAFE_API_KEY", "")
+	t.Setenv("TEST_STRATEGY_OPENROUTER_API_KEY", canary)
+	if err := app.Run([]string{"check", "--config", path}, &out); err != nil {
+		t.Fatalf("check with OpenRouter's key: %v", err)
+	}
+	if strings.Contains(out.String(), canary) {
+		t.Fatal("the key is in check's output")
+	}
+}
+
 // acceptsAnyBlock stands for a strategy whose Configure takes the block.
 type acceptsAnyBlock struct{ strategy.Strategy }
 
