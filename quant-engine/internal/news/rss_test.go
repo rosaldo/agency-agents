@@ -138,16 +138,50 @@ func TestHIP3SymbolIsSearchedByTickerAndDex(t *testing.T) {
 
 // Any other symbol is searched by its first piece alone, as ever.
 func TestOtherSymbolsKeepOneBase(t *testing.T) {
-	r := &RSS{Aliases: map[string][]string{"EEE": {"eee coin"}, "USD": {"dollar"}, "USDT": {"tether"}}}
-	for symbol, want := range map[string][]string{
-		"EEE-USD":       {"eee", "eee coin"},
-		"EEE/USDT":      {"eee", "eee coin"},
-		"EEE/USDC:USDC": {"eee", "eee coin"},
-		"EEE:USDT":      {"eee", "eee coin"},
-		"ZZZ-USD":       {"zzz"},
+	r := &RSS{Aliases: map[string][]string{"EEE": {"eee coin"}, "USD": {"dollar"}, "USDT": {"tether"}, "KPEPE": {"pepe"}}}
+	for symbol, want := range map[string]assetNames{
+		"EEE-USD":         {[]string{"EEE"}, []string{"eee coin"}},
+		"EEE/USDT":        {[]string{"EEE"}, []string{"eee coin"}},
+		"EEE/USDC:USDC":   {[]string{"EEE"}, []string{"eee coin"}},
+		"EEE:USDT":        {[]string{"EEE"}, []string{"eee coin"}},
+		"ZZZ-USD":         {[]string{"ZZZ"}, nil},
+		"kPEPE/USDC:USDC": {nil, []string{"kpepe", "pepe"}},
 	} {
-		if got := r.names(symbol); !slices.Equal(got, want) {
-			t.Errorf("%s: names %v, want %v", symbol, got, want)
+		if got := r.names(symbol); !slices.Equal(got.exact, want.exact) || !slices.Equal(got.anyCase, want.anyCase) {
+			t.Errorf("%s: names %+v, want %+v", symbol, got, want)
+		}
+	}
+}
+
+// A short name from the symbol matches as written: tickers that are words do
+// not match the word. A longer name, and any alias, matches in any case.
+func TestShortNamesMatchInExactCase(t *testing.T) {
+	for _, tc := range []struct {
+		symbol, headline string
+		aliases          map[string][]string
+		clear            bool
+	}{
+		{"XYZ-NOW/USDC:USDC", "Bitcoin exchange hack, users wait now", nil, true},
+		{"XYZ-NOW/USDC:USDC", "NOW hack disclosed", nil, false},
+		{"XYZ-NET/USDC:USDC", "Hack at retailer cuts net income", nil, true},
+		{"PARA-AVGO/USDC:USDC", "Fraude para o mercado: hack at bank", nil, true},
+		{"PARA-AVGO/USDC:USDC", "AVGO hack", nil, false},
+		{"NOT/USDC:USDC", "Exchange says funds were not hack victims", nil, true},
+		{"NOT/USDC:USDC", "NOT token hack", nil, false},
+		{"S/USDC:USDC", "Bitcoin's hack fears fade", nil, true},
+		{"BTC/USDC:USDC", "BTC exchange hack", nil, false},
+		{"BTC/USDC:USDC", "btc exchange hack", nil, true},
+		{"BTC/USDC:USDC", "btc exchange hack", map[string][]string{"BTC": {"btc"}}, false},
+		{"BTC/USDC:USDC", "bitcoin exchange hack", map[string][]string{"BTC": {"Bitcoin"}}, false},
+		{"BTC/USDC:USDC", "BITCOIN EXCHANGE HACK", map[string][]string{"BTC": {"bitcoin"}}, false},
+		{"XYZ-GOOGL/USDC:USDC", "googl hack", nil, false},
+		{"kPEPE/USDC:USDC", "KPEPE hack", nil, false},
+	} {
+		srv := oneHeadline(t, tc.headline)
+		r := &RSS{Feeds: []string{srv.URL}, Keywords: []string{"hack"}, Aliases: tc.aliases, Lookback: time.Hour, Client: srv.Client()}
+		ok, reason, err := r.Clear(context.Background(), tc.symbol, at)
+		if err != nil || ok != tc.clear {
+			t.Errorf("%s %q aliases %v: clear = %v (%s) err %v, want %v", tc.symbol, tc.headline, tc.aliases, ok, reason, err, tc.clear)
 		}
 	}
 }

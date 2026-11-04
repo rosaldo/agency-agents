@@ -14,9 +14,11 @@ import (
 	"net/http"
 	neturl "net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 )
@@ -89,32 +91,48 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 			if dated && t.Before(at.Add(-r.Lookback)) {
 				continue // undated headlines count as recent: fail closed
 			}
-			if full := h.title + "\n" + h.description; mentions(full, names) && mentions(full, r.Keywords) {
+			if full := h.title + "\n" + h.description; names.in(full) && mentions(full, r.Keywords) {
 				text, cut := classifierText(h)
 				out = append(out, Hit{Text: label(h, text), ClassifierText: text, Feed: redact(url), When: t,
-					PastTheCap: cut && !(mentions(text, names) && mentions(text, r.Keywords))})
+					PastTheCap: cut && !(names.in(text) && mentions(text, r.Keywords))})
 			}
 		}
 	}
 	return out, nil
 }
 
-// names lists what a headline can call symbol's asset: its base and that
-// base's aliases; on a HIP-3 symbol, the ticker and the dex, with the aliases
-// of each (news of the dex matters to its markets too).
-func (r *RSS) names(symbol string) []string {
+// assetNames is what a headline can call an asset. A short name from the
+// symbol is matched as written (NOT, S, NET and NOW are tickers, not, s, net
+// and now are words); a longer one and every alias in any case. An alias of
+// the same word brings any case back: {BTC: [btc]}.
+type assetNames struct{ exact, anyCase []string }
+
+const maxExactName = 4 // characters
+
+func (n assetNames) in(text string) bool {
+	return mentionsExactly(text, n.exact) || mentions(text, n.anyCase)
+}
+
+// names lists symbol's base and that base's aliases; on a HIP-3 symbol, the
+// ticker and the dex, with the aliases of each (news of the dex matters to its
+// markets too).
+func (r *RSS) names(symbol string) assetNames {
 	bases := []string{strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0]}
 	if dex, ticker, ok := market.HIP3(symbol); ok {
 		bases = []string{ticker, dex}
 	}
-	var names []string
+	var n assetNames
 	for _, b := range bases {
-		names = append(names, strings.ToLower(b))
+		if utf8.RuneCountInString(b) <= maxExactName {
+			n.exact = append(n.exact, b)
+		} else {
+			n.anyCase = append(n.anyCase, strings.ToLower(b))
+		}
 		for _, a := range r.Aliases[strings.ToUpper(b)] {
-			names = append(names, strings.ToLower(a))
+			n.anyCase = append(n.anyCase, strings.ToLower(a))
 		}
 	}
-	return names
+	return n
 }
 
 // redact drops a feed URL's query and fragment, where access tokens live.
@@ -175,18 +193,14 @@ func parseTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// mentions reports whether text contains any of the words as a whole word.
-func mentions(text string, words []string) bool {
-	set := map[string]bool{}
-	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(c rune) bool { return !unicode.IsLetter(c) && !unicode.IsDigit(c) }) {
-		set[w] = true
-	}
-	for _, w := range words {
-		if set[w] {
-			return true
-		}
-	}
-	return false
+// mentions reports whether text contains any of the lowercase words as a
+// whole word, in any case.
+func mentions(text string, words []string) bool { return mentionsExactly(strings.ToLower(text), words) }
+
+// mentionsExactly is mentions in the words' own case.
+func mentionsExactly(text string, words []string) bool {
+	return slices.ContainsFunc(strings.FieldsFunc(text, func(c rune) bool { return !unicode.IsLetter(c) && !unicode.IsDigit(c) }),
+		func(w string) bool { return slices.Contains(words, w) })
 }
 
 var htmlTag = regexp.MustCompile(`<[^>]*>`)
