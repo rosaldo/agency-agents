@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.61.1** (2026-11-04) · `docs` — quant-engine: README covers the classifier's providers, key variables and failure paths
 - **v1.61.0** (2026-11-04) · `feat` — quant-engine: the news classifier takes provider openrouter, with its own key variable; any other provider is refused at load
 - **v1.60.0** (2026-11-04) · `feat` — quant-engine: the Jev client knows OpenRouter's fixed endpoint and names its provider in errors
 - **v1.59.12** (2026-11-04) · `test` — quant-engine: the refusal of a feed's root element keeps the URL's query out of the error
