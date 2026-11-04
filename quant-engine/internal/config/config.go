@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/rosaldo/agency-agents/quant-engine/internal/news"
 	"github.com/rosaldo/agency-agents/quant-engine/market"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 )
@@ -153,6 +154,13 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 			return nil, fmt.Errorf("config: strategy %s: news classifier: news_guard is %s, so it would never be asked; set news_guard: required or remove the classifier", s.Name(), c.NewsGuard)
 		}
 		c.news = &p
+		if c.NewsGuard == "required" && len(p.Feeds) > 0 {
+			for _, sym := range c.Symbols {
+				if name := news.NameNeedingAlias(sym, p.Aliases); name != "" {
+					return nil, fmt.Errorf("config: strategy %s: symbol %q: a name of one character cannot be searched in headlines, so the news guard would find nothing; add its names to the news policy's aliases, such as {%s: [full name]}", s.Name(), sym, name)
+				}
+			}
+		}
 	}
 	if _, err := c.paramsHash(); err != nil {
 		return nil, fmt.Errorf("config: a key that is not a string (quote true, false, null and numbers used as keys) or a .inf or .nan value cannot be part of a run's parameters: %s", oneLine(err.Error()))

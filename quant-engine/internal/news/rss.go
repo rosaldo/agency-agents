@@ -141,7 +141,25 @@ func (r *RSS) names(symbol string) assetNames {
 }
 
 func baseOf(symbol string) string {
-	return strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0]
+	if pieces := strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' }); len(pieces) > 0 {
+		return pieces[0]
+	}
+	return symbol
+}
+
+// NameNeedingAlias is the name of symbol's asset, its base or HIP-3 ticker,
+// when the guard could not search it: one character with no alias, under its
+// own key or the dex's. Empty otherwise. A dex of one character needs none:
+// the ticker is what names the asset.
+func NameNeedingAlias(symbol string, aliases map[string][]string) string {
+	name, keys := baseOf(symbol), []string{baseOf(symbol)}
+	if dex, ticker, ok := market.HIP3(symbol); ok {
+		name, keys = ticker, []string{ticker, dex}
+	}
+	if utf8.RuneCountInString(name) != 1 || slices.ContainsFunc(keys, func(k string) bool { return len(aliases[strings.ToUpper(k)]) > 0 }) {
+		return ""
+	}
+	return name
 }
 
 // assetLine tells the classifier whose news it is judging.

@@ -157,3 +157,38 @@ func TestEquitySymbolMustBeHIP3(t *testing.T) {
 		t.Errorf("crypto: %v", err)
 	}
 }
+
+// With the guard on, an asset whose name is one character needs an alias: it
+// could not be searched otherwise. Refused, saying which alias to add.
+func TestOneCharacterNameNeedsAnAliasUnderTheGuard(t *testing.T) {
+	on := strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: required", 1)
+	aliases := func(key string) map[string][]string { return map[string][]string{key: {"full name"}} }
+	feeds := []string{"https://example.invalid/rss"}
+	for _, tc := range []struct {
+		yml, symbol string
+		feeds       []string
+		aliases     map[string][]string
+		want        string // "" = loads
+	}{
+		{on, "S/USDC:USDC", feeds, nil, "{S: [full name]}"},
+		{on, "S/USDC:USDC", feeds, map[string][]string{"S": {}}, "{S: [full name]}"},
+		{on, "S/USDC:USDC", feeds, aliases("W"), "{S: [full name]}"},
+		{on, "S/USDC:USDC", feeds, aliases("S"), ""},
+		{on, "BTC/USDC:USDC", feeds, nil, ""},
+		{on, "XYZ-S/USDC:USDC", feeds, nil, "{S: [full name]}"},
+		{on, "XYZ-S/USDC:USDC", feeds, aliases("S"), ""},
+		{on, "XYZ-S/USDC:USDC", feeds, aliases("XYZ"), ""},
+		{on, "X-GOOGL/USDC:USDC", feeds, nil, ""},
+		{on, "X-S/USDC:USDC", feeds, nil, "{S: [full name]}"},
+		{on, "X-S/USDC:USDC", feeds, aliases("X"), ""},
+		{on, "S/USDC:USDC", nil, nil, ""}, // no feeds: no entry at all, nothing inert
+		{validYAML, "S/USDC:USDC", feeds, nil, ""},
+	} {
+		y := strings.Replace(tc.yml, "[AAA-USD]", "[\""+tc.symbol+"\"]", 1)
+		kw := []string{"hack"}
+		_, err := Parse([]byte(y), withNews{example.New(), strategy.NewsPolicy{Feeds: tc.feeds, Keywords: kw, Aliases: tc.aliases}})
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.symbol)) {
+			t.Errorf("%s feeds %v aliases %v: err = %v, want %q", tc.symbol, tc.feeds, tc.aliases, err, tc.want)
+		}
+	}
+}

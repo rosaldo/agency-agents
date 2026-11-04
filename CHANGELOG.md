@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.59.4** (2026-11-03) · `fix` — quant-engine: under the news guard, a symbol named by one character with no alias is refused at load instead of leaving the guard inert
 - **v1.59.3** (2026-11-03) · `fix` — quant-engine: a name of one character from the symbol matches a headline only through an alias: the S of U.S. and S&P is not the asset
 - **v1.59.2** (2026-11-03) · `fix` — quant-engine: only a real tag is stripped from a description: a loose < no longer erases the text after it
 - **v1.59.1** (2026-11-03) · `fix` — quant-engine: an equity symbol the news guard cannot search is refused at load
