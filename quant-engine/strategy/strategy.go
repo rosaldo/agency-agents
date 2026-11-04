@@ -96,7 +96,7 @@ type NewsSource interface {
 type NewsPolicy struct {
 	Feeds    []string            // RSS/Atom URLs
 	Keywords []string            // no engine default list
-	Aliases  map[string][]string // base asset -> extra names
+	Aliases  map[string][]string // base asset (on HIP-3: ticker or dex) -> extra names
 	Lookback time.Duration
 	// Classifier judges each headline the keywords matched; nil means every
 	// match is a catastrophe (keywords alone).

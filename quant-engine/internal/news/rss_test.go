@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -97,5 +98,56 @@ func TestFeedQueryIsRedacted(t *testing.T) {
 	dead := &RSS{Feeds: []string{"http://127.0.0.1:1/rss?token=hunter2"}, Lookback: time.Hour, Client: srv.Client()}
 	if _, _, err := dead.Clear(context.Background(), "AAA/USDT", at); err == nil || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("connection error leaks the query: %v", err)
+	}
+}
+
+// oneHeadline serves one recent RSS item.
+func oneHeadline(t *testing.T, title string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("<rss><channel><item><title>" + title + "</title></item></channel></rss>"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A HIP-3 symbol names a ticker and a dex: a headline naming either, or an
+// alias of either, is a hit. The first piece of such a symbol is only the dex.
+func TestHIP3SymbolIsSearchedByTickerAndDex(t *testing.T) {
+	const symbol = "XYZ-GOOGL/USDC:USDC"
+	for _, tc := range []struct {
+		headline string
+		aliases  map[string][]string
+		clear    bool
+	}{
+		{"GOOGL trading halted", nil, false},
+		{"Google trading halted", map[string][]string{"GOOGL": {"google"}}, false},
+		{"XYZ trading halted", nil, false},
+		{"Google trading halted", map[string][]string{"XYZ": {"googl", "google"}}, false},
+		{"Google trading halted", nil, true},
+		{"AAPL trading halted", map[string][]string{"GOOGL": {"google"}, "XYZ": {"xyzdex"}}, true},
+	} {
+		srv := oneHeadline(t, tc.headline)
+		r := &RSS{Feeds: []string{srv.URL}, Keywords: []string{"halted"}, Aliases: tc.aliases, Lookback: time.Hour, Client: srv.Client()}
+		ok, reason, err := r.Clear(context.Background(), symbol, at)
+		if err != nil || ok != tc.clear {
+			t.Errorf("%q aliases %v: clear = %v (%s) err %v, want %v", tc.headline, tc.aliases, ok, reason, err, tc.clear)
+		}
+	}
+}
+
+// Any other symbol is searched by its first piece alone, as ever.
+func TestOtherSymbolsKeepOneBase(t *testing.T) {
+	r := &RSS{Aliases: map[string][]string{"EEE": {"eee coin"}, "USD": {"dollar"}, "USDT": {"tether"}}}
+	for symbol, want := range map[string][]string{
+		"EEE-USD":       {"eee", "eee coin"},
+		"EEE/USDT":      {"eee", "eee coin"},
+		"EEE/USDC:USDC": {"eee", "eee coin"},
+		"EEE:USDT":      {"eee", "eee coin"},
+		"ZZZ-USD":       {"zzz"},
+	} {
+		if got := r.names(symbol); !slices.Equal(got, want) {
+			t.Errorf("%s: names %v, want %v", symbol, got, want)
+		}
 	}
 }

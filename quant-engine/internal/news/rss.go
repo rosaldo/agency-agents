@@ -15,12 +15,14 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/rosaldo/agency-agents/quant-engine/market"
 )
 
 type RSS struct {
 	Feeds    []string
 	Keywords []string            // lowercase single words
-	Aliases  map[string][]string // base asset -> extra names, e.g. BTC: [bitcoin]
+	Aliases  map[string][]string // base asset (on HIP-3: ticker or dex) -> extra names, e.g. BTC: [bitcoin]
 	Lookback time.Duration
 	Client   *http.Client
 }
@@ -65,11 +67,7 @@ func (r *RSS) Clear(ctx context.Context, symbol string, at time.Time) (bool, str
 // Hits lists the recent headlines of every feed that name symbol's base
 // asset with a keyword. Any feed that cannot be read or parsed is an error.
 func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, error) {
-	base := strings.ToLower(strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0])
-	names := []string{base}
-	for _, a := range r.Aliases[strings.ToUpper(base)] {
-		names = append(names, strings.ToLower(a))
-	}
+	names := r.names(symbol)
 	var out []Hit
 	for _, url := range r.Feeds {
 		hs, err := r.fetch(ctx, url)
@@ -87,6 +85,24 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 		}
 	}
 	return out, nil
+}
+
+// names lists what a headline can call symbol's asset: its base and that
+// base's aliases; on a HIP-3 symbol, the ticker and the dex, with the aliases
+// of each (news of the dex matters to its markets too).
+func (r *RSS) names(symbol string) []string {
+	bases := []string{strings.FieldsFunc(symbol, func(c rune) bool { return c == '/' || c == '-' || c == ':' })[0]}
+	if dex, ticker, ok := market.HIP3(symbol); ok {
+		bases = []string{ticker, dex}
+	}
+	var names []string
+	for _, b := range bases {
+		names = append(names, strings.ToLower(b))
+		for _, a := range r.Aliases[strings.ToUpper(b)] {
+			names = append(names, strings.ToLower(a))
+		}
+	}
+	return names
 }
 
 // redact drops a feed URL's query and fragment, where access tokens live.

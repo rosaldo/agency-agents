@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.58.7** (2026-11-03) · `fix` — quant-engine: the news guard searches a HIP-3 symbol by its ticker and its dex, not by the dex alone
 - **v1.58.6** (2026-11-03) · `test` — quant-engine: an Add filled on the venue without a confirmed fill (answer lost, or rejected without an error) halts and keeps the retarget owed
 - **v1.58.5** (2026-11-03) · `fix` — quant-engine: an Enter or Add that filled nothing (never sent, or rejected by the exchange) puts the owed retarget back as it was, so no Retarget is called without a fill
 - **v1.58.4** (2026-11-03) · `test` — quant-engine: a tranche whose save fails sends no order and owes no retarget

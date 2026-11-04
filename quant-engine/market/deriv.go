@@ -226,12 +226,23 @@ func ReadFundingHistory(r io.Reader, symbol string, cs []Candle, interval time.D
 // upper-cased, a dash, the ticker (xyz:GOOGL -> XYZ-GOOGL/USDC:USDC).
 var hip3Base = regexp.MustCompile(`^([A-Z0-9]+)-([A-Z0-9]+)$`)
 
+// HIP3 splits a HIP-3 symbol into its dex and its ticker, as written in the
+// symbol (XYZ-GOOGL/USDC:USDC -> XYZ, GOOGL); ok is false on any other symbol.
+func HIP3(symbol string) (dex, ticker string, ok bool) {
+	base, _, slash := strings.Cut(symbol, "/")
+	m := hip3Base.FindStringSubmatch(base)
+	if !slash || m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
 // hyperliquidCoin is the venue's coin of a symbol: the base, or dex:ticker on
 // a HIP-3 market.
 func hyperliquidCoin(symbol string) string {
-	base, _, _ := strings.Cut(symbol, "/")
-	if m := hip3Base.FindStringSubmatch(base); m != nil {
-		return strings.ToLower(m[1]) + ":" + m[2]
+	if dex, ticker, ok := HIP3(symbol); ok {
+		return strings.ToLower(dex) + ":" + ticker
 	}
+	base, _, _ := strings.Cut(symbol, "/")
 	return base
 }
