@@ -175,14 +175,27 @@ func NameNeedingAlias(symbol string, aliases map[string][]string) string {
 	return name
 }
 
+// matchable reports whether the matcher finds word in a headline that is only
+// that word: one with a space or punctuation is compared with single words and
+// never is.
+func matchable(word string) bool { return mentions(word, []string{strings.ToLower(word)}) }
+
+// UnmatchableKeyword finds a keyword no headline could match.
+func UnmatchableKeyword(keywords []string) (string, bool) {
+	for _, k := range keywords {
+		if !matchable(k) {
+			return k, true
+		}
+	}
+	return "", false
+}
+
 // UnsearchableAlias finds an alias of symbol the guard could never match in a
-// headline: the matcher itself, given a headline that is only the alias, does
-// not find it. A headline is compared word by word, so an alias with a space or
-// punctuation is one.
+// headline.
 func UnsearchableAlias(symbol string, aliases map[string][]string) (string, bool) {
 	for _, b := range searchedBases(symbol) {
 		for _, a := range aliases[strings.ToUpper(b)] {
-			if !mentions(a, []string{strings.ToLower(a)}) {
+			if !matchable(a) {
 				return a, true
 			}
 		}

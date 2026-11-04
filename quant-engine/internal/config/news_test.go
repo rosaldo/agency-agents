@@ -263,3 +263,27 @@ func TestAliasKeyTheGuardNeverReadsIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// With the guard on, a keyword no headline could match is refused, naming it.
+func TestKeywordTheGuardCouldNeverFindIsRefused(t *testing.T) {
+	on := strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: required", 1)
+	feeds := []string{"https://example.invalid/rss"}
+	for _, tc := range []struct {
+		yml      string
+		feeds    []string
+		keywords []string
+		bad      string // "" = loads
+	}{
+		{on, feeds, []string{"hack", "trading halt"}, "trading halt"},
+		{on, feeds, []string{"chain-halt"}, "chain-halt"},
+		{on, feeds, []string{""}, `""`},
+		{on, feeds, []string{"hack", "HALTED"}, ""},
+		{on, nil, []string{"trading halt"}, ""}, // no feeds: no entry at all
+		{validYAML, feeds, []string{"trading halt"}, ""},
+	} {
+		_, err := Parse([]byte(tc.yml), withNews{example.New(), strategy.NewsPolicy{Feeds: tc.feeds, Keywords: tc.keywords}})
+		if tc.bad == "" && err != nil || tc.bad != "" && (err == nil || !strings.Contains(err.Error(), tc.bad)) {
+			t.Errorf("keywords %q: err = %v, want %q", tc.keywords, err, tc.bad)
+		}
+	}
+}

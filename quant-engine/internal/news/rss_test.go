@@ -277,3 +277,18 @@ func TestIgnoredAliasKeyAgreesWithTheLookup(t *testing.T) {
 		t.Error("an uppercase key of a symbol not traded was reported")
 	}
 }
+
+// The refusal at load and the matcher agree on keywords, as engine lowercases them.
+func TestUnmatchableKeywordAgreesWithTheMatcher(t *testing.T) {
+	for _, k := range []string{"hack", "HALTED", "trading halt", "chain-halt", ""} {
+		srv := oneHeadline(t, "AAA "+k)
+		r := &RSS{Feeds: []string{srv.URL}, Keywords: []string{strings.ToLower(k)}, Lookback: time.Hour, Client: srv.Client()}
+		hs, err := r.Hits(context.Background(), "AAA/USDT", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, bad := UnmatchableKeyword([]string{k}); bad != (len(hs) == 0) {
+			t.Errorf("keyword %q: unmatchable = %v, hits = %d", k, bad, len(hs))
+		}
+	}
+}

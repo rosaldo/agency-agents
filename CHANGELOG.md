@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.59.11** (2026-11-04) · `fix` — quant-engine: under the news guard, a keyword no headline could match is refused at load instead of leaving the guard inert
 - **v1.59.10** (2026-11-04) · `fix` — quant-engine: under the news guard, an alias key in the form of a symbol is refused at load: the guard never reads it
 - **v1.59.9** (2026-11-04) · `fix` — quant-engine: a feed that fails always keeps an equity out, without asking the classifier: a headline judged noise no longer opens the entry
 - **v1.59.8** (2026-11-04) · `fix` — quant-engine: under the news guard, an alias key that is not uppercase is refused at load: the guard never reads it
