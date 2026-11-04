@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.61.3** (2026-11-04) · `test` — quant-engine: a lasting 503 from the news classifier must end within the classification's deadline
 - **v1.61.2** (2026-11-04) · `fix` — quant-engine: a passing 502 or 503 from the news classifier is retried like a 429, so it does not read as a catastrophe
 - **v1.61.1** (2026-11-04) · `docs` — quant-engine: README covers the classifier's providers, key variables and failure paths
 - **v1.61.0** (2026-11-04) · `feat` — quant-engine: the news classifier takes provider openrouter, with its own key variable; any other provider is refused at load

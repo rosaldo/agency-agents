@@ -187,10 +187,10 @@ func TestKeyAndCreditFailuresAreNotRetried(t *testing.T) {
 func TestLastingFailureStaysWithinTheDeadline(t *testing.T) {
 	j := &jev{status: 503, answer: answer(0.1)}
 	c := client(j.server(t).URL, testKey)
-	c.Backoff = 80 * time.Millisecond // 80 fits the 200 ms timeout, 160 does not
+	c.Backoff = 150 * time.Millisecond // 150 fits the 200 ms timeout, 300 more does not: sitting it out would take 450
 	start := time.Now()
 	fs, err := guard(feedServer(t, "Exchange hack drains BTC reserves", 0).URL, c).Check(context.Background(), "BTC/USDC:USDC", at)
-	if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil || j.calls.Load() != 2 || time.Since(start) > time.Second {
+	if err != nil || len(fs) != 1 || !fs[0].Catastrophe || fs[0].Err == nil || j.calls.Load() != 2 || time.Since(start) > 400*time.Millisecond {
 		t.Fatalf("findings %+v %v, %d calls in %v; want a catastrophe after 2 calls, within the timeout", fs, err, j.calls.Load(), time.Since(start))
 	}
 }
