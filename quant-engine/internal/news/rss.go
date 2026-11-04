@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"maps"
 	"net/http"
 	neturl "net/url"
 	"regexp"
@@ -188,6 +189,19 @@ func UnsearchableAlias(symbol string, aliases map[string][]string) (string, bool
 			if !mentions(a, []string{strings.ToLower(a)}) {
 				return a, true
 			}
+		}
+	}
+	return "", false
+}
+
+// IgnoredAliasKey finds a key of aliases the guard never reads, for any symbol:
+// base, ticker and dex are all looked up in uppercase, so a key that is not
+// uppercase is dead. An uppercase key of no configured symbol is not reported:
+// one policy may list more assets than a run trades.
+func IgnoredAliasKey(aliases map[string][]string) (string, bool) {
+	for _, k := range slices.Sorted(maps.Keys(aliases)) {
+		if k != strings.ToUpper(k) {
+			return k, true
 		}
 	}
 	return "", false

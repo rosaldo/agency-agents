@@ -247,3 +247,31 @@ func TestUnsearchableAliasAgreesWithTheMatcher(t *testing.T) {
 		}
 	}
 }
+
+// The refusal at load and the lookup agree, on bases, tickers and dexes: a key
+// is called ignored exactly when its alias finds nothing, whatever the case of
+// the symbol, so no key that works is ever refused.
+func TestIgnoredAliasKeyAgreesWithTheLookup(t *testing.T) {
+	srv := oneHeadline(t, "Zebracoin hack")
+	for _, tc := range []struct{ symbol, key string }{
+		{"BTC/USDC:USDC", "BTC"}, {"BTC/USDC:USDC", "btc"}, {"BTC/USDC:USDC", "Btc"},
+		{"btc/usdc:usdc", "BTC"}, {"btc/usdc:usdc", "btc"},
+		{"XYZ-GOOGL/USDC:USDC", "GOOGL"}, {"XYZ-GOOGL/USDC:USDC", "googl"},
+		{"XYZ-GOOGL/USDC:USDC", "XYZ"}, {"XYZ-GOOGL/USDC:USDC", "xyz"},
+		{"xyz-GOOGL/USDC:USDC", "XYZ"}, {"xyz-GOOGL/USDC:USDC", "xyz"},
+	} {
+		aliases := map[string][]string{tc.key: {"zebracoin"}}
+		r := &RSS{Feeds: []string{srv.URL}, Keywords: testKeywords, Aliases: aliases, Lookback: time.Hour, Client: srv.Client()}
+		hs, err := r.Hits(context.Background(), tc.symbol, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ignored := IgnoredAliasKey(aliases)
+		if ignored != (len(hs) == 0) || ignored && got != tc.key {
+			t.Errorf("%s key %q: ignored = %v (%q), hits = %d", tc.symbol, tc.key, ignored, got, len(hs))
+		}
+	}
+	if _, ignored := IgnoredAliasKey(map[string][]string{"ETH": {"ethereum"}}); ignored {
+		t.Error("an uppercase key of a symbol not traded was reported")
+	}
+}

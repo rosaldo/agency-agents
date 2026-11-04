@@ -155,6 +155,9 @@ func Parse(b []byte, s strategy.Strategy) (*Config, error) {
 		}
 		c.news = &p
 		if c.NewsGuard == "required" && len(p.Feeds) > 0 {
+			if key, bad := news.IgnoredAliasKey(p.Aliases); bad {
+				return nil, fmt.Errorf("config: strategy %s: alias key %q is never read: the news guard looks keys up in uppercase, tickers and dexes alike; write it as %q", s.Name(), key, strings.ToUpper(key))
+			}
 			for _, sym := range c.Symbols {
 				if name := news.NameNeedingAlias(sym, p.Aliases); name != "" {
 					return nil, fmt.Errorf("config: strategy %s: symbol %q: a name of one character cannot be searched in headlines, so the news guard would find nothing; add its names to the news policy's aliases, one word each, such as {%s: [name]}", s.Name(), sym, name)

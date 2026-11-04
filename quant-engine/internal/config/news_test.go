@@ -227,3 +227,37 @@ func TestAliasTheGuardCouldNeverFindIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// With the guard on, an alias key the guard never reads is refused, naming the
+// key: lowercase on a ticker or a dex alike. An uppercase key is read when its
+// symbol trades and harmless when it does not.
+func TestAliasKeyTheGuardNeverReadsIsRefused(t *testing.T) {
+	on := strings.Replace(validYAML, "asset_class: crypto", "asset_class: crypto\nnews_guard: required", 1)
+	feeds := []string{"https://example.invalid/rss"}
+	for _, tc := range []struct {
+		yml, symbol string
+		feeds       []string
+		aliases     map[string][]string
+		bad         string // "" = loads
+	}{
+		{on, "BTC/USDC:USDC", feeds, map[string][]string{"btc": {"bitcoin"}}, `"btc"`},
+		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC": {"bitcoin"}, "Eth": {"ethereum"}}, `"Eth"`},
+		{on, "btc/USDC:USDC", feeds, map[string][]string{"btc": {"bitcoin"}}, `"btc"`},
+		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"xyz": {"google"}}, `"xyz"`},
+		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"googl": {"google"}}, `"googl"`},
+		{on, "S/USDC:USDC", feeds, map[string][]string{"s": {"sonic"}}, `"s"`},
+
+		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC": {"bitcoin"}}, ""},
+		{on, "BTC/USDC:USDC", feeds, map[string][]string{"BTC": {"btc"}, "ETH": {"ethereum"}}, ""},
+		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"XYZ": {"google"}}, ""},
+		{on, "XYZ-GOOGL/USDC:USDC", feeds, map[string][]string{"GOOGL": {"google"}}, ""},
+		{on, "BTC/USDC:USDC", nil, map[string][]string{"btc": {"bitcoin"}}, ""}, // no feeds: no entry at all
+		{validYAML, "BTC/USDC:USDC", feeds, map[string][]string{"btc": {"bitcoin"}}, ""},
+	} {
+		y := strings.Replace(tc.yml, "[AAA-USD]", "[\""+tc.symbol+"\"]", 1)
+		_, err := Parse([]byte(y), withNews{example.New(), strategy.NewsPolicy{Feeds: tc.feeds, Keywords: []string{"hack"}, Aliases: tc.aliases}})
+		if tc.bad == "" && err != nil || tc.bad != "" && (err == nil || !strings.Contains(err.Error(), tc.bad)) {
+			t.Errorf("%s aliases %v: err = %v, want %q", tc.symbol, tc.aliases, err, tc.bad)
+		}
+	}
+}
