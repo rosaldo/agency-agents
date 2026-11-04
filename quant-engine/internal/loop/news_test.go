@@ -41,8 +41,15 @@ type newsStrategy struct {
 	feed string
 }
 
+// extraFeed, when set, is a second feed of every newsStrategy.
+var extraFeed string
+
 func (s newsStrategy) NewsPolicy() strategy.NewsPolicy {
-	return strategy.NewsPolicy{Feeds: []string{s.feed}, Keywords: []string{"hack"}, Lookback: 24 * time.Hour}
+	feeds := []string{s.feed}
+	if extraFeed != "" {
+		feeds = append(feeds, extraFeed)
+	}
+	return strategy.NewsPolicy{Feeds: feeds, Keywords: []string{"hack"}, Lookback: 24 * time.Hour}
 }
 
 // newsRun runs the loop over four flat hourly candles with the feed
@@ -131,6 +138,30 @@ func TestUnreadableFeedAfterTheEntryKeepsThePosition(t *testing.T) {
 	ps, _ := f.Positions(context.Background(), exchange.Demo)
 	if failed == 0 || exits != 0 || len(ps) != 1 || ps[0].Qty <= 0 {
 		t.Fatalf("news_check_failed %d, exits %d, positions %+v; want the failure journaled and the position kept", failed, exits, ps)
+	}
+}
+
+// A crypto position with one feed down: a catastrophe in the other feed still
+// exits in the same cycle, and the failure is journaled.
+func TestAFailingFeedDoesNotHideACatastropheAfterTheEntry(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", http.StatusInternalServerError) }))
+	t.Cleanup(down.Close)
+	extraFeed = down.URL
+	t.Cleanup(func() { extraFeed = "" })
+	dir, _, cs := newsRun(t, "AAA exchange hack")
+	failed, exits := 0, 0
+	var exitAt time.Time
+	for _, e := range journalOf(t, dir) {
+		switch e.Kind {
+		case journal.NewsCheckFailed:
+			failed++
+		case journal.EmergencyExit:
+			exits++
+			exitAt = e.Time
+		}
+	}
+	if failed == 0 || exits != 1 || !exitAt.Equal(cs[0].Time) {
+		t.Fatalf("news_check_failed %d, emergency exits %d at %v; want the failure journaled and one exit at %v", failed, exits, exitAt, cs[0].Time)
 	}
 }
 

@@ -43,7 +43,8 @@ const (
 	FeedRestored = "feed_restored"
 	// NewsHit: a recent headline names the asset with a keyword (crypto,
 	// after the entry); NewsVerdict: how it was judged, with the classifier's
-	// model; NewsCheckFailed: a feed was unreadable, the position stays;
+	// model; NewsCheckFailed: a feed was unreadable: the position stays, unless
+	// the other feeds' headlines decide otherwise;
 	// EmergencyExit: a catastrophe closes the position and blocks the symbol.
 	NewsHit         = "news_hit"
 	NewsVerdict     = "news_verdict"

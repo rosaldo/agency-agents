@@ -67,20 +67,26 @@ type Guard struct {
 	seen map[string]Finding // feed + text -> judged once, until its Until (then dropped: an undated one still served is judged again)
 }
 
+// PartialFailure is Clear's error when a feed failed but the others' headlines
+// decided: the answer stands, as if every feed had answered, and the failure is
+// only to be journaled.
+type PartialFailure struct{ Err error }
+
+func (p PartialFailure) Error() string { return p.Err.Error() }
+func (p PartialFailure) Unwrap() error { return p.Err }
+
 // Check runs the pre-filter for symbol at at and judges every headline it
-// matched; an unreadable feed is an error and judges nothing.
+// matched; the error is that of the feeds that could not be read, which do not
+// stop the others' headlines from being judged.
 func (g *Guard) Check(ctx context.Context, symbol string, at time.Time) ([]Finding, error) {
 	hs, err := g.RSS.Hits(ctx, symbol, at)
-	if err != nil {
-		return nil, err
-	}
 	var out []Finding
 	for _, h := range hs {
 		f := g.judge(ctx, h, at)
 		f.Symbol = symbol
 		out = append(out, f)
 	}
-	return out, nil
+	return out, err
 }
 
 func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
@@ -124,16 +130,21 @@ func (g *Guard) judge(ctx context.Context, h Hit, at time.Time) Finding {
 	return f
 }
 
-// Clear is the check before an entry: not clear on any catastrophe.
+// Clear is the check before an entry: not clear on any catastrophe. A feed
+// that failed with no headline from the others is an error and not clear; with
+// a headline, that headline decides and the failure is a PartialFailure.
 func (g *Guard) Clear(ctx context.Context, symbol string, at time.Time) (bool, string, error) {
 	fs, err := g.Check(ctx, symbol, at)
-	if err != nil {
+	if err != nil && len(fs) == 0 {
 		return false, "", err
+	}
+	if err != nil {
+		err = PartialFailure{err}
 	}
 	for _, f := range fs {
 		if f.Catastrophe {
-			return false, fmt.Sprintf("%q (%s): %s", f.Headline, f.Feed, f.Why(g.Threshold)), nil
+			return false, fmt.Sprintf("%q (%s): %s", f.Headline, f.Feed, f.Why(g.Threshold)), err
 		}
 	}
-	return true, "", nil
+	return true, "", err
 }

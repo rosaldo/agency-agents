@@ -123,8 +123,9 @@ type NewsChecker interface {
 }
 
 // newsBlocks applies news_guard fail-closed: no checker, an error, a timeout
-// or a not-clear verdict all keep the engine out. A crypto is checked after
-// its entry instead (the loop's worker), and only needs the checker.
+// or a not-clear verdict all keep the engine out, except a feed's failure when
+// the others' headlines decided, which is only journaled. A crypto is checked
+// after its entry instead (the loop's worker), and only needs the checker.
 func (e *Engine) newsBlocks(ctx context.Context, symbol string, at time.Time) string {
 	crypto := e.Cfg.AssetClass == "crypto"
 	switch {
@@ -142,10 +143,14 @@ func (e *Engine) newsBlocks(ctx context.Context, symbol string, at time.Time) st
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ok, reason, err := e.News.Clear(cctx, symbol, at)
+	var partial news.PartialFailure
 	switch {
+	case errors.As(err, &partial):
+		e.note(journal.NewsCheckFailed, symbol, "the other feeds' headlines decide this check: "+partial.Error())
 	case err != nil:
 		return "news check failed: " + err.Error()
-	case !ok:
+	}
+	if !ok {
 		return "news check not clear: " + reason
 	}
 	return ""

@@ -3,6 +3,8 @@ package news_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -270,5 +272,57 @@ func TestClearBeforeAnEntry(t *testing.T) {
 		if err != nil || ok != want || (!ok && !strings.Contains(why, "catastrophe")) {
 			t.Fatalf("yes %v: clear %v %q %v; want %v", p, ok, why, err, want)
 		}
+	}
+}
+
+// A feed that fails does not hide what the others found, in either order: the
+// hit decides, once per headline, and the failure comes with it. With no hit,
+// the failure alone is not clear.
+func TestAFailingFeedDoesNotHideTheOthers(t *testing.T) {
+	const hit, other = "Exchange hack drains BTC reserves", "Nothing about it"
+	for _, tc := range []struct {
+		name      string
+		title     string
+		p         float64
+		clear     bool
+		partial   bool
+		wantCalls int32
+	}{
+		{"catastrophe", hit, 0.95, false, true, 1},
+		{"noise", hit, 0.2, true, true, 1},
+		{"no hit", other, 0.95, false, false, 0},
+	} {
+		for _, down := range []int{0, 1} {
+			t.Run(fmt.Sprintf("%s, failing feed %d", tc.name, down), func(t *testing.T) {
+				j := &jev{answer: answer(tc.p)}
+				g := guard(feedServer(t, tc.title, 0).URL, client(j.server(t).URL, testKey))
+				failing := feedServer(t, "", http.StatusInternalServerError).URL
+				g.RSS.Feeds = append(g.RSS.Feeds, failing)
+				if down == 0 {
+					g.RSS.Feeds[0], g.RSS.Feeds[1] = g.RSS.Feeds[1], g.RSS.Feeds[0]
+				}
+				for range 2 {
+					ok, why, err := g.Clear(context.Background(), "BTC/USDC:USDC", at)
+					var partial news.PartialFailure
+					if ok != tc.clear || err == nil || errors.As(err, &partial) != tc.partial || (!ok && tc.partial && why == "") {
+						t.Fatalf("clear %v %q, err %v; want clear %v, partial %v", ok, why, err, tc.clear, tc.partial)
+					}
+				}
+				if n := j.calls.Load(); n != tc.wantCalls {
+					t.Fatalf("classifier called %d times, want %d: the verdict is kept while a feed fails", n, tc.wantCalls)
+				}
+			})
+		}
+	}
+}
+
+// Every failing feed is named, and a no-classifier hit is judged too.
+func TestEveryFailingFeedIsReported(t *testing.T) {
+	g := guard(feedServer(t, "Exchange hack drains BTC reserves", 0).URL, nil)
+	a, b := feedServer(t, "", 500).URL, feedServer(t, "", 503).URL
+	g.RSS.Feeds = append(g.RSS.Feeds, a, b)
+	fs, err := g.Check(context.Background(), "BTC/USDC:USDC", at)
+	if len(fs) != 1 || !fs[0].Catastrophe || err == nil || !strings.Contains(err.Error(), a) || !strings.Contains(err.Error(), b) {
+		t.Fatalf("findings %+v, err %v", fs, err)
 	}
 }

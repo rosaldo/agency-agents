@@ -103,9 +103,11 @@ func handleNews(ctx context.Context, exit emergencyExit, threshold float64, r ne
 		return
 	}
 	if r.err != nil {
-		note(journal.Event{Kind: journal.NewsCheckFailed, Symbol: r.symbol,
-			Reason: "the position stays, its stop on the exchange; checked again at the next step: " + r.err.Error()})
-		return
+		what := "the position stays, its stop on the exchange; checked again at the next step: "
+		if len(r.found) > 0 {
+			what = "the other feeds' headlines are judged; this one is read again at the next step: "
+		}
+		note(journal.Event{Kind: journal.NewsCheckFailed, Symbol: r.symbol, Reason: what + r.err.Error()})
 	}
 	for _, f := range r.found {
 		note(journal.Event{Kind: journal.NewsHit, Symbol: r.symbol, Reason: fmt.Sprintf("%q (%s)", f.Headline, f.Feed)})

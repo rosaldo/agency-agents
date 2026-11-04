@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.59.7** (2026-11-04) · `fix` — quant-engine: a feed that fails no longer hides what the other feeds found: their headlines decide and the failure is journaled
 - **v1.59.6** (2026-11-04) · `fix` — quant-engine: a feed answering XML that is neither RSS 2.0 nor Atom is an unreadable feed, not a clean one
 - **v1.59.5** (2026-11-04) · `fix` — quant-engine: under the news guard, an alias no headline could match (a space, punctuation, empty) is refused at load instead of leaving the guard inert
 - **v1.59.4** (2026-11-03) · `fix` — quant-engine: under the news guard, a symbol named by one character with no alias is refused at load instead of leaving the guard inert

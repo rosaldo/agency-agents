@@ -66,25 +66,35 @@ type Hit struct {
 }
 
 // Clear reports whether no recent headline in any feed names symbol's base
-// asset with a keyword. Any feed that cannot be read or parsed is an error,
-// which the engine treats as not clear.
+// asset with a keyword. With no hit, a feed that cannot be read or parsed is
+// an error, which the engine treats as not clear; with a hit, the hit decides
+// and the failure comes as a PartialFailure.
 func (r *RSS) Clear(ctx context.Context, symbol string, at time.Time) (bool, string, error) {
 	hs, err := r.Hits(ctx, symbol, at)
-	if err != nil || len(hs) == 0 {
+	if len(hs) == 0 {
 		return err == nil, "", err
 	}
-	return false, fmt.Sprintf("%q (%s)", hs[0].Text, hs[0].Feed), nil
+	if err != nil {
+		err = PartialFailure{err}
+	}
+	return false, fmt.Sprintf("%q (%s)", hs[0].Text, hs[0].Feed), err
 }
 
 // Hits lists the recent headlines of every feed that name symbol's base
-// asset with a keyword. Any feed that cannot be read or parsed is an error.
+// asset with a keyword. A feed that cannot be read or parsed does not hide the
+// others: the hits come together with the error of the feeds that failed.
 func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, error) {
 	names := r.names(symbol)
 	var out []Hit
+	var failed error
 	for _, url := range r.Feeds {
 		hs, err := r.fetch(ctx, url)
 		if err != nil {
-			return nil, err
+			if failed != nil {
+				err = fmt.Errorf("%w; %w", failed, err)
+			}
+			failed = err
+			continue
 		}
 		for _, h := range hs {
 			t, dated := parseTime(h.when)
@@ -98,7 +108,7 @@ func (r *RSS) Hits(ctx context.Context, symbol string, at time.Time) ([]Hit, err
 			}
 		}
 	}
-	return out, nil
+	return out, failed
 }
 
 // assetNames is what a headline can call an asset. A short name from the
