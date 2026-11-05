@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,12 +105,18 @@ func TestReportTradeFixtureIsWhatTheEngineJournals(t *testing.T) {
 // state directory; st, when set, is saved as the run's state.
 func report(t *testing.T, fixture string, st *loop.State, args ...string) string {
 	t.Helper()
-	dir := t.TempDir()
 	b, err := os.ReadFile(filepath.Join("..", "testdata", fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), b, 0o600); err != nil {
+	return reportOn(t, string(b), st, args...)
+}
+
+// reportOn runs the report subcommand on journal, the journal's lines.
+func reportOn(t *testing.T, journal string, st *loop.State, args ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), []byte(journal), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if st != nil {
@@ -122,6 +129,13 @@ func report(t *testing.T, fixture string, st *loop.State, args ...string) string
 		t.Fatal(err)
 	}
 	return out.String()
+}
+
+// evaluatedAt is an evaluated event of sym for the candle closed at hh:00.
+func evaluatedAt(sym string, hh int) string {
+	c := time.Date(2026, 1, 1, hh, 0, 0, 0, time.UTC)
+	return fmt.Sprintf(`{"time":%q,"kind":"evaluated","mode":"paper","symbol":%q,"reason":"no signal","action":"none","candle_close":%q}`+"\n",
+		c.Add(time.Second).Format(time.RFC3339), sym, c.Format(time.RFC3339))
 }
 
 func mustHave(t *testing.T, out string, want ...string) {
@@ -229,4 +243,23 @@ func TestReportPeriodFlags(t *testing.T) {
 			t.Errorf("--since: from %v", p.from)
 		}
 	}
+}
+
+// SEEN counts candles, not events: a restart that decides the same candle
+// again does not count it twice; candles missing between two seen ones (an
+// interval inferred from the closes themselves) are an exception.
+func TestReportSeenCountsDistinctCandlesAndShowsGaps(t *testing.T) {
+	var j strings.Builder
+	for _, hh := range []int{1, 2, 2, 3, 7, 8} { // 2 decided twice; 4, 5 and 6 never
+		j.WriteString(evaluatedAt("AAA", hh))
+	}
+	for _, hh := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
+		j.WriteString(evaluatedAt("BBB", hh))
+	}
+	out := reportOn(t, j.String(), nil, "--from", "2026-01-01", "--to", "2026-01-02")
+	mustHave(t, out,
+		"AAA                  5 candles  first 2026-01-01 01:00  last 2026-01-01 08:00",
+		"BBB                  8 candles",
+		"GAP AAA: 3 candle(s) missing between 2026-01-01 03:00 and 2026-01-01 07:00")
+	mustLack(t, out, "GAP BBB", "exceptions: none")
 }

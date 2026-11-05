@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.63.4** (2026-11-05) · `fix` — quant-engine: report SEEN counts distinct candles, so a restart does not count one twice, and lists the candles missing between two seen ones as an exception
 - **v1.63.3** (2026-11-05) · `fix` — quant-engine: report reads each fill's stop from the stop order's sent event, where the engine journals its price; the trade fixture is now an engine run on the fake exchange, checked byte for byte
 - **v1.63.2** (2026-11-05) · `fix` — quant-engine: with evaluations on, a None with a reason is journaled only in its evaluated event, not again as a skipped signal; the engine's own refusals stay rejected
 - **v1.63.1** (2026-11-05) · `docs` — quant-engine: README covers the report subcommand and the evaluated journal event

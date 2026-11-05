@@ -138,8 +138,10 @@ func symbols(in []journal.Event, keep func(journal.Event) bool) []string {
 
 func evaluated(e journal.Event) bool { return e.Kind == journal.Evaluated }
 
-// reportSeen: per symbol, the candles evaluated, the first and last close,
-// and the exceptions (an evaluation the strategy gave no reason for).
+// reportSeen: per symbol, the distinct candles evaluated (a restart that
+// decides a candle again counts it once), the first and last close, and the
+// exceptions: candles missing between two seen ones, and evaluations the
+// strategy gave no reason for.
 func reportSeen(pr printer, p period, in []journal.Event) {
 	pr("\nSEEN (candles evaluated, by candle close)")
 	syms := symbols(in, evaluated)
@@ -149,28 +151,21 @@ func reportSeen(pr printer, p period, in []journal.Event) {
 	}
 	var exc []string
 	for _, s := range syms {
-		var n, bare int
-		var first, last, bareFirst, bareLast time.Time
+		seen, bare := map[time.Time]bool{}, map[time.Time]bool{}
 		for _, e := range in {
-			if !evaluated(e) || e.Symbol != s {
-				continue
-			}
-			if n++; first.IsZero() || e.CandleClose.Before(first) {
-				first = e.CandleClose
-			}
-			if e.CandleClose.After(last) {
-				last = e.CandleClose
-			}
-			if e.Reason == "" {
-				if bare++; bareFirst.IsZero() {
-					bareFirst = e.CandleClose
+			if evaluated(e) && e.Symbol == s {
+				c := e.CandleClose.UTC() // one key per instant, whatever offset it was written with
+				seen[c] = true
+				if e.Reason == "" {
+					bare[c] = true
 				}
-				bareLast = e.CandleClose
 			}
 		}
-		pr("  %-16s %5d candles  first %s  last %s", s, n, p.fmt(first), p.fmt(last))
-		if bare > 0 {
-			exc = append(exc, fmt.Sprintf("  FAIL %s: %d evaluated without a reason (%s -> %s)", s, bare, p.fmt(bareFirst), p.fmt(bareLast)))
+		closes := sortedTimes(seen)
+		pr("  %-16s %5d candles  first %s  last %s", s, len(closes), p.fmt(closes[0]), p.fmt(closes[len(closes)-1]))
+		exc = append(exc, gaps(p, s, closes)...)
+		if b := sortedTimes(bare); len(b) > 0 {
+			exc = append(exc, fmt.Sprintf("  FAIL %s: %d evaluated without a reason (%s -> %s)", s, len(b), p.fmt(b[0]), p.fmt(b[len(b)-1])))
 		}
 	}
 	if len(exc) == 0 {
@@ -181,6 +176,35 @@ func reportSeen(pr printer, p period, in []journal.Event) {
 	for _, x := range exc {
 		pr("%s", x)
 	}
+}
+
+func sortedTimes(set map[time.Time]bool) []time.Time {
+	ts := make([]time.Time, 0, len(set))
+	for t := range set {
+		ts = append(ts, t)
+	}
+	slices.SortFunc(ts, func(a, b time.Time) int { return a.Compare(b) })
+	return ts
+}
+
+// gaps lists the candles missing between consecutive closes. The interval is
+// the smallest step between two closes seen, so the report needs no config.
+// shortcut: a period where no two consecutive candles were seen infers a
+// multiple of the interval; read the config's interval if that matters.
+func gaps(p period, sym string, closes []time.Time) []string {
+	var step time.Duration
+	for i := 1; i < len(closes); i++ {
+		if d := closes[i].Sub(closes[i-1]); step == 0 || d < step {
+			step = d
+		}
+	}
+	var out []string
+	for i := 1; i < len(closes); i++ {
+		if n := int(closes[i].Sub(closes[i-1])/step) - 1; n > 0 {
+			out = append(out, fmt.Sprintf("  GAP %s: %d candle(s) missing between %s and %s", sym, n, p.fmt(closes[i-1]), p.fmt(closes[i])))
+		}
+	}
+	return out
 }
 
 // reportAnalyzed: the strategy's reasons grouped by rule (numbers taken
