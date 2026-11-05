@@ -70,6 +70,10 @@ type Engine struct {
 	// = no expectation. Buffer, when set, keeps the windows between steps.
 	ClosedCandle func() time.Time
 	Buffer       *CandleBuffer
+	// Evaluations, when set (the loop), journals every decision on a closed
+	// candle (journal.Evaluated), so a run without trades still shows what it
+	// looked at. Backtests leave it off: their journal stays as it was.
+	Evaluations bool
 
 	deriv      map[string][]market.Deriv // snapshots read, oldest first; the last one always kept
 	derivDown  map[string]bool           // symbol -> snapshot reads failing (one journal note per streak)
@@ -386,6 +390,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		e.applyRetarget(p, in)
 	}
 	if holding && TargetHit(side, last.Close, e.targets[sym]) {
+		e.evaluated(sym, last.Time, strategy.Exit, "", fmt.Sprintf("target %.8g reached at close %.8g", e.targets[sym], last.Close))
 		return e.exit(ctx, p, last.Time, "target") // the exchange stop guards it if this fails
 	}
 	if !owed {
@@ -397,6 +402,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		in.Position = e.view(p)
 	}
 	d := e.Strategy.Decide(in)
+	e.evaluated(sym, last.Time, d.Action, d.Side, d.Reason)
 	switch {
 	case d.Action == strategy.Exit && holding:
 		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
@@ -822,6 +828,18 @@ func (e *Engine) appendEvent(ev journal.Event) error {
 		return nil
 	}
 	return e.Exec.Journal.Append(ev)
+}
+
+var actionNames = map[strategy.Action]string{strategy.None: "none", strategy.Enter: "enter", strategy.Add: "add", strategy.Exit: "exit"}
+
+// evaluated journals one decision on sym's candle opened at open, when
+// Evaluations is on; the reason is the strategy's own, empty if it gave none.
+func (e *Engine) evaluated(sym string, open time.Time, a strategy.Action, side strategy.Side, reason string) {
+	if !e.Evaluations {
+		return
+	}
+	_ = e.appendEvent(journal.Event{Time: e.Exec.Now(), Kind: journal.Evaluated, Symbol: sym, Action: actionNames[a],
+		Side: string(side), Reason: reason, CandleClose: open.Add(e.Cfg.Interval())})
 }
 
 // skip journals a signal that did not become an order.

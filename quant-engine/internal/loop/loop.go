@@ -381,6 +381,7 @@ func RunReady(parent context.Context, cfg *config.Config, s strategy.Strategy, e
 	}()
 
 	en := engine.New(cfg, s, ex, env, j, tick.Now)
+	en.Evaluations = true // a live run shows every candle it decided on
 	en.Restore(prev.Targets, prev.Positions, prev.StaleStops, prev.Trades)
 	en.RestoreNews(prev.NewsUntil)
 	en.RestoreRetarget(prev.RetargetDue)

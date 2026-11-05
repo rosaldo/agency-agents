@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.62.0** (2026-11-05) · `feat` — quant-engine: a live run journals every decided candle as an evaluated event, with the strategy's action, its own reason and the candle's close time; backtests journal as before
 - **v1.61.3** (2026-11-04) · `test` — quant-engine: a lasting 503 from the news classifier must end within the classification's deadline
 - **v1.61.2** (2026-11-04) · `fix` — quant-engine: a passing 502 or 503 from the news classifier is retried like a 429, so it does not read as a catastrophe
 - **v1.61.1** (2026-11-04) · `docs` — quant-engine: README covers the classifier's providers, key variables and failure paths

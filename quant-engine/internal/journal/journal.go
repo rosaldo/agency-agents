@@ -54,22 +54,28 @@ const (
 	// (old and new target, average price, quantity), refused, or put off
 	// because the position could not be read after the fill.
 	Retarget = "retarget"
+	// Evaluated: the strategy decided on a closed candle of the symbol
+	// (live levels only): its action and reason, and the candle's close time.
+	// An empty reason is the strategy giving none, never filled in here.
+	Evaluated = "evaluated"
 )
 
 type Event struct {
-	Time       time.Time `json:"time"`
-	Kind       string    `json:"kind"`
-	Mode       string    `json:"mode"`
-	Level      string    `json:"level,omitempty"` // paper | testnet | mainnet; absent in journals from before the split
-	ParamsHash string    `json:"params_hash"`
-	ClientID   string    `json:"client_id,omitempty"`
-	Symbol     string    `json:"symbol,omitempty"`
-	Side       string    `json:"side,omitempty"`
-	Qty        float64   `json:"qty,omitempty"`
-	Price      float64   `json:"price,omitempty"`
-	Amount     float64   `json:"amount,omitempty"` // funding, in the settle currency
-	Model      string    `json:"model,omitempty"`  // news_verdict: the classifier's model that answered
-	Reason     string    `json:"reason,omitempty"`
+	Time        time.Time `json:"time"`
+	Kind        string    `json:"kind"`
+	Mode        string    `json:"mode"`
+	Level       string    `json:"level,omitempty"` // paper | testnet | mainnet; absent in journals from before the split
+	ParamsHash  string    `json:"params_hash"`
+	ClientID    string    `json:"client_id,omitempty"`
+	Symbol      string    `json:"symbol,omitempty"`
+	Side        string    `json:"side,omitempty"`
+	Qty         float64   `json:"qty,omitempty"`
+	Price       float64   `json:"price,omitempty"`
+	Amount      float64   `json:"amount,omitempty"` // funding, in the settle currency
+	Model       string    `json:"model,omitempty"`  // news_verdict: the classifier's model that answered
+	Reason      string    `json:"reason,omitempty"`
+	Action      string    `json:"action,omitempty"`      // evaluated: none | enter | add | exit
+	CandleClose time.Time `json:"candle_close,omitzero"` // evaluated: close time of the decided candle
 }
 
 type Journal struct {
