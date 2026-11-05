@@ -411,7 +411,9 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	case d.Action == strategy.None && holding:
 		return e.trail(ctx, p, in, last.Close, last.Time)
 	case d.Action == strategy.None && d.Reason != "":
-		e.skip(sym, d.Reason) // a signal the strategy dropped itself; no Reason = no signal, nothing journaled
+		if !e.Evaluations { // with evaluations on, the evaluated event already carries the reason
+			e.skip(sym, d.Reason) // a signal the strategy dropped itself; no Reason = no signal, nothing journaled
+		}
 		return nil
 	case d.Action != strategy.Enter:
 		return nil

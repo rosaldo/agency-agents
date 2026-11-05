@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.63.2** (2026-11-05) · `fix` — quant-engine: with evaluations on, a None with a reason is journaled only in its evaluated event, not again as a skipped signal; the engine's own refusals stay rejected
 - **v1.63.1** (2026-11-05) · `docs` — quant-engine: README covers the report subcommand and the evaluated journal event
 - **v1.63.0** (2026-11-05) · `feat` — quant-engine: report subcommand shows, for a period, what the run saw, analyzed and traded, in local time or UTC; an evaluation without a reason is a FAIL exception
 - **v1.62.0** (2026-11-05) · `feat` — quant-engine: a live run journals every decided candle as an evaluated event, with the strategy's action, its own reason and the candle's close time; backtests journal as before

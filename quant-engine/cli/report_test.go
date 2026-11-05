@@ -56,8 +56,8 @@ func mustLack(t *testing.T, out string, bad ...string) {
 	}
 }
 
-// A period with skips only: what each symbol saw, the reasons grouped by
-// rule, the engine's refusal, and an evaluation without a reason as a FAIL.
+// A period without fills: what each symbol saw, the reasons grouped by
+// rule, an entry the engine refused, and an evaluation without a reason as a FAIL.
 func TestReportPeriodWithSkipsOnly(t *testing.T) {
 	out := report(t, "report_skips.jsonl", nil, "--from", "2026-01-01", "--to", "2026-01-02")
 	mustHave(t, out,
@@ -66,8 +66,8 @@ func TestReportPeriodWithSkipsOnly(t *testing.T) {
 		"BBB                  3 candles  first 2026-01-01 01:00  last 2026-01-01 03:00",
 		"FAIL BBB: 1 evaluated without a reason (2026-01-01 02:00 -> 2026-01-01 02:00)",
 		"2x none: drop 2.9% < 3%", // two drops, one rule: counted, the last shown
-		"1x none: volume 0.8x < 2x",
-		"refused by the engine: volume 0.8x < 2x",
+		"enter long on the candle closed 2026-01-01 03:00: drop 3.2% >= 3%, volume 2.1x >= 2x",
+		"refused by the engine: margin 50.00 for qty 1 at leverage 1 is above the free margin 10.00",
 		"orders: none filled in this period",
 		"open positions now: none",
 		"OTHER EVENTS: heartbeat 1, rejected 1, start 1, stop 1")

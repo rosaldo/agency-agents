@@ -84,7 +84,7 @@ type Decision struct {
 	// fixed at the first tranche (equity x max_risk_per_trade_pct) and the
 	// fractions of one trade sum to at most 1.
 	Fraction float64
-	Reason   string // journal; on None while flat, journaled as a skipped signal (leave empty when there is no signal)
+	Reason   string // journal; on None while flat, a live run journals it in the evaluated event, a backtest as a skipped signal
 }
 
 // NewsSource is optional. With news_guard: required, a strategy that does not

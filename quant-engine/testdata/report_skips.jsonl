@@ -4,7 +4,7 @@
 {"time":"2026-01-01T01:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"BBB","reason":"drop 1.2% < 3%","action":"none","candle_close":"2026-01-01T01:00:00Z"}
 {"time":"2026-01-01T02:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"drop 2.9% < 3%","action":"none","candle_close":"2026-01-01T02:00:00Z"}
 {"time":"2026-01-01T02:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"BBB","action":"none","candle_close":"2026-01-01T02:00:00Z"}
-{"time":"2026-01-01T03:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"volume 0.8x < 2x","action":"none","candle_close":"2026-01-01T03:00:00Z"}
-{"time":"2026-01-01T03:00:01Z","kind":"rejected","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"signal skipped: volume 0.8x < 2x"}
+{"time":"2026-01-01T03:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","side":"long","reason":"drop 3.2% >= 3%, volume 2.1x >= 2x","action":"enter","candle_close":"2026-01-01T03:00:00Z"}
+{"time":"2026-01-01T03:00:01Z","kind":"rejected","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"signal skipped: margin 50.00 for qty 1 at leverage 1 is above the free margin 10.00"}
 {"time":"2026-01-01T03:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"BBB","reason":"drop 0.1% < 3%","action":"none","candle_close":"2026-01-01T03:00:00Z"}
 {"time":"2026-01-01T04:00:00Z","kind":"stop","mode":"paper","level":"paper","params_hash":"feedc0de1234","reason":"stop requested"}
