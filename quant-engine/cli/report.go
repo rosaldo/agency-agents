@@ -334,15 +334,20 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 	}
 }
 
-// stopAfter is the price of the first stop resting on sym after a fill.
+// stopAfter is the price of the first stop resting on sym after a fill: the
+// engine journals the stop's price on its sent event, and on its open
+// (resting) event only the order's state.
 func stopAfter(rest []journal.Event, sym string) float64 {
+	sent := map[string]float64{} // client ID -> price sent
 	for _, e := range rest {
 		if e.Symbol != sym {
 			continue
 		}
 		switch e.Kind {
+		case journal.Sent:
+			sent[e.ClientID] = e.Price
 		case journal.Resting:
-			return e.Price
+			return sent[e.ClientID]
 		case journal.Filled, journal.Evaluated:
 			return 0
 		}

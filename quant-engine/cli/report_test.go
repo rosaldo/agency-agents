@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +11,94 @@ import (
 	"time"
 
 	"github.com/rosaldo/agency-agents/quant-engine/exchange"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/config"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/engine"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/exchange/fake"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/journal"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/loop"
 	"github.com/rosaldo/agency-agents/quant-engine/internal/risk"
+	"github.com/rosaldo/agency-agents/quant-engine/internal/scripted"
+	"github.com/rosaldo/agency-agents/quant-engine/market"
+	"github.com/rosaldo/agency-agents/quant-engine/strategy"
 	"github.com/rosaldo/agency-agents/quant-engine/strategy/example"
 )
+
+var update = flag.Bool("update", false, "rewrite the report fixtures written by an engine run")
+
+// tradeRun journals, as a live run does, two trades of a scripted strategy
+// on the fake exchange: an entry, an add and an exit by rule; then an entry
+// whose target closes it.
+func tradeRun(t *testing.T, dir string) {
+	t.Helper()
+	closes := []float64{100, 100, 97, 95, 99, 100, 96, 100, 100}
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		switch in.Now.Hour() {
+		case 2:
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 92, Fraction: 0.5, Reason: "drop 3.0% >= 3%, volume 2.5x >= 2x"}
+		case 3:
+			return strategy.Decision{Action: strategy.Add, Side: strategy.Long, Stop: 93, Fraction: 0.5, Reason: "drop 5.0% >= 5%"}
+		case 4:
+			return strategy.Decision{Action: strategy.Exit, Reason: "reverted 50% of the drop"}
+		case 6:
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 91, Target: 99, Reason: "drop 4.0% >= 3%, volume 3.0x >= 2x"}
+		}
+		if in.Position != nil {
+			return strategy.Decision{Reason: "holding"}
+		}
+		return strategy.Decision{Reason: "drop 0.0% < 3%"}
+	}}
+	c, err := config.Parse([]byte("exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA]\nrisk: {confirmed_by_user: true}\n"), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for i, c := range closes {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: c, High: c, Low: c, Close: c, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs}})
+	j, err := journal.Open(dir, "paper", "paper", "feedc0de1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	var now time.Time
+	e := engine.New(c, s, f, exchange.Demo, j, func() time.Time { return now })
+	e.Evaluations = true
+	for i, candle := range cs {
+		now = candle.Time.Add(time.Hour + time.Second) // one second after the candle closed
+		if i > 0 {
+			f.Advance()
+		}
+		if err := e.Step(context.Background()); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+}
+
+// report_trade.jsonl is what the engine journals, byte for byte: the
+// report is tested on the format the engine writes, not on a hand-made one.
+func TestReportTradeFixtureIsWhatTheEngineJournals(t *testing.T) {
+	dir := t.TempDir()
+	tradeRun(t, dir)
+	got, err := os.ReadFile(filepath.Join(dir, "journal.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("..", "testdata", "report_trade.jsonl")
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s differs from what the engine journals; run go test -run %s -update\n%s", path, t.Name(), got)
+	}
+}
 
 // report runs the report subcommand on a fixture journal copied to a fresh
 // state directory; st, when set, is saved as the run's state.
@@ -74,27 +160,31 @@ func TestReportPeriodWithSkipsOnly(t *testing.T) {
 	mustLack(t, out, "FAIL AAA", "feedc0de")
 }
 
-// A period with an entry, an add and an exit: the values behind each
-// tranche, the fills with their stops, the trade's P&L and the total.
+// A period with an entry, an add and an exit, then an entry closed by its
+// target: the values behind each tranche, the fills with the stop the engine
+// sent after each, each trade's P&L and the total.
 func TestReportPeriodWithEntryAddAndExit(t *testing.T) {
-	out := report(t, "report_trade.jsonl", nil, "--from", "2026-01-01 00:00", "--to", "2026-01-01 05:00")
+	out := report(t, "report_trade.jsonl", nil, "--from", "2026-01-01 00:00", "--to", "2026-01-01 10:00")
 	mustHave(t, out,
 		"exceptions: none",
-		"enter long on the candle closed 2026-01-01 01:00: drop 3.4% >= 3%, volume 2.5x >= 2x",
-		"add long on the candle closed 2026-01-01 02:00: drop 5.1% >= 5%",
+		"enter long on the candle closed 2026-01-01 03:00: drop 3.0% >= 3%, volume 2.5x >= 2x",
+		"add long on the candle closed 2026-01-01 04:00: drop 5.0% >= 5%",
 		"1x exit: reverted 50% of the drop",
-		"AAA              buy  qty 2          price 100          stop 95",
-		"AAA              buy  qty 1          price 97           stop 96",
-		"AAA              sell qty 3          price 103          closes: P&L +12.00", // 3 x (103 - avg 99)
-		"P&L of the trades closed in the period: +12.00")
-	mustLack(t, out, "secretish", "feedc0de")
+		"1x exit: target 99 reached at close 100",
+		"AAA              buy  qty 10         price 97           stop 92",
+		"AAA              buy  qty 25         price 95           stop 93",
+		"AAA              sell qty 35         price 99           closes: P&L +120.00", // 35 x (99 - avg 95.5714)
+		"AAA              buy  qty 20         price 96           stop 91",
+		"AAA              sell qty 20         price 100          closes: P&L +80.00",
+		"P&L of the trades closed in the period: +200.00")
+	mustLack(t, out, "feedc0de", "447960362bb6")
 }
 
 // The P&L of a trade opened before the period is priced on its real entry.
 func TestReportPricesATradeOpenedBeforeThePeriod(t *testing.T) {
-	out := report(t, "report_trade.jsonl", nil, "--from", "2026-01-01 03:00", "--to", "2026-01-01 05:00")
-	mustHave(t, out, "closes: P&L +12.00", "P&L of the trades closed in the period: +12.00")
-	mustLack(t, out, "price 100", "enter long")
+	out := report(t, "report_trade.jsonl", nil, "--from", "2026-01-01 05:00", "--to", "2026-01-01 06:00")
+	mustHave(t, out, "closes: P&L +120.00", "P&L of the trades closed in the period: +120.00")
+	mustLack(t, out, "price 97", "enter long")
 }
 
 // An empty period says so in each part instead of printing nothing.
