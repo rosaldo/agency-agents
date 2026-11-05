@@ -8,7 +8,7 @@ The engine is generic. It asks a strategy one question per closed candle — ent
 
 | Public (this module) | Private (each strategy's own repository) |
 |---|---|
-| Strategy interface, CLI library (`start`, `status`, `stop`, `backtest`, `check`) | The strategy's rules: signal, stop and target |
+| Strategy interface, CLI library (`start`, `status`, `report`, `stop`, `backtest`, `check`) | The strategy's rules: signal, stop and target |
 | Sizing from the risk budget, risk limits, drawdown breaker | The `strategy:` block of the yml and its defaults |
 | Order execution, exchange stops, reconciliation, journal | Its news content: feeds, keywords, aliases |
 | Paper simulator, testnet demo, mainnet gates, parameter hash | Its fixtures, skill text and examples |
@@ -42,9 +42,12 @@ my-strategy check                      # validate the yml: {"config":"ok"}
 my-strategy backtest --candles btc.csv --capital 10000
 my-strategy start                      # background loop, paper by default
 my-strategy status                     # one JSON line: mode, P&L, limits, positions, their stops and targets
+my-strategy report --since 24h         # for a human: what the run saw, analyzed and traded in the period
 my-strategy stop                       # positions stay protected by their exchange stops
 my-strategy stop --flatten             # also close every position at market
 ```
+
+`report` reads the journal and the state (never writes) and prints, for a period (`--since 12h` by default, or `--from <time> [--to <time>]`, `<time>` as `YYYY-MM-DD[ HH:MM]` or RFC 3339; local time, `--utc` for UTC), three parts: **SEEN** — per symbol, the candles evaluated with the first and last close; **ANALYZED** — the strategy's reasons grouped by rule (numbers taken out) with their count and the last example, every entry and add with the values that triggered it, and the signals the engine refused; **OPERATED** — the fills with the stop placed after each, the P&L of each trade closed in the period and the total (fill prices; fees and funding left out; a position closed by its exchange stop shows as `closed_outside`, P&L not in the journal), and the open positions from `status` with their budget used and tranches. A live run (paper, testnet, mainnet) journals one `evaluated` event per symbol per decided candle: the strategy's action, its own `Reason` and the candle's close time (`candle_close`); backtests do not. An evaluation without a reason is listed as a FAIL exception: the engine never makes one up, so a strategy should give a reason on every decision, including "no signal". `status` stays the machine's JSON, unchanged.
 
 ## The strategy interface
 
