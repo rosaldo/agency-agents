@@ -52,6 +52,8 @@ const usage = `usage: NAME <command> [--config NAME.yml] [--dir .NAME]
   check
   start    run the loop in the background (paper by default)
   status   one JSON line: alive, mode, P&L, limits, positions with their stops, why it stopped
+  report   [--since 12h | --from <time> [--to <time>]] [--utc]  what the run saw, analyzed and traded in a period,
+           for a human (local time unless --utc; <time> is YYYY-MM-DD[ HH:MM] or RFC 3339)
   stop     end the loop; positions stay protected by their exchange stops
            --flatten also closes every position at market (stop cancelled first)
   backtest --candles <csv> --capital <n> [--aux <symbol>=<csv> ...] [--qty-step <n>] [--min-qty <n>] [--out <dir>]
@@ -108,6 +110,10 @@ func (a App) Run(args []string, stdout io.Writer) error {
 	fs.Float64Var(&fk.cash, "fake-cash", 10_000, "fake adapter: starting cash")
 	fs.Float64Var(&fk.paperCapital, "paper-capital", 10_000, "paper without exchange credentials: simulated capital")
 	flatten := fs.Bool("flatten", false, "stop: also close every position at market")
+	since := fs.Duration("since", 12*time.Hour, "report: the period ends now and starts this long before")
+	from := fs.String("from", "", "report: start of the period")
+	to := fs.String("to", "", "report: end of the period (default now)")
+	utc := fs.Bool("utc", false, "report: times in UTC instead of the machine's time zone")
 	if err := fs.Parse(args[1:]); err != nil {
 		return fmt.Errorf("%v\n%s", err, use)
 	}
@@ -121,6 +127,16 @@ func (a App) Run(args []string, stdout io.Writer) error {
 		return err
 	case "status":
 		return printStatus(*dir, stdout)
+	case "report":
+		loc := time.Local
+		if *utc {
+			loc = time.UTC
+		}
+		p, err := reportPeriod(*since, *from, *to, loc, time.Now())
+		if err != nil {
+			return err
+		}
+		return printReport(*dir, p, stdout)
 	case "stop":
 		if *flatten && !loop.Locked(*dir) {
 			if err := a.flattenNow(*cfgPath, *dir, fk); err != nil {

@@ -1,0 +1,12 @@
+{"time":"2026-01-01T00:00:00Z","kind":"start","mode":"paper","level":"paper","params_hash":"feedc0de1234"}
+{"time":"2026-01-01T01:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","side":"long","reason":"drop 3.4% >= 3%, volume 2.5x >= 2x","action":"enter","candle_close":"2026-01-01T01:00:00Z"}
+{"time":"2026-01-01T01:00:01Z","kind":"proposed","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-1","symbol":"AAA","side":"buy","qty":2,"price":100,"reason":"long stop 95 target 0"}
+{"time":"2026-01-01T01:00:01Z","kind":"sent","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-1","symbol":"AAA","side":"buy","qty":2}
+{"time":"2026-01-01T01:00:02Z","kind":"filled","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-1","symbol":"AAA","side":"buy","qty":2,"price":100}
+{"time":"2026-01-01T01:00:02Z","kind":"open","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-2","symbol":"AAA","side":"sell","qty":2,"price":95}
+{"time":"2026-01-01T02:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","side":"long","reason":"drop 5.1% >= 5%","action":"add","candle_close":"2026-01-01T02:00:00Z"}
+{"time":"2026-01-01T02:00:02Z","kind":"filled","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-3","symbol":"AAA","side":"buy","qty":1,"price":97}
+{"time":"2026-01-01T02:00:02Z","kind":"open","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-4","symbol":"AAA","side":"sell","qty":3,"price":96}
+{"time":"2026-01-01T03:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"reverted 50% of the drop","action":"exit","candle_close":"2026-01-01T03:00:00Z"}
+{"time":"2026-01-01T03:00:02Z","kind":"filled","mode":"paper","level":"paper","params_hash":"feedc0de1234","client_id":"secretish-cid-5","symbol":"AAA","side":"sell","qty":3,"price":103,"reason":"exit: reverted 50% of the drop"}
+{"time":"2026-01-01T04:00:01Z","kind":"evaluated","mode":"paper","level":"paper","params_hash":"feedc0de1234","symbol":"AAA","reason":"drop 0.2% < 3%","action":"none","candle_close":"2026-01-01T04:00:00Z"}
