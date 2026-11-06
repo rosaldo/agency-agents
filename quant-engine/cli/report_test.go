@@ -281,3 +281,19 @@ func TestReportRefusesSinceWithFromOrTo(t *testing.T) {
 		}
 	}
 }
+
+// fill is a filled event of AAA at hh:00.
+func fill(hh int, side string, qty, price float64) string {
+	return fmt.Sprintf(`{"time":"2026-01-01T%02d:00:00Z","kind":"filled","mode":"paper","symbol":"AAA","side":%q,"qty":%g,"price":%g}`+"\n", hh, side, qty, price)
+}
+
+// A fill larger than the position closes it and opens the rest on the other
+// side at the fill's price: the next close is priced from there.
+func TestReportPricesAPositionThatTurnsSide(t *testing.T) {
+	j := fill(1, "buy", 2, 100) + fill(2, "sell", 3, 110) + fill(3, "buy", 1, 100)
+	out := reportOn(t, j, nil, "--from", "2026-01-01", "--to", "2026-01-02")
+	mustHave(t, out,
+		"sell qty 3          price 110          closes: P&L +20.00", // 2 x (110 - 100), short 1 at 110
+		"buy  qty 1          price 100          closes: P&L +10.00", // 1 x (110 - 100)
+		"P&L of the trades closed in the period: +30.00")
+}

@@ -313,6 +313,9 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 			if t.qty < 0 {
 				pnl = -pnl
 			}
+			if abs(signed) > abs(t.qty) { // turns side: the rest opens at this fill's price
+				t.avg = e.Price
+			}
 			t.qty += signed
 		} else {
 			t.avg = (t.avg*abs(t.qty) + e.Price*abs(signed)) / (abs(t.qty) + abs(signed))
