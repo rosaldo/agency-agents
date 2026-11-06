@@ -439,3 +439,25 @@ func TestARefusedEntryLeavesItsSlotToTheChoice(t *testing.T) {
 		t.Fatalf("fills %v, want [S0 S2] in symbols: order", filled)
 	}
 }
+
+// A reallocated entry refused at its order leaves the slot too: it goes on to
+// the next strongest, and never past the limit.
+func TestAReallocatedEntryRefusedAtItsOrderLeavesTheSlot(t *testing.T) {
+	r := newSlotRun(t, 1, []string{"AAA", "BBB", "CCC", "DDD"}, nil, func(_ int, in strategy.Input) strategy.Decision {
+		d := enterLongAt(in, map[string]float64{"AAA": 4, "BBB": 2, "CCC": 3, "DDD": 1}[in.Symbol])
+		if in.Symbol == "AAA" || in.Symbol == "CCC" {
+			d.Stop = 99.99 // a tiny stop distance: a size whose margin is above the cash
+		}
+		return d
+	})
+	r.next()
+	if got := r.open(); !slices.Equal(got, []string{"BBB"}) {
+		t.Fatalf("open %v, want BBB in the slot AAA and then CCC left (refused: %s)", got, r.j.rejected())
+	}
+	if got := r.noSlot(); !slices.Equal(got, []string{"DDD no slot: 1 of 1 positions open"}) {
+		t.Fatalf("no slot %v, want only DDD", got)
+	}
+	if n := strings.Count(r.j.rejected(), "free margin"); n != 2 {
+		t.Fatalf("setup: %d refused for margin, want AAA and CCC: %s", n, r.j.rejected())
+	}
+}

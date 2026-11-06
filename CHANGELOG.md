@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.66.5** (2026-11-06) · `test` — quant-engine: a reallocated entry refused at its order leaves the slot to the next strongest
 - **v1.66.4** (2026-11-06) · `docs` — quant-engine: README: max_open_positions counts the whole account but not positions outside the engine's book, keeps the symbols: order, is not exercised by walk-forward, and changes the params hash
 - **v1.66.3** (2026-11-06) · `test` — quant-engine: the mainnet confirmation pins the max open positions line
 - **v1.66.2** (2026-11-06) · `fix` — quant-engine: max_open_positions counts every position the engine sees on the account (a symbol taken out of symbols: keeps its slot), and the chosen entries and Adds go out in the order of symbols: (a limit that does not bind sends the same orders as none)
