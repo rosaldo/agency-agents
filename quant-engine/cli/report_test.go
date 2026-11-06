@@ -361,3 +361,98 @@ func TestReportTotalIsIncompleteWhenAClosedOutsideHasNoPrice(t *testing.T) {
 	mustHave(t, out, "P&L not in the journal",
 		"P&L of the trades closed in the period: INCOMPLETE, 1 trade(s) closed outside the engine without a known exit price are missing; +10.00 is the others only")
 }
+
+func closedOutside(hh int, side string, qty, price float64) string {
+	return fmt.Sprintf(`{"time":"2026-01-01T%02d:00:00Z","kind":"closed_outside","mode":"paper","symbol":"AAA","side":%q,"qty":%g,"price":%g}`+"\n", hh, side, qty, price)
+}
+
+// A short closed by its stop above the entry is a loss.
+func TestReportPricesAShortsStopAsALoss(t *testing.T) {
+	out := reportOn(t, fill(1, "sell", 2, 100)+closedOutside(2, "buy", 2, 110), nil, "--from", "2026-01-01", "--to", "2026-01-02")
+	mustHave(t, out, "closes: P&L -20.00  (its stop, filled on the exchange)", "P&L of the trades closed in the period: -20.00 (prices")
+}
+
+// A stop fill that does not close the journal's position as it stands (the
+// wrong side, or another quantity, e.g. a fee taken in the base coin) is not
+// priced: the trade is listed without a P&L and the total is incomplete.
+func TestReportLeavesAStopFillThatDoesNotMatchThePositionUnpriced(t *testing.T) {
+	for name, close := range map[string]string{
+		"side": closedOutside(2, "buy", 2, 110),
+		"qty":  closedOutside(2, "sell", 1.998, 110),
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := reportOn(t, fill(1, "buy", 2, 100)+close, nil, "--from", "2026-01-01", "--to", "2026-01-02")
+			mustHave(t, out, "P&L not in the journal", "INCOMPLETE, 1 trade(s)")
+			mustLack(t, out, "(its stop, filled on the exchange)")
+		})
+	}
+}
+
+// The engine's journal and the report price a stop-out in two places; for
+// the same trade, long and short, both say the same P&L, and the period's
+// total is what status says the account made.
+func TestEngineAndReportPriceAStopOutAlike(t *testing.T) {
+	for _, tc := range []struct {
+		side   strategy.Side
+		stop   float64
+		prices []float64
+		yml    string
+	}{
+		{strategy.Long, 95, []float64{100, 100, 100, 104, 104, 100, 100, 92, 93, 93}, ""},
+		{strategy.Short, 105, []float64{100, 100, 100, 96, 96, 100, 100, 108, 107, 107}, "market: swap\nperp: {allow_short: true, leverage: 2}\n"},
+	} {
+		t.Run(string(tc.side), func(t *testing.T) {
+			s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+				switch h := in.Now.Hour(); {
+				case in.Position == nil && (h == 2 || h == 5):
+					return strategy.Decision{Action: strategy.Enter, Side: tc.side, Stop: tc.stop, Reason: "test"}
+				case in.Position != nil && h == 4:
+					return strategy.Decision{Action: strategy.Exit, Reason: "reverted"}
+				}
+				return strategy.Decision{Reason: "no signal"}
+			}}
+			c, err := config.Parse([]byte("exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA]\nrisk: {confirmed_by_user: true}\n"+tc.yml), s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			var cs []market.Candle
+			for i, o := range tc.prices {
+				cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: o, High: o + 1, Low: o - 1, Close: o, Volume: 10})
+			}
+			f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, SlippagePct: 0.1, Shorts: tc.side == strategy.Short,
+				Candles: map[string][]market.Candle{"AAA": cs}})
+			dir := filepath.Join(t.TempDir(), ".scripted")
+			loop.Run(context.Background(), c, s, f, exchange.Demo, &loop.FakeTicker{Ex: f, Candles: cs}, dir)
+
+			evs, _, err := journal.Read(filepath.Join(dir, "journal.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pnl string
+			for _, ev := range evs {
+				if ev.Kind == journal.ClosedOutside {
+					if _, after, ok := strings.Cut(ev.Reason, "P&L "); ok {
+						pnl, _, _ = strings.Cut(after, " ")
+					}
+				}
+			}
+			if pnl == "" {
+				t.Fatalf("no priced closed_outside in the journal: %+v", evs)
+			}
+			var out bytes.Buffer
+			if err := (App{Strategy: example.New()}).Run([]string{"report", "--dir", dir, "--utc", "--from", "2026-01-01", "--to", "2026-01-02"}, &out); err != nil {
+				t.Fatal(err)
+			}
+			st, err := loop.ReadStatus(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustHave(t, out.String(), "closes: P&L "+pnl+"  (its stop, filled on the exchange)",
+				fmt.Sprintf("P&L of the trades closed in the period: %+.2f (prices", st.DayPnL))
+			if !strings.HasPrefix(pnl, "-") {
+				t.Errorf("stop-out P&L %s: want a loss\n%s", pnl, out.String())
+			}
+		})
+	}
+}
