@@ -353,7 +353,7 @@ func (e *Engine) Step(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	if queue != nil {
-		err := e.enterBySlot(ctx, *queue, e.openPositions(held), bal.Equity, &free)
+		err := e.sendQueued(ctx, *queue, e.openPositions(held), bal.Equity, &free)
 		if IsHalt(err) {
 			return err
 		}
@@ -369,7 +369,7 @@ func (e *Engine) Step(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// stepSymbol decides sym's closed candle; with queue set (risk.max_open_positions) an Enter is queued for Step instead of sent.
+// stepSymbol decides sym's closed candle; with queue set (risk.max_open_positions) an Enter or an Add is queued for Step instead of sent.
 func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64, queue *[]entry) error {
 	delete(e.closed, sym)
 	n := max(e.Strategy.Warmup(), 1)
@@ -435,6 +435,9 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	switch {
 	case d.Action == strategy.Exit && holding:
 		return e.exit(ctx, p, last.Time, "exit: "+d.Reason)
+	case d.Action == strategy.Add && queue != nil: // sent by Step in the order of symbols:, among the entries
+		*queue = append(*queue, entry{sym: sym, p: p, d: d, in: in, last: last, add: true})
+		return nil
 	case d.Action == strategy.Add:
 		return e.add(ctx, sym, p, d, in, equity, free)
 	case d.Action == strategy.None && holding:
@@ -449,38 +452,87 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	case holding:
 		e.skip(sym, "a position is already open (one per symbol; reverse through flat)")
 		return nil
-	case queue != nil: // risk.max_open_positions: entered by Step, strongest first
-		*queue = append(*queue, entry{sym, p, d, in, last})
+	case queue != nil: // risk.max_open_positions: Step picks the strongest
+		*queue = append(*queue, entry{sym: sym, p: p, d: d, in: in, last: last})
 		return nil
 	}
-	_, err = e.enter(ctx, entry{sym, p, d, in, last}, equity, free)
+	q := entry{sym: sym, p: p, d: d, in: in, last: last}
+	if !e.prepare(ctx, &q, equity) {
+		return nil
+	}
+	_, err = e.send(ctx, &q, free)
 	return err
 }
 
-// entry is an Enter decision waiting for a slot (risk.max_open_positions).
+// entry is an Enter (or, add set, an Add) queued for Step by
+// risk.max_open_positions; trade and qty are the Enter's, once prepared.
 type entry struct {
-	sym  string
-	p    exchange.Position
-	d    strategy.Decision
-	in   strategy.Input
-	last market.Candle
+	sym   string
+	p     exchange.Position
+	d     strategy.Decision
+	in    strategy.Input
+	last  market.Candle
+	add   bool
+	trade risk.Trade
+	qty   float64
 }
 
-// enterBySlot sends the step's queued entries, highest Decision.Priority
-// first (a tie keeps the order of symbols:), while fewer than
-// risk.max_open_positions positions are open; open counts the positions held
-// at the start of the step, so an exit in this step frees its slot on the
-// next one. An entry refused before its order uses no slot.
-func (e *Engine) enterBySlot(ctx context.Context, queue []entry, open int, equity float64, free *float64) error {
+// sendQueued sends the step's queued orders under risk.max_open_positions.
+// The strongest entries (highest Decision.Priority, a tie keeps the order of
+// symbols:) that pass their checks take the free slots; open counts the
+// positions held at the start of the step, so an exit in this step frees its
+// slot on the next one. The chosen entries and the Adds then go out in the
+// order of symbols:, as without the limit, so a limit that does not bind
+// sends the same orders in the same order. A slot a chosen entry leaves
+// (refused at its order: margin, save, nothing filled) goes to the next
+// strongest after them.
+func (e *Engine) sendQueued(ctx context.Context, queue []entry, open int, equity float64, free *float64) error {
 	limit := e.Cfg.Risk.MaxOpenPositions
-	slices.SortStableFunc(queue, func(a, b entry) int { return cmp.Compare(b.d.Priority, a.d.Priority) })
+	var ranked []*entry
+	for i := range queue {
+		if !queue[i].add {
+			ranked = append(ranked, &queue[i])
+		}
+	}
+	slices.SortStableFunc(ranked, func(a, b *entry) int { return cmp.Compare(b.d.Priority, a.d.Priority) })
+	chosen := map[*entry]bool{}
+	next, taken := 0, open
+	for ; next < len(ranked) && taken < limit; next++ {
+		if e.prepare(ctx, ranked[next], equity) { // a refused entry uses no slot
+			chosen[ranked[next]] = true
+			taken++
+		}
+	}
 	var errs []error
-	for _, q := range queue {
+	for i := range queue {
+		q := &queue[i]
+		var err error
+		switch {
+		case q.add:
+			err = e.add(ctx, q.sym, q.p, q.d, q.in, equity, free)
+		case chosen[q]:
+			var sent bool
+			if sent, err = e.send(ctx, q, free); sent {
+				open++
+			}
+		default:
+			continue
+		}
+		if IsHalt(err) {
+			return err
+		}
+		errs = append(errs, err)
+	}
+	for ; next < len(ranked); next++ {
+		q := ranked[next]
 		if open >= limit {
 			e.skip(q.sym, fmt.Sprintf("no slot: %d of %d positions open", open, limit))
 			continue
 		}
-		sent, err := e.enter(ctx, q, equity, free)
+		if !e.prepare(ctx, q, equity) {
+			continue
+		}
+		sent, err := e.send(ctx, q, free)
 		if IsHalt(err) {
 			return err
 		}
@@ -492,43 +544,51 @@ func (e *Engine) enterBySlot(ctx context.Context, queue []entry, open int, equit
 	return errors.Join(errs...)
 }
 
-// enter checks and sends an Enter; sent says an order went out that may have
-// filled (it holds a slot).
-func (e *Engine) enter(ctx context.Context, q entry, equity float64, free *float64) (sent bool, err error) {
-	sym, p, d, in, last := q.sym, q.p, q.d, q.in, q.last
+// prepare checks an Enter before its order and sizes it; false = refused and
+// journaled.
+func (e *Engine) prepare(ctx context.Context, q *entry, equity float64) bool {
+	sym, p, d, last := q.sym, q.p, q.d, q.last
 	if err := e.validateEntry(d, last.Close); err != nil {
 		e.skip(sym, err.Error())
-		return false, nil
+		return false
 	}
 	if d.Side == strategy.Short && !e.Ex.Capabilities().Swap {
 		e.skip(sym, "short entries need a swap market; this adapter trades spot")
-		return false, nil
+		return false
 	}
 	if p.Blocked != "" {
 		e.skip(sym, "symbol blocked: "+p.Blocked)
-		return false, nil
+		return false
 	}
 	if until, ok := e.newsUntil[sym]; ok {
 		e.skip(sym, "symbol blocked by a news catastrophe until "+until.UTC().Format(time.RFC3339))
-		return false, nil
+		return false
 	}
 	if id := e.staleStops[sym]; id != "" {
 		e.skip(sym, "symbol blocked: old stop "+id+" not cancelled yet")
-		return false, nil
+		return false
 	}
 	if err := e.entryClearsLiquidation(sym, exchange.PositionSide(d.Side), last.Close, d.Stop); err != nil {
 		e.skip(sym, err.Error())
-		return false, nil
+		return false
 	}
 	if why := e.newsBlocks(ctx, sym, last.Time); why != "" {
 		e.skip(sym, why)
-		return false, nil
+		return false
 	}
 	trade, qty, why := risk.Trade{}.Tranche(d.Fraction, e.sizeInput(sym, equity, last.Close, d.Stop, d.Side == strategy.Short))
 	if qty == 0 {
 		e.skip(sym, why)
-		return false, nil
+		return false
 	}
+	q.trade, q.qty = trade, qty
+	return true
+}
+
+// send sends a prepared Enter against the free margin; sent says an order
+// went out that may have filled (it holds a slot).
+func (e *Engine) send(ctx context.Context, q *entry, free *float64) (sent bool, err error) {
+	sym, d, in, last, trade, qty := q.sym, q.d, q.in, q.last, q.trade, q.qty
 	margin := qty * last.Close / float64(e.Cfg.Perp.Leverage)
 	if margin > *free {
 		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
@@ -562,12 +622,13 @@ func (e *Engine) enter(ctx context.Context, q entry, equity float64, free *float
 	return true, e.guardFilled(ctx, sym)
 }
 
-// openPositions counts the positions held on the configured symbols: those
-// restored after a restart too, since held is the exchange's own read.
+// openPositions counts every position the engine sees on the account, held
+// being the exchange's own read: those restored after a restart and those of
+// a symbol since removed from symbols: too, as status counts them.
 func (e *Engine) openPositions(held map[string]exchange.Position) int {
 	n := 0
-	for _, sym := range e.Cfg.Symbols {
-		if held[sym].Qty > 0 {
+	for _, p := range held {
+		if p.Qty > 0 {
 			n++
 		}
 	}

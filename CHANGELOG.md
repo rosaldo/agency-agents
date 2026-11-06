@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.66.2** (2026-11-06) · `fix` — quant-engine: max_open_positions counts every position the engine sees on the account (a symbol taken out of symbols: keeps its slot), and the chosen entries and Adds go out in the order of symbols: (a limit that does not bind sends the same orders as none)
 - **v1.66.1** (2026-11-06) · `docs` — quant-engine: README documents risk.max_open_positions and Decision.Priority
 - **v1.66.0** (2026-11-06) · `feat` — quant-engine: status shows max_open_positions and free_slots, the mainnet confirmation the limit, only when set
 - **v1.65.0** (2026-11-06) · `feat` — quant-engine: risk.max_open_positions enforced: the step's entries take the free slots strongest first (tie = symbols order), the rest journaled as no slot; adds take none

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -269,5 +270,172 @@ func TestNoLimitEntersEverySignal(t *testing.T) {
 	r.next()
 	if got := r.open(); len(got) != 10 || len(r.noSlot()) != 0 {
 		t.Fatalf("open %v, no-slot %q; want all ten and none refused", got, r.noSlot())
+	}
+}
+
+// orderTrace runs the margin case on symbols [AAA, BBB, CCC] with 10000 of
+// cash and risk.max_open_positions limit: BBB enters half a trade on candle 1;
+// on candle 2 AAA enters (priority 1), BBB adds its other half and CCC enters
+// (priority 9), and the margin covers only the first two in symbols: order.
+// It returns the order and refusal events in the order they happened.
+func orderTrace(t *testing.T, limit int) []string {
+	t.Helper()
+	step := 0
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		switch {
+		case in.Symbol == "BBB" && in.Position == nil && step == 0:
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 98, Fraction: 0.5, Reason: "bbb"}
+		case in.Symbol == "BBB" && in.Position != nil && step == 1:
+			return strategy.Decision{Action: strategy.Add, Side: strategy.Long, Fraction: 0.5, Reason: "bbb add"}
+		case in.Symbol == "AAA" && step == 1:
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 98, Priority: 1, Reason: "aaa"}
+		case in.Symbol == "CCC" && step == 1:
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 98, Priority: 9, Reason: "ccc"}
+		}
+		return strategy.Decision{}
+	}}
+	c, err := config.Parse([]byte(fmt.Sprintf("exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA, BBB, CCC]\nrisk: {confirmed_by_user: true, max_risk_per_trade_pct: 1, max_open_positions: %d}\n", limit)), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for i := 0; i < 5; i++ {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: 100, High: 100, Low: 100, Close: 100, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 1, MinQty: 1, Candles: map[string][]market.Candle{"AAA": cs, "BBB": cs, "CCC": cs}})
+	f.Advance()
+	j := &events{}
+	e := New(c, s, f, exchange.Demo, j, func() time.Time { return cs[step+1].Time })
+	for step = 0; step < 2; step++ {
+		if step > 0 {
+			f.Advance()
+		}
+		if err := e.Step(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out []string
+	for _, ev := range *j {
+		if ev.Kind == journal.Proposed || ev.Kind == journal.Filled || ev.Kind == journal.Rejected {
+			out = append(out, fmt.Sprintf("%s %s %s %g %s", ev.Kind, ev.Symbol, ev.Side, ev.Qty, ev.Reason))
+		}
+	}
+	return out
+}
+
+// A limit that does not bind sends the same orders in the same order as no
+// limit, and they are accepted or refused alike: the margin goes to the
+// first in symbols:, not to the strongest or to the Add.
+func TestALimitThatDoesNotBindSendsTheSameOrders(t *testing.T) {
+	want := orderTrace(t, 0)
+	if !slices.ContainsFunc(want, func(s string) bool { return strings.HasPrefix(s, "rejected CCC") && strings.Contains(s, "free margin") }) {
+		t.Fatalf("setup: without the limit CCC should be refused for margin: %q", want)
+	}
+	for _, limit := range []int{3, 5} { // 1 open + 2 entries: 3 does not bind either
+		if got := orderTrace(t, limit); !slices.Equal(got, want) {
+			t.Fatalf("limit %d:\n%s\nwant (no limit):\n%s", limit, strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	}
+}
+
+// With the limit binding, the strongest still take the slots, and the chosen
+// entries go out in the order of symbols:.
+func TestTheChosenEntriesGoOutInTheSymbolsOrder(t *testing.T) {
+	prio := map[string]float64{"S0": 1, "S1": 9, "S2": 3, "S3": 7}
+	r := newSlotRun(t, 2, ten[:4], nil, func(_ int, in strategy.Input) strategy.Decision {
+		if in.Position != nil {
+			return strategy.Decision{Reason: "hold"}
+		}
+		return enterLongAt(in, prio[in.Symbol])
+	})
+	r.next()
+	var filled []string
+	for _, ev := range *r.j {
+		if ev.Kind == journal.Filled {
+			filled = append(filled, ev.Symbol)
+		}
+	}
+	if !slices.Equal(filled, []string{"S1", "S3"}) {
+		t.Fatalf("fills %v, want the two strongest in symbols: order [S1 S3]", filled)
+	}
+}
+
+// Ties among more signals than a small sort handles in place still keep the
+// order of symbols:.
+func TestManyTiedSignalsKeepTheSymbolsOrder(t *testing.T) {
+	var syms []string
+	for i := 0; i < 40; i++ {
+		syms = append(syms, fmt.Sprintf("T%02d", i))
+	}
+	r := newSlotRun(t, 6, syms, nil, func(_ int, in strategy.Input) strategy.Decision {
+		var n int
+		fmt.Sscanf(in.Symbol, "T%d", &n)
+		return enterLongAt(in, float64(n%2)) // the odd ones tie on top
+	})
+	r.next()
+	if got, want := r.open(), []string{"T01", "T03", "T05", "T07", "T09", "T11"}; !slices.Equal(got, want) {
+		t.Fatalf("open %v, want the first six odd ones %v", got, want)
+	}
+}
+
+// An entry whose fill is not confirmed holds its slot: the order went out
+// and may have filled.
+func TestAnEntryOfUnknownFateHoldsItsSlot(t *testing.T) {
+	r := newSlotRun(t, 1, []string{"AAA"}, nil, func(_ int, in strategy.Input) strategy.Decision { return enterLongAt(in, 0) })
+	r.e.Exec.Retries = 1
+	r.f.FailNext("PlaceOrder", errors.New("timeout"), false)
+	last := r.cs[1]
+	cs, _ := r.f.Candles(context.Background(), exchange.Demo, "AAA", time.Hour, 1)
+	q := entry{sym: "AAA", d: enterLongAt(strategy.Input{Candles: cs}, 0), last: last, in: strategy.Input{Symbol: "AAA", Candles: cs}}
+	if !r.e.prepare(context.Background(), &q, 100_000) {
+		t.Fatal("setup: the entry was refused before its order")
+	}
+	free := 100_000.0
+	sent, err := r.e.send(context.Background(), &q, &free)
+	if !sent || err == nil {
+		t.Fatalf("sent %v err %v, want the slot held and the error returned", sent, err)
+	}
+}
+
+// A chosen entry refused at its order (here the free margin) leaves its slot
+// to the next strongest on the same candle.
+func TestAnEntryRefusedAtItsOrderLeavesTheSlot(t *testing.T) {
+	r := newSlotRun(t, 1, []string{"AAA", "BBB", "CCC"}, nil, func(_ int, in strategy.Input) strategy.Decision {
+		d := enterLongAt(in, map[string]float64{"AAA": 3, "BBB": 1, "CCC": 2}[in.Symbol])
+		if in.Symbol == "AAA" {
+			d.Stop = 99.99 // a tiny stop distance: a size whose margin is above the cash
+		}
+		return d
+	})
+	r.next()
+	if got := r.open(); !slices.Equal(got, []string{"CCC"}) {
+		t.Fatalf("open %v, want CCC in the slot AAA left (refused: %s)", got, r.j.rejected())
+	}
+	if !strings.Contains(r.j.rejected(), "free margin") {
+		t.Fatalf("setup: AAA not refused for margin: %s", r.j.rejected())
+	}
+}
+
+// An entry refused at its checks takes no slot in the choice either: the
+// next strongest is chosen in its place and goes out in the order of
+// symbols:, not after the others.
+func TestARefusedEntryLeavesItsSlotToTheChoice(t *testing.T) {
+	r := newSlotRun(t, 2, []string{"S0", "S1", "S2"}, nil, func(_ int, in strategy.Input) strategy.Decision {
+		d := enterLongAt(in, map[string]float64{"S0": 1, "S1": 3, "S2": 2}[in.Symbol])
+		if in.Symbol == "S1" {
+			d.Stop = 200 // above the entry: refused
+		}
+		return d
+	})
+	r.next()
+	var filled []string
+	for _, ev := range *r.j {
+		if ev.Kind == journal.Filled {
+			filled = append(filled, ev.Symbol)
+		}
+	}
+	if !slices.Equal(filled, []string{"S0", "S2"}) {
+		t.Fatalf("fills %v, want [S0 S2] in symbols: order", filled)
 	}
 }
