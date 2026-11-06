@@ -483,7 +483,8 @@ type entry struct {
 // positions held at the start of the step, so an exit in this step frees its
 // slot on the next one. The chosen entries and the Adds then go out in the
 // order of symbols:, as without the limit, so a limit that does not bind
-// sends the same orders in the same order. A slot a chosen entry leaves
+// sends the same entries and Adds in the same order among themselves (exits
+// went out at once, before them). A slot a chosen or reallocated entry leaves
 // (refused at its order: margin, save, nothing filled) goes to the next
 // strongest after them.
 func (e *Engine) sendQueued(ctx context.Context, queue []entry, open int, equity float64, free *float64) error {
