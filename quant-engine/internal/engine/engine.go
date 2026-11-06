@@ -88,6 +88,9 @@ type Engine struct {
 	// retargetDue: symbols whose Retargeter call is owed because the
 	// position could not be read after the fill (persisted, retried next step)
 	retargetDue map[string]bool
+	// last: each symbol's position as last seen held (the loop's account
+	// read after every step), whose stop prices a close outside the engine
+	last map[string]exchange.Position
 }
 
 // New wires the executor and the breaker from the config; cfg must have been
@@ -95,7 +98,7 @@ type Engine struct {
 func New(cfg *config.Config, s strategy.Strategy, ex exchange.Exchange, env exchange.Env, j exec.Recorder, now func() time.Time) *Engine {
 	br := &risk.Breaker{DailyPct: cfg.Risk.MaxDailyDrawdownPct, WeeklyPct: cfg.Risk.MaxWeeklyDrawdownPct, Loc: cfg.Location()}
 	e := &Engine{Cfg: cfg, Strategy: s, Ex: ex, Env: env, Risk: br, targets: map[string]float64{}, stops: map[string]float64{}, trades: map[string]risk.Trade{},
-		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, newsUntil: map[string]time.Time{}, retargetDue: map[string]bool{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
+		staleStops: map[string]string{}, blocked: map[string]string{}, funding: map[string]time.Time{}, deriv: map[string][]market.Deriv{}, derivDown: map[string]bool{}, closed: map[string]time.Time{}, newsUntil: map[string]time.Time{}, retargetDue: map[string]bool{}, last: map[string]exchange.Position{}, Exec: &exec.Executor{Name: cfg.StrategyName(), Ex: ex, Env: env, Now: now, Risk: br, Journal: j}}
 	_, e.Simulated = ex.(*paper.Sim) // by type: no real adapter can be taken for the simulator and lose the floor
 	if n := cfg.NewsPolicy(); n != nil && len(n.Feeds) > 0 {
 		var kw []string
@@ -197,6 +200,7 @@ func (e *Engine) Restore(targets map[string]float64, positions []exchange.Positi
 		}
 		short[p.Symbol] = p.PSide() == exchange.Short
 	}
+	e.Remember(positions)
 	for k, t := range trades {
 		if t.Tranches == 0 && t.Used > 0 {
 			t.Tranches = 1 // saved before tranches were counted: at least one went out
@@ -235,8 +239,20 @@ func (e *Engine) Trades() map[string]risk.Trade {
 	return out
 }
 
+// Remember keeps the held positions of an account read, so a position
+// closed outside the engine before the next step is priced from its stop. A
+// position missing here is kept: it may have closed during this very read.
+func (e *Engine) Remember(ps []exchange.Position) {
+	for _, p := range ps {
+		if p.Qty > 0 {
+			e.last[p.Symbol] = p
+		}
+	}
+}
+
 // forget drops what the engine keeps about a position that is gone.
 func (e *Engine) forget(sym string) {
+	delete(e.last, sym)
 	delete(e.targets, sym)
 	delete(e.stops, sym)
 	delete(e.trades, sym)
@@ -367,8 +383,7 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 		delete(e.retargetDue, sym)
 	}
 	if _, known := e.stops[sym]; known && !holding {
-		e.note(journal.ClosedOutside, sym, "the engine's position is gone without an exit of this step "+
-			"(its stop, a liquidation or a close outside the engine); target cleared")
+		e.closedOutside(ctx, sym)
 		e.forget(sym)
 	}
 	side := strategy.Long
@@ -819,6 +834,31 @@ func (e *Engine) journalFunding(ctx context.Context, held map[string]exchange.Po
 			delete(e.funding, sym)
 		}
 	}
+}
+
+// closedOutside journals a position gone without the engine's exit. When the
+// stop it last had filled, the event carries that fill (closing side,
+// quantity, price) and the P&L against the position's average; otherwise (a
+// liquidation, a manual close, a position never seen by the account read)
+// it carries no price and its P&L stays unknown. CancelOrder is the
+// interface's only read of one order: a filled order comes back as it is,
+// without a call to the venue; one still resting guards nothing and goes.
+func (e *Engine) closedOutside(ctx context.Context, sym string) {
+	ev := journal.Event{Time: e.Exec.Now(), Kind: journal.ClosedOutside, Symbol: sym, Reason: "the engine's position is gone " +
+		"without an exit of this step (its stop, a liquidation or a close outside the engine); target cleared"} // unchanged: the golden journals
+	if p, ok := e.last[sym]; ok && p.StopClientID != "" {
+		st, err := e.Ex.CancelOrder(ctx, e.Env, p.StopClientID)
+		if err == nil && st.Status == exchange.Filled && st.Filled > 0 && st.FillPrice > 0 {
+			pnl := st.Filled * (st.FillPrice - p.AvgPrice)
+			if p.PSide() == exchange.Short {
+				pnl = -pnl
+			}
+			ev.ClientID, ev.Side, ev.Qty, ev.Price = p.StopClientID, string(p.PSide().Closing()), st.Filled, st.FillPrice
+			ev.Reason = fmt.Sprintf("closed by its stop on the exchange: qty %.8g at %.8g, P&L %+.2f against the average %.8g; target cleared",
+				st.Filled, st.FillPrice, pnl, p.AvgPrice)
+		}
+	}
+	_ = e.appendEvent(ev)
 }
 
 func (e *Engine) note(kind, sym, reason string) {

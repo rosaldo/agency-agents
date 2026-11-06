@@ -307,3 +307,57 @@ func TestReportForgetsAPositionClosedOutsideBeforeThePeriod(t *testing.T) {
 	out := reportOn(t, j, nil, "--from", "2026-01-01 03:00", "--to", "2026-01-02")
 	mustHave(t, out, "closes: P&L +5.00", "P&L of the trades closed in the period: +5.00")
 }
+
+// A stop filled on the exchange is priced in the report from that fill, and
+// the period's total is then what status says the account made: a live run
+// on the fake exchange, a trade closed by rule and one whose stop the price
+// gaps through (filled at the open, with slippage, not at the stop price).
+func TestReportPricesAStopFilledOnTheExchangeAsStatusDoes(t *testing.T) {
+	s := &scripted.Strategy{Decider: func(in strategy.Input) strategy.Decision {
+		switch h := in.Now.Hour(); {
+		case in.Position == nil && (h == 2 || h == 5):
+			return strategy.Decision{Action: strategy.Enter, Side: strategy.Long, Stop: 95, Reason: "drop"}
+		case in.Position != nil && h == 4:
+			return strategy.Decision{Action: strategy.Exit, Reason: "reverted"}
+		}
+		return strategy.Decision{Reason: "no signal"}
+	}}
+	c, err := config.Parse([]byte("exchange: fake\nasset_class: crypto\ninterval: 1h\nsymbols: [AAA]\nrisk: {confirmed_by_user: true}\n"), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var cs []market.Candle
+	for i, o := range []float64{100, 100, 100, 104, 104, 100, 100, 92, 93, 93} {
+		cs = append(cs, market.Candle{Time: t0.Add(time.Duration(i) * time.Hour), Open: o, High: o, Low: o - 1, Close: o, Volume: 10})
+	}
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, SlippagePct: 0.1, Candles: map[string][]market.Candle{"AAA": cs}})
+	dir := filepath.Join(t.TempDir(), ".scripted")
+	loop.Run(context.Background(), c, s, f, exchange.Demo, &loop.FakeTicker{Ex: f, Candles: cs}, dir)
+
+	var out bytes.Buffer
+	if err := (App{Strategy: example.New()}).Run([]string{"report", "--dir", dir, "--utc", "--from", "2026-01-01", "--to", "2026-01-02"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loop.ReadStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustHave(t, out.String(), "(its stop, filled on the exchange)",
+		fmt.Sprintf("P&L of the trades closed in the period: %+.2f (prices", st.DayPnL))
+	mustLack(t, out.String(), "not in the journal", "INCOMPLETE")
+	if st.DayPnL > -1 {
+		t.Fatalf("day P&L %.2f: the scenario's stop-out should leave the day at a loss\n%s", st.DayPnL, out.String())
+	}
+}
+
+// A journal from before stop fills were recorded still reads: the trade
+// its stop closed is listed without a P&L, and the total says it is
+// incomplete and how many trades it misses.
+func TestReportTotalIsIncompleteWhenAClosedOutsideHasNoPrice(t *testing.T) {
+	j := fill(1, "buy", 1, 90) + fill(2, "sell", 1, 100) + fill(3, "buy", 2, 100) +
+		`{"time":"2026-01-01T04:00:00Z","kind":"closed_outside","mode":"paper","symbol":"AAA"}` + "\n"
+	out := reportOn(t, j, nil, "--from", "2026-01-01", "--to", "2026-01-02")
+	mustHave(t, out, "P&L not in the journal",
+		"P&L of the trades closed in the period: INCOMPLETE, 1 trade(s) closed outside the engine without a known exit price are missing; +10.00 is the others only")
+}

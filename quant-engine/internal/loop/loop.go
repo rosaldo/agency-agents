@@ -583,7 +583,10 @@ func run(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env excha
 // saveAccount puts the account as the exchange reports it in state.json.
 func saveAccount(ctx context.Context, en *engine.Engine, ex exchange.Exchange, env exchange.Env, save func(func(*State))) {
 	if bal, err := ex.Balance(ctx, env); err == nil {
-		ps, _ := ex.Positions(ctx, env)
+		ps, err := ex.Positions(ctx, env)
+		if err == nil {
+			en.Remember(ps)
+		}
 		save(func(s *State) {
 			s.Equity, s.Positions, s.Targets, s.StaleStops, s.Trades, s.Breaker = bal.Equity, ps, en.Targets(), en.StaleStops(), en.Trades(), snapshot(en)
 			s.NewsUntil, s.RetargetDue = en.NewsBlocks(), en.RetargetDue()

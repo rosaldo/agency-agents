@@ -287,11 +287,20 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 	pr("\nOPERATED")
 	pos := map[string]*trade{}
 	var total float64
+	var unknown int // trades closed in the period whose P&L the journal lacks
 	var lines, closed []string
 	for i, e := range all {
 		if e.Kind == journal.ClosedOutside {
+			pnl, ok := closedOutsidePnL(pos[e.Symbol], e)
 			delete(pos, e.Symbol) // before the period too: the next trade starts flat
-			if p.has(e.Time) {
+			switch {
+			case !p.has(e.Time):
+			case ok:
+				total += pnl
+				closed = append(closed, fmt.Sprintf("    %s %-16s %-4s qty %-10.8g price %-12.8g closes: P&L %+.2f  (its stop, filled on the exchange)",
+					p.fmt(e.Time), e.Symbol, e.Side, e.Qty, e.Price, pnl))
+			default:
+				unknown++
 				closed = append(closed, fmt.Sprintf("    %s %s closed outside the engine (its stop, a liquidation or a manual close): P&L not in the journal", p.fmt(e.Time), e.Symbol))
 			}
 		}
@@ -348,7 +357,12 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 		for _, l := range append(lines, closed...) {
 			pr("%s", l)
 		}
-		pr("  P&L of the trades closed in the period: %+.2f (prices of the fills; fees and funding not included)", total)
+		if unknown == 0 {
+			pr("  P&L of the trades closed in the period: %+.2f (prices of the fills; fees and funding not included)", total)
+		} else {
+			pr("  P&L of the trades closed in the period: INCOMPLETE, %d trade(s) closed outside the engine without a known exit price are missing; "+
+				"%+.2f is the others only (prices of the fills; fees and funding not included); status has the account's P&L", unknown, total)
+		}
 	}
 	s, err := loop.ReadStatus(dir)
 	if err != nil {
@@ -373,6 +387,21 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 		}
 		pr("%s", line)
 	}
+}
+
+// closedOutsidePnL prices a close outside the engine from the fill it
+// carries, against t as the journal's fills built it: known only when the
+// fill closes all of t, on t's closing side. A journal from before such
+// fills were recorded carries none.
+func closedOutsidePnL(t *trade, e journal.Event) (float64, bool) {
+	if t == nil || e.Price <= 0 || abs(e.Qty-abs(t.qty)) > 1e-9*abs(t.qty) || (e.Side == string(exchange.Sell)) != (t.qty > 0) {
+		return 0, false
+	}
+	pnl := e.Qty * (e.Price - t.avg)
+	if t.qty < 0 {
+		pnl = -pnl
+	}
+	return pnl, true
 }
 
 // stopWithin bounds how long after a fill its stop is sent: the engine
