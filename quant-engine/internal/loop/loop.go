@@ -98,6 +98,7 @@ type Limits struct {
 	MaxDailyDrawdownPct  float64 `json:"max_daily_drawdown_pct"`
 	MaxWeeklyDrawdownPct float64 `json:"max_weekly_drawdown_pct"`
 	MinDemoDays          int     `json:"min_demo_days"`
+	MaxOpenPositions     int     `json:"max_open_positions,omitempty"` // 0 = no limit
 }
 
 // State is <state dir>/state-<level>.json: paper, testnet and mainnet are
@@ -392,7 +393,7 @@ func RunReady(parent context.Context, cfg *config.Config, s strategy.Strategy, e
 	r := cfg.Risk
 	st := State{Running: true, Pid: os.Getpid(), Mode: cfg.Mode, Level: level, ParamsHash: cfg.ParamsHash(), Heartbeat: time.Now(),
 		Equity: prev.Equity, Positions: prev.Positions, Targets: en.Targets(), StaleStops: en.StaleStops(), Trades: en.Trades(), NewsUntil: en.NewsBlocks(), RetargetDue: en.RetargetDue(), Breaker: prev.Breaker,
-		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays}}
+		Limits: Limits{r.MaxRiskPerTradePct, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays, r.MaxOpenPositions}}
 	if n, ok := ex.(interface{ FundingNote() string }); ok { // the paper simulator
 		st.Funding = n.FundingNote()
 	}
@@ -625,9 +626,10 @@ type Status struct {
 	DailyRoomPct  float64                `json:"daily_room_pct"`
 	WeeklyRoomPct float64                `json:"weekly_room_pct"`
 	Positions     []exchange.Position    `json:"positions"`
-	Targets       map[string]float64     `json:"targets,omitempty"` // symbol -> exit target of the engine's own position
-	Trades        map[string]TradeStatus `json:"trades,omitempty"`  // symbol -> the trade in progress (graduated entry)
-	Halt          string                 `json:"halt,omitempty"`    // the breaker's halt: no entry until it lifts
+	FreeSlots     *int                   `json:"free_slots,omitempty"` // with limits.max_open_positions: slots left for new entries
+	Targets       map[string]float64     `json:"targets,omitempty"`    // symbol -> exit target of the engine's own position
+	Trades        map[string]TradeStatus `json:"trades,omitempty"`     // symbol -> the trade in progress (graduated entry)
+	Halt          string                 `json:"halt,omitempty"`       // the breaker's halt: no entry until it lifts
 	Funding       string                 `json:"funding,omitempty"`
 	PaperSim      string                 `json:"sim,omitempty"`
 	Sizing        string                 `json:"sizing,omitempty"`
@@ -669,6 +671,16 @@ func ReadStatus(dir string) (Status, error) {
 			s.Trades = map[string]TradeStatus{}
 		}
 		s.Trades[sym] = TradeStatus{Budget: t.Budget, BudgetUsed: t.Used, Tranches: t.Tranches, Stop: t.Stop}
+	}
+	if n := st.Limits.MaxOpenPositions; n > 0 {
+		free := n
+		for _, p := range st.Positions {
+			if p.Qty > 0 {
+				free--
+			}
+		}
+		free = max(free, 0)
+		s.FreeSlots = &free
 	}
 	if b := st.Breaker; b.DayOpen > 0 {
 		s.DayPnL = st.Equity - b.DayOpen

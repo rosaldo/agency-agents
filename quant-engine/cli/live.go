@@ -40,6 +40,10 @@ func confirmLive(cfg *config.Config, ex exchange.Exchange) error {
 	if margin == "" {
 		margin = "none (spot)"
 	}
+	slots := "" // shown only when set: the prompt without the limit stays as it was
+	if r.MaxOpenPositions > 0 {
+		slots = fmt.Sprintf("  max open positions     %d\n", r.MaxOpenPositions)
+	}
 	fmt.Fprintf(out, `
 MAINNET trading with real money on %s: %s
   capital (equity)       %.2f
@@ -51,10 +55,10 @@ MAINNET trading with real money on %s: %s
   max leverage           %d
   margin mode            %s
   liquidation buffer     %g (min share of the distance to liquidation the stop leaves free)
-From here on the engine enforces these limits by itself, with no approval per order.
+%sFrom here on the engine enforces these limits by itself, with no approval per order.
 Type yes to start on mainnet: `, cfg.Exchange, strings.Join(cfg.Symbols, ", "), bal.Equity,
 		r.MaxRiskPerTradePct, bal.Equity*r.MaxRiskPerTradePct/100, r.MaxDailyDrawdownPct, r.MaxWeeklyDrawdownPct, cfg.Gate.MinDemoDays,
-		cfg.Perp.Leverage, r.MaxLeverage, margin, r.MinLiquidationBuffer)
+		cfg.Perp.Leverage, r.MaxLeverage, margin, r.MinLiquidationBuffer, slots)
 
 	answer := make(chan string, 1)
 	go func() {

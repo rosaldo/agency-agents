@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.66.0** (2026-11-06) · `feat` — quant-engine: status shows max_open_positions and free_slots, the mainnet confirmation the limit, only when set
 - **v1.65.0** (2026-11-06) · `feat` — quant-engine: risk.max_open_positions enforced: the step's entries take the free slots strongest first (tie = symbols order), the rest journaled as no slot; adds take none
 - **v1.64.0** (2026-11-06) · `feat` — quant-engine: risk.max_open_positions (0 = no limit, params hash unchanged without it) and Decision.Priority to rank entries
 - **v1.63.11** (2026-11-05) · `test` — quant-engine: tests pin a stop-out closed outside the engine: restart with the book kept or lost, short sign and side, Filled-only pricing, forget clearing the last view, report side/qty checks, and engine and report P&L agreeing
