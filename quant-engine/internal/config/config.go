@@ -67,7 +67,10 @@ type Risk struct {
 	MaxWeeklyDrawdownPct float64 `yaml:"max_weekly_drawdown_pct"`
 	MaxLeverage          int     `yaml:"max_leverage"`           // hard ceiling for perp.leverage
 	MinLiquidationBuffer float64 `yaml:"min_liquidation_buffer"` // share of the distance to liquidation the stop leaves free
-	ConfirmedByUser      bool    `yaml:"confirmed_by_user"`
+	// MaxOpenPositions caps the positions open at once across symbols; 0 = no
+	// limit. omitempty keeps the params hash of a yml without it unchanged.
+	MaxOpenPositions int  `yaml:"max_open_positions" json:"MaxOpenPositions,omitempty"`
+	ConfirmedByUser  bool `yaml:"confirmed_by_user"`
 }
 
 // Demo picks the level mode: paper runs at. source: paper is the engine's
@@ -246,6 +249,8 @@ func (c *Config) validate() error {
 		return errors.New("risk.max_leverage must be >= 1")
 	case r.MinLiquidationBuffer < 0 || r.MinLiquidationBuffer >= 1:
 		return errors.New("risk.min_liquidation_buffer must be >= 0 and < 1")
+	case r.MaxOpenPositions < 0:
+		return errors.New("risk.max_open_positions must be >= 0 (0 = no limit)")
 	case c.Perp.Leverage < 1:
 		return errors.New("perp.leverage must be >= 1")
 	case c.Perp.Leverage > r.MaxLeverage:

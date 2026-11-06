@@ -84,6 +84,10 @@ type Decision struct {
 	// fixed at the first tranche (equity x max_risk_per_trade_pct) and the
 	// fractions of one trade sum to at most 1.
 	Fraction float64
+	// Priority ranks Enter signals of the same candle when
+	// risk.max_open_positions leaves fewer free slots than signals: higher is
+	// stronger; a tie keeps the order of symbols:. Ignored without the limit.
+	Priority float64
 	Reason   string // journal; on None while flat, a live run journals it in the evaluated event, a backtest as a skipped signal
 }
 

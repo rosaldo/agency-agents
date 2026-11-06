@@ -103,3 +103,28 @@ func TestParseRefusesWhatCannotBeHashed(t *testing.T) {
 		t.Errorf("a repeated key: %v", err)
 	}
 }
+
+// risk.max_open_positions absent or 0 leaves the params hash of an existing
+// yml as it was (pinned before the limit existed), so its validation file and
+// demo days still count; any limit above 0 is a new parameter set.
+func TestMaxOpenPositionsKeepsTheHashWhenOff(t *testing.T) {
+	const before = "b4afda8b1b1b9ea444fa0d6bf7aaf92d26515fe01893f517aa179b6b9857eacb"
+	if got := hashOf(t, reordered); got != before {
+		t.Fatalf("hash without the limit %s, want %s", got, before)
+	}
+	zero := strings.Replace(reordered, "confirmed_by_user: true", "confirmed_by_user: true\n  max_open_positions: 0", 1)
+	if got := hashOf(t, zero); got != before {
+		t.Fatalf("hash with the limit 0 %s, want %s", got, before)
+	}
+	five := strings.Replace(reordered, "confirmed_by_user: true", "confirmed_by_user: true\n  max_open_positions: 5", 1)
+	if hashOf(t, five) == before {
+		t.Fatal("a limit of 5 kept the hash of no limit")
+	}
+}
+
+func TestMaxOpenPositionsBelowZeroIsRefused(t *testing.T) {
+	y := strings.Replace(reordered, "confirmed_by_user: true", "confirmed_by_user: true\n  max_open_positions: -1", 1)
+	if _, err := Parse([]byte(y), example.New()); err == nil || !strings.Contains(err.Error(), "max_open_positions") {
+		t.Fatalf("err %v, want the max_open_positions refusal", err)
+	}
+}
