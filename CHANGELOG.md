@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.63.6** (2026-11-05) · `test` — quant-engine: report test pins the period's end as exclusive
 - **v1.63.5** (2026-11-05) · `perf` — quant-engine: report filters the journal to the period while reading it, so one day of a year-long journal takes about 22 MB instead of 850 MB
 - **v1.63.4** (2026-11-05) · `fix` — quant-engine: report SEEN counts distinct candles, so a restart does not count one twice, and lists the candles missing between two seen ones as an exception
 - **v1.63.3** (2026-11-05) · `fix` — quant-engine: report reads each fill's stop from the stop order's sent event, where the engine journals its price; the trade fixture is now an engine run on the fake exchange, checked byte for byte

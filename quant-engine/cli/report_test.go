@@ -263,3 +263,9 @@ func TestReportSeenCountsDistinctCandlesAndShowsGaps(t *testing.T) {
 		"GAP AAA: 3 candle(s) missing between 2026-01-01 03:00 and 2026-01-01 07:00")
 	mustLack(t, out, "GAP BBB", "exceptions: none")
 }
+
+// The period is [from, to): an event at --to belongs to the next period.
+func TestReportPeriodEndIsExclusive(t *testing.T) {
+	out := report(t, "report_skips.jsonl", nil, "--from", "2026-01-01", "--to", "2026-01-01 04:00") // stop at 04:00
+	mustHave(t, out, "OTHER EVENTS: heartbeat 1, rejected 1, start 1\n")
+}
