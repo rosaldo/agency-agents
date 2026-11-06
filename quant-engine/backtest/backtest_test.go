@@ -200,3 +200,34 @@ func TestBacktestWithRequiredNews(t *testing.T) {
 		}
 	}
 }
+
+// risk.max_open_positions runs in the backtest through the same engine step:
+// 0 writes byte for byte what no limit writes; 1 on the one symbol a backtest
+// trades never refuses its single position, so only the params hash moves.
+func TestBacktestWithMaxOpenPositions(t *testing.T) {
+	run := func(limit string) (string, string, Result) {
+		cs, _ := market.ReadCSVFile("../testdata/backtest_one_trade.csv")
+		y := strings.Replace(cfgYAML, "confirmed_by_user: true}", "confirmed_by_user: true"+limit+"}", 1)
+		res, err := Run(context.Background(), example.New(), []byte(y), Input{Candles: cs, Capital: 10_000, QtyStep: 1, MinQty: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := res.Write(dir); err != nil {
+			t.Fatal(err)
+		}
+		trades, _ := os.ReadFile(filepath.Join(dir, "trades.csv"))
+		summary, _ := os.ReadFile(filepath.Join(dir, "summary.json"))
+		return string(trades), string(summary), res
+	}
+	t0, s0, r0 := run("")
+	tz, sz, _ := run(", max_open_positions: 0")
+	if t0 != tz || s0 != sz {
+		t.Fatal("max_open_positions 0 changed the backtest output")
+	}
+	t1, s1, r1 := run(", max_open_positions: 1")
+	if len(r0.Trades) != 1 || t1 != t0 || r1.Summary.ParamsHash == r0.Summary.ParamsHash ||
+		strings.ReplaceAll(s1, r1.Summary.ParamsHash, r0.Summary.ParamsHash) != s0 {
+		t.Fatalf("limit 1: trades %q summary %q; want the same trade and only a new hash", t1, s1)
+	}
+}

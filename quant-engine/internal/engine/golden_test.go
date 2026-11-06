@@ -7,6 +7,7 @@ import (
 	"flag"
 	"math"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,48 +46,54 @@ func TestExampleJournalIsUnchanged(t *testing.T) {
 			"market: swap\nperp: {leverage: 2}\n" +
 			"strategy: {period: 6, stop_pct: 1.5, target_pct: 0, trail_period: 3}\n",
 	} {
-		t.Run(name, func(t *testing.T) {
-			s := example.New()
-			c, err := config.Parse([]byte(yml), s)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cs := waves(400)
-			f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs},
-				SlippagePct: c.SimCosts()["AAA"].SlippagePct, CommissionPct: c.SimCosts()["AAA"].CommissionPct, Shorts: c.Market == "swap"})
-			var now time.Time
-			j := &events{}
-			e := New(c, s, f, exchange.Demo, j, func() time.Time { return now })
-			e.Simulated = true
-			for i, candle := range cs {
-				now = candle.Time
-				if i > 0 {
-					f.Advance()
-				}
-				if err := e.Step(context.Background()); err != nil {
-					t.Fatalf("step %d: %v", i, err)
-				}
-			}
-			var got bytes.Buffer
-			enc := json.NewEncoder(&got)
-			for _, ev := range *j {
-				if err := enc.Encode(ev); err != nil {
-					t.Fatal(err)
-				}
-			}
-			path := "../../testdata/example_journal_" + name + ".golden.jsonl"
-			if *update {
-				if err := os.WriteFile(path, got.Bytes(), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got.Bytes(), want) {
-				t.Fatalf("journal differs from %s (%d bytes, want %d)", path, got.Len(), len(want))
-			}
-		})
+		for _, limit := range []string{"", ", max_open_positions: 0", ", max_open_positions: 1"} { // off, or one symbol that never needs a second slot
+			t.Run(name+limit, func(t *testing.T) {
+				goldenRun(t, name, strings.Replace(yml, "confirmed_by_user: true}", "confirmed_by_user: true"+limit+"}", 1), limit == "")
+			})
+		}
+	}
+}
+
+func goldenRun(t *testing.T, name, yml string, write bool) {
+	s := example.New()
+	c, err := config.Parse([]byte(yml), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := waves(400)
+	f := fake.New(fake.Options{Paper: true, Cash: 10_000, QtyStep: 0.001, MinQty: 0.001, Candles: map[string][]market.Candle{"AAA": cs},
+		SlippagePct: c.SimCosts()["AAA"].SlippagePct, CommissionPct: c.SimCosts()["AAA"].CommissionPct, Shorts: c.Market == "swap"})
+	var now time.Time
+	j := &events{}
+	e := New(c, s, f, exchange.Demo, j, func() time.Time { return now })
+	e.Simulated = true
+	for i, candle := range cs {
+		now = candle.Time
+		if i > 0 {
+			f.Advance()
+		}
+		if err := e.Step(context.Background()); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	var got bytes.Buffer
+	enc := json.NewEncoder(&got)
+	for _, ev := range *j {
+		if err := enc.Encode(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := "../../testdata/example_journal_" + name + ".golden.jsonl"
+	if *update && write {
+		if err := os.WriteFile(path, got.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Bytes(), want) {
+		t.Fatalf("journal differs from %s (%d bytes, want %d)", path, got.Len(), len(want))
 	}
 }

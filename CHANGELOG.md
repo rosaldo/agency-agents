@@ -2,6 +2,7 @@
 
 > Generated from git by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.65.0** (2026-11-06) · `feat` — quant-engine: risk.max_open_positions enforced: the step's entries take the free slots strongest first (tie = symbols order), the rest journaled as no slot; adds take none
 - **v1.64.0** (2026-11-06) · `feat` — quant-engine: risk.max_open_positions (0 = no limit, params hash unchanged without it) and Decision.Priority to rank entries
 - **v1.63.11** (2026-11-05) · `test` — quant-engine: tests pin a stop-out closed outside the engine: restart with the book kept or lost, short sign and side, Filled-only pricing, forget clearing the last view, report side/qty checks, and engine and report P&L agreeing
 - **v1.63.10** (2026-11-05) · `fix` — quant-engine: a position its exchange stop closed is journaled with that stop's fill and P&L, and report prices it; a close it cannot price makes the total INCOMPLETE with the count of trades missing

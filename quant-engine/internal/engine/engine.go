@@ -4,11 +4,13 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -339,8 +341,19 @@ func (e *Engine) Step(ctx context.Context) error {
 	e.journalFunding(ctx, held)
 	var errs []error
 	free := bal.Cash // free margin left for this step's entries
+	var queue *[]entry
+	if e.Cfg.Risk.MaxOpenPositions > 0 {
+		queue = &[]entry{}
+	}
 	for _, sym := range e.Cfg.Symbols {
-		err := e.stepSymbol(ctx, sym, held, bal.Equity, &free)
+		err := e.stepSymbol(ctx, sym, held, bal.Equity, &free, queue)
+		if IsHalt(err) {
+			return err
+		}
+		errs = append(errs, err)
+	}
+	if queue != nil {
+		err := e.enterBySlot(ctx, *queue, e.openPositions(held), bal.Equity, &free)
 		if IsHalt(err) {
 			return err
 		}
@@ -356,7 +369,8 @@ func (e *Engine) Step(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64) error {
+// stepSymbol decides sym's closed candle; with queue set (risk.max_open_positions) an Enter is queued for Step instead of sent.
+func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exchange.Position, equity float64, free *float64, queue *[]entry) error {
 	delete(e.closed, sym)
 	n := max(e.Strategy.Warmup(), 1)
 	var want time.Time
@@ -435,44 +449,90 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 	case holding:
 		e.skip(sym, "a position is already open (one per symbol; reverse through flat)")
 		return nil
+	case queue != nil: // risk.max_open_positions: entered by Step, strongest first
+		*queue = append(*queue, entry{sym, p, d, in, last})
+		return nil
 	}
+	_, err = e.enter(ctx, entry{sym, p, d, in, last}, equity, free)
+	return err
+}
+
+// entry is an Enter decision waiting for a slot (risk.max_open_positions).
+type entry struct {
+	sym  string
+	p    exchange.Position
+	d    strategy.Decision
+	in   strategy.Input
+	last market.Candle
+}
+
+// enterBySlot sends the step's queued entries, highest Decision.Priority
+// first (a tie keeps the order of symbols:), while fewer than
+// risk.max_open_positions positions are open; open counts the positions held
+// at the start of the step, so an exit in this step frees its slot on the
+// next one. An entry refused before its order uses no slot.
+func (e *Engine) enterBySlot(ctx context.Context, queue []entry, open int, equity float64, free *float64) error {
+	limit := e.Cfg.Risk.MaxOpenPositions
+	slices.SortStableFunc(queue, func(a, b entry) int { return cmp.Compare(b.d.Priority, a.d.Priority) })
+	var errs []error
+	for _, q := range queue {
+		if open >= limit {
+			e.skip(q.sym, fmt.Sprintf("no slot: %d of %d positions open", open, limit))
+			continue
+		}
+		sent, err := e.enter(ctx, q, equity, free)
+		if IsHalt(err) {
+			return err
+		}
+		if sent {
+			open++
+		}
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// enter checks and sends an Enter; sent says an order went out that may have
+// filled (it holds a slot).
+func (e *Engine) enter(ctx context.Context, q entry, equity float64, free *float64) (sent bool, err error) {
+	sym, p, d, in, last := q.sym, q.p, q.d, q.in, q.last
 	if err := e.validateEntry(d, last.Close); err != nil {
 		e.skip(sym, err.Error())
-		return nil
+		return false, nil
 	}
 	if d.Side == strategy.Short && !e.Ex.Capabilities().Swap {
 		e.skip(sym, "short entries need a swap market; this adapter trades spot")
-		return nil
+		return false, nil
 	}
 	if p.Blocked != "" {
 		e.skip(sym, "symbol blocked: "+p.Blocked)
-		return nil
+		return false, nil
 	}
 	if until, ok := e.newsUntil[sym]; ok {
 		e.skip(sym, "symbol blocked by a news catastrophe until "+until.UTC().Format(time.RFC3339))
-		return nil
+		return false, nil
 	}
 	if id := e.staleStops[sym]; id != "" {
 		e.skip(sym, "symbol blocked: old stop "+id+" not cancelled yet")
-		return nil
+		return false, nil
 	}
 	if err := e.entryClearsLiquidation(sym, exchange.PositionSide(d.Side), last.Close, d.Stop); err != nil {
 		e.skip(sym, err.Error())
-		return nil
+		return false, nil
 	}
 	if why := e.newsBlocks(ctx, sym, last.Time); why != "" {
 		e.skip(sym, why)
-		return nil
+		return false, nil
 	}
 	trade, qty, why := risk.Trade{}.Tranche(d.Fraction, e.sizeInput(sym, equity, last.Close, d.Stop, d.Side == strategy.Short))
 	if qty == 0 {
 		e.skip(sym, why)
-		return nil
+		return false, nil
 	}
 	margin := qty * last.Close / float64(e.Cfg.Perp.Leverage)
 	if margin > *free {
 		e.skip(sym, fmt.Sprintf("margin %.2f for qty %.8g at leverage %d is above the free margin %.2f", margin, qty, e.Cfg.Perp.Leverage, *free))
-		return nil
+		return false, nil
 	}
 	trade.Stop = d.Stop
 	prev, had := e.trades[sym]
@@ -484,21 +544,34 @@ func (e *Engine) stepSymbol(ctx context.Context, sym string, held map[string]exc
 			e.trades[sym] = prev
 		}
 		e.skip(sym, why)
-		return nil
+		return false, nil
 	}
 	*free -= margin // also on a failed entry: it may have filled
 	if err := e.Exec.Enter(ctx, sym, last.Time, exec.Plan{Side: exchange.PositionSide(d.Side), Entry: last.Close, Stop: d.Stop, Target: d.Target, Qty: qty}); err != nil {
 		if exec.NothingFilled(err) { // no fill: nothing to retarget
 			unowe()
+			return false, err
 		}
-		return err
+		return true, err
 	}
 	e.stops[sym] = d.Stop
 	if d.Target > 0 {
 		e.targets[sym] = d.Target
 	}
 	e.retarget(ctx, sym, in)
-	return e.guardFilled(ctx, sym)
+	return true, e.guardFilled(ctx, sym)
+}
+
+// openPositions counts the positions held on the configured symbols: those
+// restored after a restart too, since held is the exchange's own read.
+func (e *Engine) openPositions(held map[string]exchange.Position) int {
+	n := 0
+	for _, sym := range e.Cfg.Symbols {
+		if held[sym].Qty > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // input is the strategy's Input on sym's window cs, without the position;
