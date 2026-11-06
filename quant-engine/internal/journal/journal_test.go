@@ -49,6 +49,29 @@ func TestCorruptLastLineIsSkippedWithAWarning(t *testing.T) {
 	}
 }
 
+// Scan hands each event to keep as it reads, so a reader of one period never
+// holds the whole journal; a cut line is a warning, as in Read.
+func TestScanKeepsOnlyWhatItIsAskedTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	var b strings.Builder
+	for _, k := range []string{Filled, Evaluated, Evaluated, Filled} {
+		b.WriteString(`{"time":"2026-01-01T00:00:00Z","kind":"` + k + `","mode":"paper","params_hash":"abc"}` + "\n")
+	}
+	b.WriteString(`{"time":"2026-01-01T0`)
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var fills int
+	warns, err := Scan(path, func(e Event) {
+		if e.Kind == Filled {
+			fills++
+		}
+	})
+	if err != nil || fills != 2 || len(warns) != 1 {
+		t.Fatalf("fills %d, warnings %v, err %v", fills, warns, err)
+	}
+}
+
 func TestNoSecretReachesTheJournal(t *testing.T) {
 	env := map[string]string{"TEST_FAKE_API_KEY": "key-hunter2", "TEST_FAKE_API_SECRET": "secret-hunter2"}
 	cred, err := config.LoadCredentials("test", "fake", false, []string{"API_KEY", "API_SECRET"}, nil, func(k string) string { return env[k] })

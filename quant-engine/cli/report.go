@@ -72,7 +72,27 @@ var numbers = regexp.MustCompile(`[-+]?\d+(\.\d+)?([eE][-+]?\d+)?`)
 // (candles evaluated per symbol), what it analyzed (the reasons) and what it
 // traded (fills, P&L of closed trades, open positions from status).
 func printReport(dir string, p period, w io.Writer) error {
-	evs, warns, err := journal.Read(filepath.Join(dir, "journal.jsonl"))
+	// filtered while read: the period's events, and for OPERATED only the
+	// order events, the earlier fills that price a trade opened before the
+	// period, and a stop sent just after its end
+	var in, ops []journal.Event
+	counts := map[string]int{}
+	warns, err := journal.Scan(filepath.Join(dir, "journal.jsonl"), func(e journal.Event) {
+		if p.has(e.Time) {
+			in = append(in, e)
+			counts[e.Kind]++
+		}
+		switch e.Kind {
+		case journal.Filled, journal.ClosedOutside:
+			if e.Time.Before(p.to) {
+				ops = append(ops, e)
+			}
+		case journal.Sent, journal.Resting:
+			if !e.Time.Before(p.from) && e.Time.Before(p.to.Add(stopWithin)) {
+				ops = append(ops, e)
+			}
+		}
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("report: no journal in %s (never started?)", dir)
 	}
@@ -84,14 +104,6 @@ func printReport(dir string, p period, w io.Writer) error {
 	zone, _ := p.to.In(p.loc).Zone()
 	pr("Report %s -> %s (%s)", p.fmt(p.from), p.fmt(p.to), zone)
 
-	var in []journal.Event
-	counts := map[string]int{}
-	for _, e := range evs {
-		if p.has(e.Time) {
-			in = append(in, e)
-			counts[e.Kind]++
-		}
-	}
 	runs := map[string]bool{}
 	for _, e := range in {
 		if e.Level != "" {
@@ -105,7 +117,7 @@ func printReport(dir string, p period, w io.Writer) error {
 
 	reportSeen(pr, p, in)
 	reportAnalyzed(pr, p, in)
-	reportOperated(pr, p, evs, dir)
+	reportOperated(pr, p, ops, dir)
 	reportOther(pr, counts)
 	_, err = io.WriteString(w, b.String())
 	return err
@@ -270,7 +282,7 @@ type trade struct {
 // reportOperated: the fills of the period with the stop placed after them,
 // the P&L of each trade closed in the period (fills from the whole journal
 // build the position, so a trade opened before the period is priced right),
-// and the open positions from status.
+// and the open positions from status. all holds only the order events.
 func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 	pr("\nOPERATED")
 	pos := map[string]*trade{}
@@ -316,7 +328,7 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 		if closing {
 			total += pnl
 			line += fmt.Sprintf(" closes: P&L %+.2f", pnl)
-		} else if stop := stopAfter(all[i+1:], e.Symbol); stop > 0 {
+		} else if stop := stopAfter(e, all[i+1:]); stop > 0 {
 			line += fmt.Sprintf(" stop %.8g", stop)
 		}
 		if e.Reason != "" {
@@ -358,13 +370,20 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 	}
 }
 
-// stopAfter is the price of the first stop resting on sym after a fill: the
+// stopWithin bounds how long after a fill its stop is sent: the engine
+// places it in the same step.
+const stopWithin = time.Minute
+
+// stopAfter is the price of the first stop resting on sym after fill: the
 // engine journals the stop's price on its sent event, and on its open
 // (resting) event only the order's state.
-func stopAfter(rest []journal.Event, sym string) float64 {
+func stopAfter(fill journal.Event, rest []journal.Event) float64 {
 	sent := map[string]float64{} // client ID -> price sent
 	for _, e := range rest {
-		if e.Symbol != sym {
+		if e.Time.After(fill.Time.Add(stopWithin)) {
+			return 0
+		}
+		if e.Symbol != fill.Symbol {
 			continue
 		}
 		switch e.Kind {
@@ -372,7 +391,7 @@ func stopAfter(rest []journal.Event, sym string) float64 {
 			sent[e.ClientID] = e.Price
 		case journal.Resting:
 			return sent[e.ClientID]
-		case journal.Filled, journal.Evaluated:
+		case journal.Filled:
 			return 0
 		}
 	}

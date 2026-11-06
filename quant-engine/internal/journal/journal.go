@@ -116,9 +116,16 @@ func (j *Journal) Close() error { return j.f.Close() }
 // Read returns every parseable event; an unparseable line (a write cut short
 // by a crash) is skipped and reported as a warning instead of failing.
 func Read(path string) (events []Event, warnings []string, err error) {
+	warnings, err = Scan(path, func(e Event) { events = append(events, e) })
+	return events, warnings, err
+}
+
+// Scan calls each with every parseable event in order, as it reads: the
+// caller keeps what it needs. Unparseable lines are warnings, as in Read.
+func Scan(path string, each func(Event)) (warnings []string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("journal: %w", err)
+		return nil, fmt.Errorf("journal: %w", err)
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -129,10 +136,10 @@ func Read(path string) (events []Event, warnings []string, err error) {
 			warnings = append(warnings, fmt.Sprintf("journal line %d skipped: not a complete event", n))
 			continue
 		}
-		events = append(events, e)
+		each(e)
 	}
 	if err := sc.Err(); err != nil {
-		return events, warnings, fmt.Errorf("journal: %w", err)
+		return warnings, fmt.Errorf("journal: %w", err)
 	}
-	return events, warnings, nil
+	return warnings, nil
 }
