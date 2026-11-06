@@ -269,3 +269,15 @@ func TestReportPeriodEndIsExclusive(t *testing.T) {
 	out := report(t, "report_skips.jsonl", nil, "--from", "2026-01-01", "--to", "2026-01-01 04:00") // stop at 04:00
 	mustHave(t, out, "OTHER EVENTS: heartbeat 1, rejected 1, start 1\n")
 }
+
+// --since and --from/--to are two ways to give the period: both at once is
+// an error, not one silently ignored.
+func TestReportRefusesSinceWithFromOrTo(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"--since", "1h", "--from", "2026-01-01"}, {"--since", "1h", "--to", "2026-01-01"}} {
+		err := (App{Strategy: example.New()}).Run(append([]string{"report", "--dir", dir}, args...), &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "--since or --from") {
+			t.Errorf("%v: err %v", args, err)
+		}
+	}
+}

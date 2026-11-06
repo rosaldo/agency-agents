@@ -128,6 +128,15 @@ func (a App) Run(args []string, stdout io.Writer) error {
 	case "status":
 		return printStatus(*dir, stdout)
 	case "report":
+		var both error
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "since" && (*from != "" || *to != "") {
+				both = errors.New("report: give the period with --since or --from/--to, not both")
+			}
+		})
+		if both != nil {
+			return both
+		}
 		loc := time.Local
 		if *utc {
 			loc = time.UTC
