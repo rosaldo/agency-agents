@@ -297,3 +297,13 @@ func TestReportPricesAPositionThatTurnsSide(t *testing.T) {
 		"buy  qty 1          price 100          closes: P&L +10.00", // 1 x (110 - 100)
 		"P&L of the trades closed in the period: +30.00")
 }
+
+// A position its stop closed before the period is gone: the next trade is
+// priced from its own entry, not averaged into the closed one.
+func TestReportForgetsAPositionClosedOutsideBeforeThePeriod(t *testing.T) {
+	j := fill(1, "buy", 2, 100) +
+		`{"time":"2026-01-01T02:00:00Z","kind":"closed_outside","mode":"paper","symbol":"AAA"}` + "\n" +
+		fill(3, "buy", 1, 90) + fill(4, "sell", 1, 95)
+	out := reportOn(t, j, nil, "--from", "2026-01-01 03:00", "--to", "2026-01-02")
+	mustHave(t, out, "closes: P&L +5.00", "P&L of the trades closed in the period: +5.00")
+}

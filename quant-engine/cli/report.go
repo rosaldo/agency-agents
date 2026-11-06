@@ -289,9 +289,11 @@ func reportOperated(pr printer, p period, all []journal.Event, dir string) {
 	var total float64
 	var lines, closed []string
 	for i, e := range all {
-		if e.Kind == journal.ClosedOutside && p.has(e.Time) {
-			closed = append(closed, fmt.Sprintf("    %s %s closed outside the engine (its stop, a liquidation or a manual close): P&L not in the journal", p.fmt(e.Time), e.Symbol))
-			delete(pos, e.Symbol)
+		if e.Kind == journal.ClosedOutside {
+			delete(pos, e.Symbol) // before the period too: the next trade starts flat
+			if p.has(e.Time) {
+				closed = append(closed, fmt.Sprintf("    %s %s closed outside the engine (its stop, a liquidation or a manual close): P&L not in the journal", p.fmt(e.Time), e.Symbol))
+			}
 		}
 		if e.Kind != journal.Filled || e.Qty <= 0 {
 			continue
